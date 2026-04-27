@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 20% 2%;
+    --foreground: 0 0% 92%;
+    --card: 240 15% 4%;
+    --card-foreground: 0 0% 92%;
+    --popover: 240 15% 4%;
+    --popover-foreground: 0 0% 92%;
+    --primary: 0 0% 85%;
+    --primary-foreground: 240 20% 2%;
+    --secondary: 240 8% 12%;
+    --secondary-foreground: 0 0% 85%;
+    --muted: 240 8% 10%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 240 8% 10%;
+    --accent-foreground: 0 0% 92%;
+    --destructive: 0 60% 45%;
+    --destructive-foreground: 0 0% 95%;
+    --border: 240 8% 14%;
+    --input: 240 8% 14%;
+    --ring: 0 0% 60%;
+    --radius: 0.5rem;
+    --sidebar-background: 240 15% 3%;
+    --sidebar-foreground: 0 0% 55%;
+    --sidebar-primary: 0 0% 85%;
+    --sidebar-primary-foreground: 240 20% 2%;
+    --sidebar-accent: 240 8% 10%;
+    --sidebar-accent-foreground: 0 0% 92%;
+    --sidebar-border: 240 8% 12%;
+    --sidebar-ring: 0 0% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', 'SF Pro Display', system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.01em;
+  }
+  html {
+    @apply scroll-smooth;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 2px;
+  }
+}

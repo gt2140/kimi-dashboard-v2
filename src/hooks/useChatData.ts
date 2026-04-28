@@ -1,0 +1,220 @@
+import { useEffect, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router";
+import { ensureBackendSession, trpc } from "@/providers/trpc";
+import { useChatStore } from "@/hooks/useStore";
+import { formatRuntimeError } from "@/lib/app-errors";
+import { logClientDebug, logClientError } from "@/lib/debug";
+import type { ChatSession, Message } from "@/types";
+
+function mapConversationSummary(item: {
+  id: number;
+  agentId: string;
+  title: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  calledAgentIds?: string[];
+}): ChatSession {
+  return {
+    id: String(item.id),
+    agentId: item.agentId,
+    calledAgentIds: item.calledAgentIds ?? [],
+    title: item.title || "New conversation",
+    messages: [],
+    createdAt: new Date(item.createdAt),
+    updatedAt: new Date(item.updatedAt),
+  };
+}
+
+function mapMessage(item: {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  agentId: string | null;
+  createdAt: Date | string;
+  metadata?: Message["metadata"];
+}): Message {
+  return {
+    id: String(item.id),
+    role: item.role,
+    content: item.content,
+    agentId: item.agentId ?? "generalist",
+    timestamp: new Date(item.createdAt),
+    metadata: item.metadata,
+  };
+}
+
+function isUnauthorizedError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as { data?: { code?: string }; message?: string };
+  return (
+    candidate.data?.code === "UNAUTHORIZED" ||
+    candidate.message?.toLowerCase().includes("unauth") === true
+  );
+}
+
+export function useChatData() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeAgentId = useChatStore(state => state.activeAgentId);
+  const calledAgentIds = useChatStore(state => state.calledAgentIds);
+  const setActiveAgent = useChatStore(state => state.setActiveAgent);
+  const hydrateConversation = useChatStore(state => state.hydrateConversation);
+  const clearChatStore = useChatStore(state => state.clearChat);
+
+  const rawConversationId = searchParams.get("conversation");
+  const activeConversationId = rawConversationId
+    ? Number(rawConversationId)
+    : null;
+
+  const utils = trpc.useUtils();
+  const conversationsQuery = trpc.chat.listConversations.useQuery();
+  const conversationQuery = trpc.chat.getConversation.useQuery(
+    { id: activeConversationId ?? 0 },
+    {
+      enabled: activeConversationId !== null,
+      retry: false,
+    }
+  );
+
+  const createConversation = trpc.chat.createConversation.useMutation();
+  const sendMessageMutation = trpc.chat.sendMessage.useMutation();
+  const deleteConversationMutation = trpc.chat.deleteConversation.useMutation();
+
+  const sessions = useMemo(
+    () => (conversationsQuery.data ?? []).map(mapConversationSummary),
+    [conversationsQuery.data]
+  );
+
+  const messages = useMemo(
+    () => (conversationQuery.data?.messages ?? []).map(mapMessage),
+    [conversationQuery.data?.messages]
+  );
+
+  useEffect(() => {
+    const conversation = conversationQuery.data?.conversation;
+    if (!conversation) {
+      return;
+    }
+
+    hydrateConversation({
+      sessionId: conversation.id,
+      agentId: conversation.agentId,
+      calledAgentIds: conversation.calledAgentIds ?? [],
+    });
+  }, [conversationQuery.data?.conversation, hydrateConversation]);
+
+  async function runWithAuthSyncRetry<T>(
+    label: string,
+    action: () => Promise<T>
+  ) {
+    const synced = await ensureBackendSession();
+    if (!synced) {
+      throw new Error(
+        "Your browser session exists, but the backend session is not ready yet."
+      );
+    }
+
+    try {
+      logClientDebug(`chat.${label}.attempt`);
+      return await action();
+    } catch (error) {
+      logClientError(`chat.${label}.failed`, error);
+      if (!isUnauthorizedError(error)) {
+        throw error;
+      }
+
+      logClientDebug(`chat.${label}.retry-after-auth-sync`);
+      const retrySynced = await ensureBackendSession({ force: true });
+      if (!retrySynced) {
+        throw error;
+      }
+      return action();
+    }
+  }
+
+  async function selectConversation(sessionId: string) {
+    setSearchParams({ conversation: sessionId });
+    navigate(`/chat?conversation=${sessionId}`);
+  }
+
+  async function startNewChat(agentId?: string) {
+    const nextAgentId = agentId ?? activeAgentId;
+    setActiveAgent(nextAgentId);
+    clearChatStore();
+    setSearchParams({});
+    navigate("/chat");
+  }
+
+  async function ensureConversationId(firstMessage?: string) {
+    if (activeConversationId !== null) {
+      return activeConversationId;
+    }
+
+    const created = await runWithAuthSyncRetry("create-conversation", () =>
+      createConversation.mutateAsync({
+        agentId: activeAgentId,
+        title: firstMessage ? firstMessage.slice(0, 60) : undefined,
+      })
+    );
+    const nextId = created.id;
+    setSearchParams({ conversation: String(nextId) });
+    navigate(`/chat?conversation=${nextId}`);
+    return nextId;
+  }
+
+  async function sendMessage(content: string) {
+    const conversationId = await ensureConversationId(content);
+    await runWithAuthSyncRetry("send-message", () =>
+      sendMessageMutation.mutateAsync({
+        conversationId,
+        content,
+        agentId: activeAgentId,
+        calledAgentIds,
+      })
+    );
+    await Promise.all([
+      utils.chat.listConversations.invalidate(),
+      utils.chat.getConversation.invalidate({ id: conversationId }),
+    ]);
+  }
+
+  async function removeConversation(sessionId: string) {
+    const numericId = Number(sessionId);
+    await runWithAuthSyncRetry("delete-conversation", () =>
+      deleteConversationMutation.mutateAsync({ id: numericId })
+    );
+
+    if (activeConversationId === numericId) {
+      clearChatStore();
+      setSearchParams({});
+      navigate("/chat");
+      await utils.chat.getConversation.invalidate({ id: numericId });
+    }
+
+    await utils.chat.listConversations.invalidate();
+  }
+
+  const error =
+    createConversation.error ??
+    sendMessageMutation.error ??
+    deleteConversationMutation.error ??
+    conversationsQuery.error ??
+    conversationQuery.error ??
+    null;
+
+  return {
+    sessions,
+    messages,
+    activeConversationId,
+    isConversationLoading: conversationQuery.isLoading,
+    isSending: sendMessageMutation.isPending || createConversation.isPending,
+    error: error ? formatRuntimeError(error, "Chat") : null,
+    selectConversation,
+    startNewChat,
+    sendMessage,
+    removeConversation,
+  };
+}

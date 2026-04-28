@@ -1,243 +1,567 @@
-import { useState, useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  FileText, Image, Table, FileCode, Upload, Search,
-  Download, Trash2, Eye, Droplets, Dna, Watch,
-  Weight, StickyNote, File, Lock, Unlock, ChevronRight,
-  ArrowLeft, X
+  ArrowLeft,
+  ChevronRight,
+  Clock3,
+  Droplets,
+  Dna,
+  Eye,
+  File,
+  FileCode,
+  FileText,
+  Image,
+  Loader2,
+  Search,
+  ShieldCheck,
+  StickyNote,
+  Table,
+  Trash2,
+  Upload,
+  Watch,
+  Weight,
+  X,
 } from "lucide-react";
-import { useVaultStore } from "@/hooks/useStore";
+import { trpc } from "@/providers/trpc";
+import { formatRuntimeError } from "@/lib/app-errors";
 import type { VaultFile } from "@/types";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-const categoryConfig: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
-  bloodwork: { icon: <Droplets className="h-4 w-4" />, label: "Bloodwork", color: "text-red-400/50" },
-  genetics: { icon: <Dna className="h-4 w-4" />, label: "Genetics", color: "text-purple-400/50" },
-  wearables: { icon: <Watch className="h-4 w-4" />, label: "Wearables", color: "text-blue-400/50" },
-  "body-composition": { icon: <Weight className="h-4 w-4" />, label: "Body Comp", color: "text-emerald-400/50" },
-  notes: { icon: <StickyNote className="h-4 w-4" />, label: "Notes", color: "text-amber-400/50" },
-  other: { icon: <File className="h-4 w-4" />, label: "Other", color: "text-muted-foreground/30" },
+const categoryConfig: Record<
+  string,
+  { icon: React.ReactNode; label: string; color: string }
+> = {
+  bloodwork: {
+    icon: <Droplets className="h-4 w-4" />,
+    label: "Bloodwork",
+    color: "text-red-400/50",
+  },
+  genetics: {
+    icon: <Dna className="h-4 w-4" />,
+    label: "Genetics",
+    color: "text-purple-400/50",
+  },
+  wearables: {
+    icon: <Watch className="h-4 w-4" />,
+    label: "Wearables",
+    color: "text-blue-400/50",
+  },
+  "body-composition": {
+    icon: <Weight className="h-4 w-4" />,
+    label: "Body Comp",
+    color: "text-emerald-400/50",
+  },
+  notes: {
+    icon: <StickyNote className="h-4 w-4" />,
+    label: "Notes",
+    color: "text-amber-400/50",
+  },
+  other: {
+    icon: <File className="h-4 w-4" />,
+    label: "Other",
+    color: "text-muted-foreground/30",
+  },
 };
 
-function getFileIcon(filename: string) {
-  if (filename.endsWith(".pdf")) return <FileText className="h-4 w-4" />;
-  if (filename.endsWith(".csv")) return <Table className="h-4 w-4" />;
-  if (filename.endsWith(".json")) return <FileCode className="h-4 w-4" />;
-  if (filename.match(/\.(png|jpg|jpeg|webp)$/)) return <Image className="h-4 w-4" />;
-  return <FileText className="h-4 w-4" />;
+function inferCategory(file: File): VaultFile["category"] {
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  if (ext === "pdf") return "bloodwork";
+  if (ext === "csv") return "wearables";
+  if (ext === "json") return "genetics";
+  if (["png", "jpg", "jpeg", "webp"].includes(ext || "")) {
+    return "body-composition";
+  }
+  if (["md", "txt"].includes(ext || "")) {
+    return "notes";
+  }
+  return "other";
 }
 
-function formatSize(bytes: number): string {
-  if (bytes > 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / 1024).toFixed(0)} KB`;
+function inferFileType(fileName: string) {
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  return ext ? ext.toUpperCase() : "FILE";
+}
+
+function getFileIcon(fileName: string) {
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  if (ext === "pdf" || ext === "md" || ext === "txt") {
+    return <FileText className="h-4 w-4" />;
+  }
+  if (ext === "csv") {
+    return <Table className="h-4 w-4" />;
+  }
+  if (ext === "json") {
+    return <FileCode className="h-4 w-4" />;
+  }
+  if (["png", "jpg", "jpeg", "webp"].includes(ext || "")) {
+    return <Image className="h-4 w-4" />;
+  }
+  return <File className="h-4 w-4" />;
+}
+
+function formatSize(bytes: number) {
+  if (bytes <= 0) {
+    return "0 KB";
+  }
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function formatDate(value: Date) {
+  return value.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function mapVaultFile(item: {
+  id: number;
+  filename: string;
+  fileType: string;
+  category: VaultFile["category"];
+  size: number;
+  status: "ready" | "processing" | "failed";
+  uploadedAt: Date | string;
+  updatedAt: Date | string;
+}): VaultFile {
+  return {
+    id: String(item.id),
+    filename: item.filename,
+    fileType: item.fileType,
+    category: item.category,
+    size: item.size,
+    status: item.status,
+    uploadedAt: new Date(item.uploadedAt),
+    updatedAt: new Date(item.updatedAt),
+  };
 }
 
 export default function Vault() {
-  const files = useVaultStore((state) => state.files);
-  const removeFile = useVaultStore((state) => state.removeFile);
-  const addFile = useVaultStore((state) => state.addFile);
-  const activeCategory = useVaultStore((state) => state.activeCategory);
-  const setActiveCategory = useVaultStore((state) => state.setActiveCategory);
+  const utils = trpc.useUtils();
+  const filesQuery = trpc.vault.list.useQuery();
+  const uploadMutation = trpc.vault.upload.useMutation();
+  const deleteMutation = trpc.vault.delete.useMutation();
 
   const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState<
+    VaultFile["category"] | null
+  >(null);
   const [previewFile, setPreviewFile] = useState<VaultFile | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
-  const categories = Array.from(new Set(files.map((f) => f.category)));
-  const totalSize = files.reduce((acc, f) => acc + f.size, 0);
+  const files = useMemo(
+    () => (filesQuery.data ?? []).map(mapVaultFile),
+    [filesQuery.data]
+  );
 
-  const filteredFiles = files.filter((f) => {
-    const matchesSearch = f.filename.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = !activeCategory || f.category === activeCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const categories = useMemo(
+    () => Array.from(new Set(files.map(file => file.category))),
+    [files]
+  );
+  const totalSize = useMemo(
+    () => files.reduce((acc, file) => acc + file.size, 0),
+    [files]
+  );
 
-  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragOver(true); }, []);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragOver(false); }, []);
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setIsDragOver(false);
-    handleFiles(Array.from(e.dataTransfer.files));
-  }, [addFile]);
+  const filteredFiles = useMemo(
+    () =>
+      files.filter(file => {
+        const matchesSearch = file.filename
+          .toLowerCase()
+          .includes(search.toLowerCase());
+        const matchesCategory =
+          !activeCategory || file.category === activeCategory;
+        return matchesSearch && matchesCategory;
+      }),
+    [activeCategory, files, search]
+  );
 
-  const handleFiles = (fileList: File[]) => {
-    setUploading(true);
-    setTimeout(() => {
-      fileList.forEach((file) => {
-        const ext = file.name.split(".").pop()?.toLowerCase();
-        let category: VaultFile["category"] = "other";
-        if (ext === "pdf") category = "bloodwork";
-        else if (ext === "csv") category = "wearables";
-        else if (ext === "json") category = "genetics";
-        else if (["png", "jpg", "jpeg"].includes(ext || "")) category = "body-composition";
-        addFile({ id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, filename: file.name, category, size: file.size, uploadedAt: new Date(), encrypted: true });
-      });
-      setUploading(false);
-    }, 1500);
-  };
+  const error =
+    filesQuery.error ?? uploadMutation.error ?? deleteMutation.error ?? null;
+
+  const refreshVault = useCallback(async () => {
+    await utils.vault.list.invalidate();
+  }, [utils.vault.list]);
+
+  const handleFiles = useCallback(
+    async (fileList: File[]) => {
+      for (const file of fileList) {
+        await uploadMutation.mutateAsync({
+          filename: file.name,
+          fileType: inferFileType(file.name),
+          category: inferCategory(file),
+          size: file.size,
+          status: "ready",
+        });
+      }
+
+      await refreshVault();
+    },
+    [refreshVault, uploadMutation]
+  );
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      setIsDragOver(false);
+      void handleFiles(Array.from(event.dataTransfer.files));
+    },
+    [handleFiles]
+  );
+
+  async function handleDelete(fileId: string) {
+    await deleteMutation.mutateAsync({ id: Number(fileId) });
+    if (previewFile?.id === fileId) {
+      setPreviewFile(null);
+    }
+    await refreshVault();
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1400px] min-w-0 p-4 sm:p-6 lg:p-8">
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-baseline justify-between gap-4">
           <div>
-            <h1 className="text-[20px] font-medium tracking-tight text-foreground">Vault</h1>
-            <p className="text-[12px] text-muted-foreground/40 mt-1">{files.length} files &middot; {formatSize(totalSize)} &middot; AES-256 encrypted</p>
+            <h1 className="text-[20px] font-medium tracking-tight text-foreground">
+              Vault
+            </h1>
+            <p className="mt-1 text-[12px] text-muted-foreground/40">
+              {files.length} files · {formatSize(totalSize)} · Metadata
+              inventory persisted per user
+            </p>
           </div>
+          {filesQuery.isFetching && !filesQuery.isLoading && (
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground/40">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Syncing
+            </div>
+          )}
         </div>
       </motion.div>
 
-      {/* Upload */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={cn("mt-6 flex items-center gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors cursor-pointer relative",
-          isDragOver ? "border-foreground/30 bg-card/50" : "border-border/40 bg-card/20 hover:border-border/60")}
+        className={cn(
+          "relative mt-6 flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors",
+          isDragOver
+            ? "border-foreground/30 bg-card/50"
+            : "border-border/40 bg-card/20 hover:border-border/60"
+        )}
       >
         <Upload className="h-4 w-4 text-muted-foreground/30" />
-        <p className="text-[12px] text-muted-foreground/50">{isDragOver ? "Drop files here" : "Drag files or click to upload"}</p>
-        <span className="ml-auto text-[11px] text-muted-foreground/25">PDF, CSV, PNG, JSON</span>
-        <input type="file" multiple accept=".pdf,.csv,.png,.jpg,.jpeg,.json" onChange={(e) => e.target.files && handleFiles(Array.from(e.target.files))} className="absolute inset-0 cursor-pointer opacity-0" />
-        {uploading && <div className="ml-2 h-3 w-3 animate-spin rounded-full border border-muted-foreground/30 border-t-transparent" />}
+        <p className="text-[12px] text-muted-foreground/50">
+          {isDragOver
+            ? "Drop files here"
+            : "Drag files or click to register metadata"}
+        </p>
+        <span className="ml-auto text-[11px] text-muted-foreground/25">
+          PDF, CSV, PNG, JSON, TXT
+        </span>
+        <input
+          type="file"
+          multiple
+          accept=".pdf,.csv,.png,.jpg,.jpeg,.webp,.json,.txt,.md"
+          onChange={event => {
+            if (event.target.files) {
+              void handleFiles(Array.from(event.target.files));
+              event.target.value = "";
+            }
+          }}
+          className="absolute inset-0 cursor-pointer opacity-0"
+        />
+        {uploadMutation.isPending && (
+          <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin text-muted-foreground/35" />
+        )}
       </div>
 
-      {/* Search */}
-      <div className="mt-4 relative max-w-xs">
+      <div className="relative mt-4 max-w-xs">
         <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/25" />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search files..." className="h-8 pl-8 text-[12px] bg-card/30 border-border/30" />
+        <Input
+          value={search}
+          onChange={event => setSearch(event.target.value)}
+          placeholder="Search files..."
+          className="h-8 border-border/30 bg-card/30 pl-8 text-[12px]"
+        />
       </div>
 
-      {/* Category Cards */}
-      {!activeCategory && !search && (
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-          {categories.map((cat) => {
-            const config = categoryConfig[cat] || categoryConfig.other;
-            const catFiles = files.filter((f) => f.category === cat);
-            const catSize = catFiles.reduce((a, f) => a + f.size, 0);
+      {filesQuery.isLoading ? (
+        <div className="mt-8 flex items-center justify-center text-[12px] text-muted-foreground/40">
+          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+          Loading vault metadata...
+        </div>
+      ) : !activeCategory && !search ? (
+        <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {categories.map(category => {
+            const config = categoryConfig[category] || categoryConfig.other;
+            const categoryFiles = files.filter(
+              file => file.category === category
+            );
+            const categorySize = categoryFiles.reduce(
+              (acc, file) => acc + file.size,
+              0
+            );
+
             return (
               <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className="group flex items-center gap-3 rounded-xl border border-border/30 bg-card/20 px-4 py-3 text-left transition-all hover:bg-card/40 hover:border-border/50"
+                key={category}
+                onClick={() => setActiveCategory(category)}
+                className="group flex items-center gap-3 rounded-xl border border-border/30 bg-card/20 px-4 py-3 text-left transition-all hover:border-border/50 hover:bg-card/40"
               >
-                <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/30", config.color)}>
+                <div
+                  className={cn(
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/30",
+                    config.color
+                  )}
+                >
                   {config.icon}
                 </div>
                 <div className="flex-1">
-                  <p className="text-[13px] font-medium text-foreground">{config.label}</p>
-                  <p className="text-[11px] text-muted-foreground/30">{catFiles.length} files &middot; {formatSize(catSize)}</p>
+                  <p className="text-[13px] font-medium text-foreground">
+                    {config.label}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/30">
+                    {categoryFiles.length} files · {formatSize(categorySize)}
+                  </p>
                 </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground/15 group-hover:text-muted-foreground/30 transition-colors" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground/15 transition-colors group-hover:text-muted-foreground/30" />
               </button>
             );
           })}
+          {categories.length === 0 && (
+            <div className="rounded-xl border border-border/30 bg-card/20 px-4 py-6 text-center text-[12px] text-muted-foreground/35">
+              No metadata registered yet.
+            </div>
+          )}
         </div>
-      )}
-
-      {/* File List */}
-      {(activeCategory || search) && (
+      ) : (
         <div className="mt-4">
           {activeCategory && (
-            <div className="flex items-center gap-2 mb-3">
-              <button onClick={() => setActiveCategory(null)} className="text-[11px] text-muted-foreground/40 hover:text-foreground flex items-center gap-1 transition-colors">
-                <ArrowLeft className="h-3 w-3" /> All categories
+            <div className="mb-3 flex items-center gap-2">
+              <button
+                onClick={() => setActiveCategory(null)}
+                className="flex items-center gap-1 text-[11px] text-muted-foreground/40 transition-colors hover:text-foreground"
+              >
+                <ArrowLeft className="h-3 w-3" />
+                All categories
               </button>
               <ChevronRight className="h-3 w-3 text-muted-foreground/15" />
-              <span className="text-[11px] text-foreground font-medium">{categoryConfig[activeCategory]?.label || activeCategory}</span>
-              <span className="text-[10px] text-muted-foreground/30 ml-1">({filteredFiles.length} files)</span>
+              <span className="text-[11px] font-medium text-foreground">
+                {categoryConfig[activeCategory]?.label || activeCategory}
+              </span>
+              <span className="ml-1 text-[10px] text-muted-foreground/30">
+                ({filteredFiles.length} files)
+              </span>
               {search && (
                 <>
                   <ChevronRight className="h-3 w-3 text-muted-foreground/15" />
-                  <span className="text-[11px] text-muted-foreground/40 flex items-center gap-1">
-                    Search: "{search}" <button onClick={() => setSearch("")}><X className="h-3 w-3" /></button>
+                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground/40">
+                    Search: "{search}"
+                    <button onClick={() => setSearch("")}>
+                      <X className="h-3 w-3" />
+                    </button>
                   </span>
                 </>
               )}
             </div>
           )}
-          <div className="rounded-xl border border-border/30 bg-card/20 overflow-hidden">
-            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/30 border-b border-border/20">
+          <div className="overflow-hidden rounded-xl border border-border/30 bg-card/20">
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-3 border-b border-border/20 px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/30">
               <span>File</span>
+              <span className="hidden sm:block">Type</span>
               <span className="hidden sm:block">Category</span>
-              <span>Size</span>
+              <span>Status</span>
               <span className="hidden sm:block">Date</span>
-              <span></span>
+              <span />
             </div>
             <div className="divide-y divide-border/10">
-              {filteredFiles.map((file) => {
-                const config = categoryConfig[file.category] || categoryConfig.other;
+              {filteredFiles.map(file => {
+                const config =
+                  categoryConfig[file.category] || categoryConfig.other;
+                const status = file.status || "ready";
+
                 return (
-                  <div key={file.id} className="group grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 items-center px-4 py-2.5 transition-colors hover:bg-card/30">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="text-muted-foreground/25 shrink-0">{getFileIcon(file.filename)}</div>
-                      <span className="text-[12px] text-foreground truncate">{file.filename}</span>
+                  <div
+                    key={file.id}
+                    className="group grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-card/30"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="shrink-0 text-muted-foreground/25">
+                        {getFileIcon(file.filename)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-[12px] text-foreground">
+                          {file.filename}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground/25">
+                          {formatSize(file.size)}
+                        </p>
+                      </div>
                     </div>
-                    <span className={cn("hidden sm:block text-[11px] shrink-0", config.color)}>{config.label}</span>
-                    <span className="text-[11px] text-muted-foreground/25 shrink-0">{formatSize(file.size)}</span>
-                    <span className="hidden sm:block text-[11px] text-muted-foreground/20 shrink-0">{file.uploadedAt.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      {file.encrypted ? <Lock className="h-3 w-3 text-muted-foreground/15" /> : <Unlock className="h-3 w-3 text-muted-foreground/15" />}
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/30 hover:text-foreground" onClick={() => setPreviewFile(file)}><Eye className="h-3 w-3" /></Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/30 hover:text-destructive/60" onClick={() => removeFile(file.id)}><Trash2 className="h-3 w-3" /></Button>
+                    <span className="hidden text-[11px] text-muted-foreground/35 sm:block">
+                      {file.fileType || inferFileType(file.filename)}
+                    </span>
+                    <span
+                      className={cn(
+                        "hidden text-[11px] sm:block",
+                        config.color
+                      )}
+                    >
+                      {config.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[11px] uppercase",
+                        status === "ready" && "text-emerald-400/70",
+                        status === "processing" && "text-amber-400/70",
+                        status === "failed" && "text-red-400/70"
+                      )}
+                    >
+                      {status}
+                    </span>
+                    <span className="hidden text-[11px] text-muted-foreground/20 sm:block">
+                      {formatDate(file.uploadedAt)}
+                    </span>
+                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground/30 hover:text-foreground"
+                        onClick={() => setPreviewFile(file)}
+                      >
+                        <Eye className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground/30 hover:text-destructive/60"
+                        onClick={() => {
+                          void handleDelete(file.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
                   </div>
                 );
               })}
             </div>
             {filteredFiles.length === 0 && (
-              <p className="text-center text-[12px] text-muted-foreground/30 py-8">No files found</p>
+              <p className="py-8 text-center text-[12px] text-muted-foreground/30">
+                No files found
+              </p>
             )}
           </div>
         </div>
       )}
 
-      {/* Preview Dialog */}
+      {error && (
+        <p className="mt-4 text-[12px] text-destructive/80">
+          {formatRuntimeError(error, "Vault")}
+        </p>
+      )}
+
       <Dialog open={!!previewFile} onOpenChange={() => setPreviewFile(null)}>
-        <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto border-border/60 bg-card">
+        <DialogContent className="max-h-[80vh] max-w-xl overflow-y-auto border-border/60 bg-card">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-[13px] font-medium">
               {previewFile && getFileIcon(previewFile.filename)}
               {previewFile?.filename}
             </DialogTitle>
           </DialogHeader>
-          <div className="mt-2">
-            {previewFile?.filename.endsWith(".csv") && (
-              <div className="rounded border border-border/40 bg-background p-3 overflow-x-auto">
-                <table className="w-full text-[11px]">
-                  <thead><tr className="border-b border-border/40">
-                    <th className="text-left py-1 pr-3 font-medium text-muted-foreground/60">Date</th>
-                    <th className="text-left py-1 pr-3 font-medium text-muted-foreground/60">Sleep</th>
-                    <th className="text-left py-1 pr-3 font-medium text-muted-foreground/60">HRV</th>
-                    <th className="text-left py-1 pr-3 font-medium text-muted-foreground/60">RHR</th>
-                    <th className="text-left py-1 pr-3 font-medium text-muted-foreground/60">Steps</th>
-                  </tr></thead>
-                  <tbody>
-                    {[["2026-01-20", 85, 62, 52, 10240], ["2026-01-21", 88, 65, 51, 11500], ["2026-01-22", 82, 58, 54, 9800], ["2026-01-23", 90, 70, 49, 12500], ["2026-01-24", 87, 64, 51, 11000]].map((row, i) => (
-                      <tr key={i} className="border-b border-border/20">{row.map((cell, j) => <td key={j} className="py-1 pr-3 text-muted-foreground/60">{cell}</td>)}</tr>
-                    ))}
-                  </tbody>
-                </table>
+          {previewFile && (
+            <div className="mt-2 space-y-3">
+              <VaultMetaRow
+                icon={<FileText className="h-4 w-4" />}
+                label="Type"
+                value={
+                  previewFile.fileType || inferFileType(previewFile.filename)
+                }
+              />
+              <VaultMetaRow
+                icon={<ShieldCheck className="h-4 w-4" />}
+                label="Status"
+                value={(previewFile.status || "ready").toUpperCase()}
+              />
+              <VaultMetaRow
+                icon={
+                  categoryConfig[previewFile.category]?.icon || (
+                    <File className="h-4 w-4" />
+                  )
+                }
+                label="Category"
+                value={
+                  categoryConfig[previewFile.category]?.label ||
+                  previewFile.category
+                }
+              />
+              <VaultMetaRow
+                icon={<Clock3 className="h-4 w-4" />}
+                label="Uploaded"
+                value={previewFile.uploadedAt.toLocaleString()}
+              />
+              <VaultMetaRow
+                icon={<Clock3 className="h-4 w-4" />}
+                label="Updated"
+                value={
+                  previewFile.updatedAt?.toLocaleString() || "Not available"
+                }
+              />
+              <VaultMetaRow
+                icon={<File className="h-4 w-4" />}
+                label="Size"
+                value={formatSize(previewFile.size)}
+              />
+              <div className="rounded-xl border border-border/20 bg-background/40 p-3 text-[12px] leading-relaxed text-muted-foreground/45">
+                Phase 3 keeps the vault at metadata level only. File content
+                preview, chunking, extraction, and retrieval stay intentionally
+                out of scope until the next phase.
               </div>
-            )}
-            {previewFile?.filename.endsWith(".pdf") && (
-              <div className="rounded border border-border/40 bg-background p-8 text-center">
-                <FileText className="h-8 w-8 mx-auto text-muted-foreground/20 mb-2" />
-                <p className="text-[13px] text-muted-foreground/40">PDF preview requires decryption</p>
-                <Button variant="outline" size="sm" className="mt-3 h-7 text-[12px] border-border/60"><Download className="mr-1 h-3 w-3" /> Download</Button>
-              </div>
-            )}
-            {previewFile?.filename.endsWith(".json") && (
-              <div className="rounded border border-border/40 bg-background p-3 overflow-x-auto">
-                <pre className="text-[11px] text-muted-foreground/50">{JSON.stringify({ genome_version: "GRCh38", analyzed_variants: 1250000, pharmacogenomics: { CYP2D6: "*1/*2", CYP3A4: "*1/*1" }, polygenic_scores: { cardiovascular_risk: 0.42, type2_diabetes: 0.31, longevity: 0.58 } }, null, 2)}</pre>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function VaultMetaRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-xl border border-border/20 bg-background/40 px-3 py-2.5">
+      <div className="flex items-center gap-2 text-muted-foreground/40">
+        {icon}
+        <span className="text-[11px] uppercase tracking-wider">{label}</span>
+      </div>
+      <span className="text-right text-[12px] text-foreground/80">{value}</span>
     </div>
   );
 }

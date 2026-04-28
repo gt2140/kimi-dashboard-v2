@@ -6,7 +6,7 @@ import {
   Moon, Hourglass, HeartPulse, Beaker, Venus, Zap,
   BookOpen, Stethoscope, TrendingUp, Target, Dna,
   ShieldAlert, Gauge, Activity, ArrowUpRight, Star,
-  Users, Settings, Plus,
+  Users, Plus,
   Search
 } from "lucide-react";
 import { useChatStore } from "@/hooks/useStore";
@@ -86,9 +86,9 @@ export default function Agents() {
                   <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl bg-muted/40", agent.color)}>
                     {allIcons[agent.icon]}
                   </div>
-                  <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => navigate(`/agents/${agent.id}`)} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"><Settings className="h-3 w-3" /> Settings</button>
-                  </div>
+                  <span className="text-[10px] text-muted-foreground/30">
+                    MVP chat-ready
+                  </span>
                 </div>
                 <h3 className="mt-3 text-[14px] font-medium text-foreground">{agent.name}</h3>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground/40">{agent.description}</p>
@@ -97,6 +97,9 @@ export default function Agents() {
                     <span key={cat} className="px-1.5 py-0.5 rounded-full bg-muted/30 text-[9px] text-muted-foreground/40 border border-border/20 uppercase">{cat}</span>
                   ))}
                 </div>
+                <p className="mt-3 text-[11px] text-muted-foreground/35">
+                  Persistent agent settings are temporarily disabled in the MVP.
+                </p>
                 <button onClick={() => { setActiveAgent(agent.id); navigate("/chat"); }} className="mt-3 flex items-center gap-1 text-[11px] text-muted-foreground/40 hover:text-foreground transition-colors">
                   Start chat <ArrowUpRight className="h-3 w-3" />
                 </button>

@@ -41,9 +41,18 @@ export interface Message {
 export interface VaultFile {
   id: string;
   filename: string;
-  category: "bloodwork" | "genetics" | "wearables" | "body-composition" | "notes" | "other";
+  fileType?: string;
+  category:
+    | "bloodwork"
+    | "genetics"
+    | "wearables"
+    | "body-composition"
+    | "notes"
+    | "other";
   size: number;
   uploadedAt: Date;
+  updatedAt?: Date;
+  status?: "ready" | "processing" | "failed";
   url?: string;
   encrypted?: boolean;
 }
@@ -105,7 +114,14 @@ export interface UserProfile {
 
 export interface ActivityLog {
   id: string;
-  type: "chat" | "vault-upload" | "prediction-created" | "prediction-won" | "prediction-responded" | "token-earned" | "token-spent";
+  type:
+    | "chat"
+    | "vault-upload"
+    | "prediction-created"
+    | "prediction-won"
+    | "prediction-responded"
+    | "token-earned"
+    | "token-spent";
   description: string;
   tokens?: number;
   timestamp: Date;

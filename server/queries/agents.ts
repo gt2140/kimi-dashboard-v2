@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import { AGENTS } from "@/lib/data";
+import { AGENTS } from "../../src/lib/data.js";
 import {
   agentDefinitions,
   modelEndpoints,
@@ -7,8 +7,8 @@ import {
   promptTemplates,
   userAgentSettings,
   type InsertAgentDefinition,
-} from "@db/schema";
-import { getDb } from "./connection";
+} from "../../db/schema.js";
+import { getDb } from "./connection.js";
 
 const PROVIDER_SEEDS = [
   {

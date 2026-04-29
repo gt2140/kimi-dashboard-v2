@@ -10,23 +10,23 @@ import {
   messages,
   modelEndpoints,
   modelProviders,
-} from "@db/schema";
-import { logServerDebug, logServerError } from "./lib/debug";
-import { createRouter, authedQuery } from "./middleware";
-import { getDb } from "./queries/connection";
+} from "../db/schema.js";
+import { logServerDebug, logServerError } from "../server/lib/debug.js";
+import { createRouter, authedQuery } from "./middleware.js";
+import { getDb } from "../server/queries/connection.js";
 import {
   ensureConversationalCatalogSeeded,
   getActiveSystemPrompt,
   getAgentDefinitionBySlug,
-} from "./queries/agents";
-import { resolveConsultationPlan } from "./services/consultation-policy";
-import { ModelGatewayService } from "./services/model-gateway";
-import { planConversationTurn } from "./services/conversation-orchestrator";
-import { buildContextAwareFallbackReply } from "./services/fallback-reply";
+} from "../server/queries/agents.js";
+import { resolveConsultationPlan } from "../server/services/consultation-policy.js";
+import { ModelGatewayService } from "../server/services/model-gateway.js";
+import { planConversationTurn } from "../server/services/conversation-orchestrator.js";
+import { buildContextAwareFallbackReply } from "../server/services/fallback-reply.js";
 import {
   buildPrimarySystemPrompt,
   buildSupportingSystemPrompt,
-} from "./services/prompt-composer";
+} from "../server/services/prompt-composer.js";
 
 const chatMetadataSchema = z
   .object({
@@ -100,7 +100,9 @@ async function syncConversationParticipants(params: {
     .from(agentDefinitions)
     .where(inArray(agentDefinitions.slug, slugs));
 
-  const bySlug = new Map(definitions.map(definition => [definition.slug, definition]));
+  const bySlug = new Map(
+    definitions.map(definition => [definition.slug, definition] as const)
+  );
 
   const primary = bySlug.get(params.primaryAgentSlug);
   if (!primary) {
@@ -704,6 +706,11 @@ export const chatRouter = createRouter({
             })
             .returning({ id: messages.id });
 
+          const userMessageId = insertedUserMessage[0]?.id;
+          if (userMessageId == null) {
+            throw new Error("Failed to create the user message record.");
+          }
+
           const insertedAssistantMessage = await tx
             .insert(messages)
             .values({
@@ -737,11 +744,16 @@ export const chatRouter = createRouter({
             })
             .returning({ id: messages.id });
 
+          const assistantMessageId = insertedAssistantMessage[0]?.id;
+          if (assistantMessageId == null) {
+            throw new Error("Failed to create the assistant message record.");
+          }
+
           const primaryRun = await tx
             .insert(agentRuns)
             .values({
               conversationId: input.conversationId,
-              messageId: insertedAssistantMessage[0].id,
+              messageId: assistantMessageId,
               agentDefinitionId: participants.primary.id,
               runType: "primary_reply",
               providerId: primaryModelReference.providerId,
@@ -756,6 +768,11 @@ export const chatRouter = createRouter({
             })
             .returning({ id: agentRuns.id });
 
+          const primaryRunId = primaryRun[0]?.id;
+          if (primaryRunId == null) {
+            throw new Error("Failed to persist the primary agent run.");
+          }
+
           for (const [index, supportingRun] of assistantReply.supportingRuns.entries()) {
             if (!supportingRun?.agentDefinitionId) {
               continue;
@@ -763,7 +780,7 @@ export const chatRouter = createRouter({
 
             await tx.insert(agentRuns).values({
               conversationId: input.conversationId,
-              messageId: insertedUserMessage[0].id,
+              messageId: userMessageId,
               agentDefinitionId: supportingRun.agentDefinitionId,
               runType: "supporting_consult",
               providerId: supportingModelReferences[index]?.providerId ?? null,
@@ -786,8 +803,8 @@ export const chatRouter = createRouter({
           for (const filename of assistantReply.relatedVaultFiles) {
             await tx.insert(messageContextBlocks).values({
               conversationId: input.conversationId,
-              messageId: insertedAssistantMessage[0].id,
-              agentRunId: primaryRun[0].id,
+              messageId: assistantMessageId,
+              agentRunId: primaryRunId,
               sourceType: "vault_file",
               sourceId: filename,
               title: filename,

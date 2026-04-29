@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveConsultationPlan } from "./consultation-policy";
+import { resolveConsultationPlan } from "./consultation-policy.js";
 
 describe("resolveConsultationPlan", () => {
   it("consults only explicitly mentioned agents for non-generalist primaries", () => {

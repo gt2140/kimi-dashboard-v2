@@ -1,12 +1,12 @@
 import * as cookie from "cookie";
-import { Session } from "@contracts/constants";
-import { Errors } from "@contracts/errors";
-import { env } from "./lib/env";
-import { logServerDebug, logServerError } from "./lib/debug";
-import { signSessionToken } from "./kimi/session";
-import { verifySessionToken } from "./kimi/session";
-import { findUserByUnionId, upsertUser } from "./queries/users";
-import { getSessionCookieOptions } from "./lib/cookies";
+import { Session } from "../contracts/constants.js";
+import { Errors } from "../contracts/errors.js";
+import { env } from "../server/lib/env.js";
+import { logServerDebug, logServerError } from "../server/lib/debug.js";
+import { signSessionToken } from "../server/kimi/session.js";
+import { verifySessionToken } from "../server/kimi/session.js";
+import { findUserByUnionId, upsertUser } from "../server/queries/users.js";
+import { getSessionCookieOptions } from "../server/lib/cookies.js";
 
 type SupabaseUserPayload = {
   id: string;

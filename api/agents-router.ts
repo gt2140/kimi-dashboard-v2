@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { createRouter, authedQuery, publicQuery } from "./middleware";
+import { createRouter, authedQuery, publicQuery } from "./middleware.js";
 import {
   ensureConversationalCatalogSeeded,
   getActiveSystemPrompt,
@@ -9,9 +9,9 @@ import {
   listAgentDefinitions,
   listModelProvidersWithEndpoints,
   listUserAgentSettings,
-} from "./queries/agents";
-import { getDb } from "./queries/connection";
-import { agentDefinitions, userAgentSettings } from "@db/schema";
+} from "../server/queries/agents.js";
+import { getDb } from "../server/queries/connection.js";
+import { agentDefinitions, userAgentSettings } from "../db/schema.js";
 
 const userAgentSettingsInput = z.object({
   slug: z.string().min(1),

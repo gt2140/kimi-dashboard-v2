@@ -1,4 +1,4 @@
-import { AGENTS } from "@/lib/data";
+import { AGENTS } from "../../src/lib/data.js";
 
 type ConsultationMode = "none" | "explicit" | "auto";
 

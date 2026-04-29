@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getSessionCookieOptions } from "./cookies";
+import { getSessionCookieOptions } from "./cookies.js";
 
 describe("getSessionCookieOptions", () => {
   it("uses lax cookies on localhost", () => {

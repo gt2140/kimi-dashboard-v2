@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPrimarySystemPrompt,
   buildSupportingSystemPrompt,
-} from "./prompt-composer";
+} from "./prompt-composer.js";
 
 describe("prompt-composer", () => {
   it("builds a primary prompt with character and consultation policy", () => {

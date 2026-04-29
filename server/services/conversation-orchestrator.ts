@@ -1,4 +1,4 @@
-import { assembleConversationContext } from "./context-assembler";
+import { assembleConversationContext } from "./context-assembler.js";
 
 export async function planConversationTurn(params: {
   userId: number;

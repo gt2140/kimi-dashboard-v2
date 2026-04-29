@@ -2,7 +2,7 @@ import {
   getAgentDefinitionBySlug,
   getUserAgentSetting,
   ensureConversationalCatalogSeeded,
-} from "../queries/agents";
+} from "../queries/agents.js";
 
 export async function resolveAgentExecutionProfile(params: {
   userId: number;

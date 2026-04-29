@@ -1,9 +1,9 @@
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { vaultFiles } from "@db/schema";
-import { createRouter, authedQuery } from "./middleware";
-import { getDb } from "./queries/connection";
+import { vaultFiles } from "../db/schema.js";
+import { createRouter, authedQuery } from "./middleware.js";
+import { getDb } from "../server/queries/connection.js";
 
 const vaultCategorySchema = z.enum([
   "bloodwork",

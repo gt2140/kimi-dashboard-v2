@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildContextAwareFallbackReply } from "./fallback-reply";
+import { buildContextAwareFallbackReply } from "./fallback-reply.js";
 
 describe("buildContextAwareFallbackReply", () => {
   it("answers capability questions with a concrete overview", () => {

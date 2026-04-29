@@ -1,8 +1,8 @@
-import { authRouter } from "./auth-router";
-import { agentsRouter } from "./agents-router";
-import { chatRouter } from "./chat-router";
-import { vaultRouter } from "./vault-router";
-import { createRouter, publicQuery } from "./middleware";
+import { authRouter } from "./auth-router.js";
+import { agentsRouter } from "./agents-router.js";
+import { chatRouter } from "./chat-router.js";
+import { vaultRouter } from "./vault-router.js";
+import { createRouter, publicQuery } from "./middleware.js";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),

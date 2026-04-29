@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractOpenAIResponseText } from "./model-gateway";
+import { extractOpenAIResponseText } from "./model-gateway.js";
 
 describe("extractOpenAIResponseText", () => {
   it("derives text from output content blocks when output_text is absent", () => {

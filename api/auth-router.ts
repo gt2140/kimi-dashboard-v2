@@ -1,12 +1,15 @@
 import * as cookie from "cookie";
 import { TRPCError } from "@trpc/server";
-import { Session } from "@contracts/constants";
-import { createAppSessionFromSupabaseToken } from "./auth";
-import { logServerDebug, logServerError } from "./lib/debug";
-import { getSessionCookieOptions } from "./lib/cookies";
-import { env } from "./lib/env";
-import { createRouter, authedQuery, publicQuery } from "./middleware";
-import { checkDatabaseHealth, getDatabaseSetupState } from "./queries/connection";
+import { Session } from "../contracts/constants.js";
+import { createAppSessionFromSupabaseToken } from "./auth.js";
+import { logServerDebug, logServerError } from "../server/lib/debug.js";
+import { getSessionCookieOptions } from "../server/lib/cookies.js";
+import { env } from "../server/lib/env.js";
+import { createRouter, authedQuery, publicQuery } from "./middleware.js";
+import {
+  checkDatabaseHealth,
+  getDatabaseSetupState,
+} from "../server/queries/connection.js";
 import { z } from "zod";
 
 export const authRouter = createRouter({

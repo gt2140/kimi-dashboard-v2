@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { conversations, messages, vaultFiles } from "@db/schema";
-import { logServerError } from "../lib/debug";
-import { getDb } from "../queries/connection";
-import { resolveAgentExecutionProfile } from "./agent-registry";
+import { conversations, messages, vaultFiles } from "../../db/schema.js";
+import { logServerError } from "../lib/debug.js";
+import { getDb } from "../queries/connection.js";
+import { resolveAgentExecutionProfile } from "./agent-registry.js";
 
 export async function assembleConversationContext(params: {
   userId: number;

@@ -1,37 +1,67 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import {
+  Activity,
   Apple,
+  Beaker,
+  BookOpen,
   Brain,
   ChevronRight,
+  Dna,
   Droplets,
   Flower2,
+  Gauge,
+  Heart,
+  HeartPulse,
+  Hourglass,
   LayoutDashboard,
   Menu,
   MessageSquare,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Pill,
   Shield,
+  ShieldAlert,
   Sparkles,
+  Stethoscope,
+  Target,
   Trash2,
+  TrendingUp,
   Users,
+  Venus,
   X,
+  Zap,
 } from "lucide-react";
 import { useChatStore } from "@/hooks/useStore";
 import { useChatData } from "@/hooks/useChatData";
+import { useAgentCatalog } from "@/hooks/useAgentCatalog";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const iconMap: Record<string, React.ReactNode> = {
+  Activity: <Activity className="h-[18px] w-[18px]" />,
   Brain: <Brain className="h-[18px] w-[18px]" />,
-  Droplets: <Droplets className="h-[18px] w-[18px]" />,
   Apple: <Apple className="h-[18px] w-[18px]" />,
+  Beaker: <Beaker className="h-[18px] w-[18px]" />,
+  BookOpen: <BookOpen className="h-[18px] w-[18px]" />,
+  Dna: <Dna className="h-[18px] w-[18px]" />,
+  Droplets: <Droplets className="h-[18px] w-[18px]" />,
   Pill: <Pill className="h-[18px] w-[18px]" />,
-  Sparkles: <Sparkles className="h-[18px] w-[18px]" />,
   Flower2: <Flower2 className="h-[18px] w-[18px]" />,
+  Gauge: <Gauge className="h-[18px] w-[18px]" />,
+  HeartPulse: <HeartPulse className="h-[18px] w-[18px]" />,
+  Hourglass: <Hourglass className="h-[18px] w-[18px]" />,
+  Moon: <Moon className="h-[18px] w-[18px]" />,
+  ShieldAlert: <ShieldAlert className="h-[18px] w-[18px]" />,
+  Sparkles: <Sparkles className="h-[18px] w-[18px]" />,
+  Stethoscope: <Stethoscope className="h-[18px] w-[18px]" />,
+  Target: <Target className="h-[18px] w-[18px]" />,
+  TrendingUp: <TrendingUp className="h-[18px] w-[18px]" />,
+  Venus: <Venus className="h-[18px] w-[18px]" />,
+  Zap: <Zap className="h-[18px] w-[18px]" />,
 };
 
 const navItems = [
@@ -44,33 +74,6 @@ const navItems = [
   { id: "agents", label: "Agents", icon: Users, path: "/agents" },
   { id: "chat", label: "Chat", icon: MessageSquare, path: "/chat" },
   { id: "vault", label: "Vault", icon: Shield, path: "/vault" },
-];
-
-const QUICK_AGENTS = [
-  {
-    id: "generalist",
-    icon: "Brain",
-    color: "text-indigo-400",
-    label: "Generalist",
-  },
-  {
-    id: "bloodwork",
-    icon: "Droplets",
-    color: "text-red-400",
-    label: "Bloodwork",
-  },
-  {
-    id: "peptides",
-    icon: "Sparkles",
-    color: "text-cyan-400",
-    label: "Peptides",
-  },
-  {
-    id: "supplements",
-    icon: "Pill",
-    color: "text-amber-400",
-    label: "Supplements",
-  },
 ];
 
 function getIdentity(
@@ -207,6 +210,7 @@ export function Sidebar({
   const identity = useMemo(() => getIdentity(user), [user]);
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
+  const { favoriteAgents } = useAgentCatalog();
   const {
     sessions,
     activeConversationId,
@@ -283,20 +287,20 @@ export function Sidebar({
       <div className="shrink-0 px-2">
         {!collapsed && (
           <p className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/30">
-            Quick
+            Favorites
           </p>
         )}
-        {QUICK_AGENTS.map(agent => {
+        {favoriteAgents.map(agent => {
           const isActive =
-            activeAgentId === agent.id &&
+            activeAgentId === agent.slug &&
             location.pathname === "/chat" &&
             !activeConversationId;
 
           return (
             <button
-              key={agent.id}
+              key={agent.slug}
               onClick={() => {
-                setActiveAgent(agent.id);
+                setActiveAgent(agent.slug);
                 navigate("/chat");
               }}
               className={cn(
@@ -308,7 +312,7 @@ export function Sidebar({
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/50 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground/80"
               )}
-              title={collapsed ? agent.label : undefined}
+              title={collapsed ? agent.name : undefined}
             >
               <span
                 className={cn(
@@ -316,12 +320,17 @@ export function Sidebar({
                   isActive ? agent.color : "text-sidebar-foreground/40"
                 )}
               >
-                {iconMap[agent.icon]}
+                {iconMap[agent.icon] ?? <Sparkles className="h-[18px] w-[18px]" />}
               </span>
-              {!collapsed && <span className="capitalize">{agent.id}</span>}
+              {!collapsed && <span>{agent.name}</span>}
             </button>
           );
         })}
+        {!collapsed && favoriteAgents.length === 0 && (
+          <p className="px-2.5 py-1.5 text-[11px] text-sidebar-foreground/25">
+            Add favorites from the agents page.
+          </p>
+        )}
       </div>
 
       <div className="mx-3 my-2 h-px shrink-0 bg-border/60" />
@@ -387,6 +396,7 @@ export function MobileSidebar() {
   const identity = useMemo(() => getIdentity(user), [user]);
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
+  const { favoriteAgents } = useAgentCatalog();
   const { sessions, selectConversation, removeConversation } = useChatData();
   const [showHistory, setShowHistory] = useState(true);
 
@@ -437,16 +447,16 @@ export function MobileSidebar() {
 
           <div className="shrink-0 px-2">
             <p className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/30">
-              Quick chat
+              Favorites
             </p>
-            {QUICK_AGENTS.map(agent => {
-              const isActive = activeAgentId === agent.id;
+            {favoriteAgents.map(agent => {
+              const isActive = activeAgentId === agent.slug;
 
               return (
                 <button
-                  key={agent.id}
+                  key={agent.slug}
                   onClick={() => {
-                    setActiveAgent(agent.id);
+                    setActiveAgent(agent.slug);
                     navigate("/chat");
                     setOpen(false);
                   }}
@@ -463,12 +473,18 @@ export function MobileSidebar() {
                       isActive ? agent.color : "text-sidebar-foreground/40"
                     )}
                   >
-                    {iconMap[agent.icon]}
+                    {iconMap[agent.icon] ?? <Sparkles className="h-[18px] w-[18px]" />}
                   </span>
-                  <span className="capitalize">{agent.id}</span>
+                  <span>{agent.name}</span>
                 </button>
               );
             })}
+            {favoriteAgents.length === 0 && (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-sidebar-foreground/25">
+                <Heart className="h-3 w-3" />
+                <span>Add favorites from Agents</span>
+              </div>
+            )}
           </div>
 
           <div className="mx-3 my-2 h-px shrink-0 bg-border/60" />

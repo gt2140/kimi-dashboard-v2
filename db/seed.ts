@@ -1,17 +1,34 @@
+import { ensureConversationalCatalogSeeded } from "../api/queries/agents";
 import { getDb } from "../api/queries/connection";
-// TODO: import tables from "./schema"
+import { agentDefinitions, modelEndpoints, modelProviders } from "./schema";
 
 async function seed() {
+  console.log("Seeding conversational catalog...");
+  await ensureConversationalCatalogSeeded();
+
   const db = getDb();
-  console.log("Seeding database...");
+  const [providers, endpoints, agents] = await Promise.all([
+    db.select().from(modelProviders),
+    db.select().from(modelEndpoints),
+    db.select().from(agentDefinitions),
+  ]);
 
-  // TODO: insert seed data, e.g.
-  // await db.insert(schema.posts).values([
-  //   { title: "First post", content: "Hello world" },
-  // ]);
+  console.log(
+    JSON.stringify(
+      {
+        providers: providers.length,
+        endpoints: endpoints.length,
+        agents: agents.length,
+      },
+      null,
+      2
+    )
+  );
 
-  console.log("Done.");
-  process.exit(0); // close MySQL connection pool
+  process.exit(0);
 }
 
-seed();
+seed().catch(error => {
+  console.error("Seed failed", error);
+  process.exit(1);
+});

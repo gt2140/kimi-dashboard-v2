@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type {
   ActivityLog,
   Agent,
@@ -106,6 +107,46 @@ export const useAgentSettingsStore = create<AgentSettingsState>(set => ({
       },
     })),
 }));
+
+interface FavoriteAgentsState {
+  favoriteAgentIds: string[];
+  setFavoriteAgentIds: (agentIds: string[]) => void;
+  toggleFavoriteAgent: (agentId: string) => void;
+  isFavoriteAgent: (agentId: string) => boolean;
+}
+
+const DEFAULT_FAVORITE_AGENT_IDS = ["generalist"];
+
+export const useFavoriteAgentsStore = create<FavoriteAgentsState>()(
+  persist(
+    (set, get) => ({
+      favoriteAgentIds: DEFAULT_FAVORITE_AGENT_IDS,
+      setFavoriteAgentIds: agentIds =>
+        set({
+          favoriteAgentIds: Array.from(
+            new Set(["generalist", ...agentIds.filter(Boolean)])
+          ),
+        }),
+      toggleFavoriteAgent: agentId =>
+        set(state => {
+          if (agentId === "generalist") {
+            return state;
+          }
+
+          const exists = state.favoriteAgentIds.includes(agentId);
+          return {
+            favoriteAgentIds: exists
+              ? state.favoriteAgentIds.filter(id => id !== agentId)
+              : [...state.favoriteAgentIds, agentId],
+          };
+        }),
+      isFavoriteAgent: agentId => get().favoriteAgentIds.includes(agentId),
+    }),
+    {
+      name: "favorite-agents",
+    }
+  )
+);
 
 interface PredictionsState {
   predictions: Prediction[];

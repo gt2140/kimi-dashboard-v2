@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTH_CALLBACK_PATH, getAuthCallbackUrl } from "./const";
 

@@ -45,6 +45,15 @@ function readConnectionErrorMessage(error: unknown) {
       return "Could not resolve the configured database host.";
     }
 
+    const normalizedMessage = candidate.message.toLowerCase();
+    if (
+      candidate.code === "EMAXCONNSESSION" ||
+      normalizedMessage.includes("emaxconnsession") ||
+      normalizedMessage.includes("max clients reached in session mode")
+    ) {
+      return "Supabase pooled Postgres rejected the connection because too many session-mode clients were opened. Use the pooled DATABASE_URL on port 6543, keep the backend pool small, and restart the backend so it drops stale direct connections.";
+    }
+
     if (candidate.message.trim()) {
       return candidate.message.trim();
     }
@@ -70,6 +79,9 @@ export function getDb() {
     client = postgres(env.databaseUrl, {
       prepare: false,
       ssl: "require",
+      max: 5,
+      idle_timeout: 20,
+      connect_timeout: 15,
     });
     instance = drizzle(client, { schema: fullSchema });
   }

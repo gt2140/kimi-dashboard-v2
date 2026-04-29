@@ -35,6 +35,13 @@ export interface Message {
     confidence?: number;
     relatedVaultFiles?: string[];
     calledAgents?: string[];
+    note?: string;
+    responseMode?: "model" | "limited";
+    consultedAgentNames?: string[];
+    providerSlug?: string;
+    modelName?: string;
+    inputTokens?: number;
+    outputTokens?: number;
   };
 }
 

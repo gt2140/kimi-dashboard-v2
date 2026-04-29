@@ -54,6 +54,11 @@ export const env = {
   kimiAuthUrl: optionalUrl("KIMI_AUTH_URL"),
   kimiOpenUrl: optionalUrl("KIMI_OPEN_URL"),
   ownerUnionId: process.env.OWNER_UNION_ID ?? "",
+  openaiApiKey: process.env.OPENAI_API_KEY?.trim() || "",
+  openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || "",
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
+  kimiApiKey: process.env.KIMI_API_KEY?.trim() || "",
   supabaseUrl: optionalUrl("SUPABASE_URL"),
   supabaseAnonKey: requiredOneOf("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"),
 };

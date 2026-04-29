@@ -40,6 +40,21 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
   }
 
   if (
+    normalized.includes("emaxconnsession") ||
+    normalized.includes("max clients reached in session mode")
+  ) {
+    return "Setup error: Supabase connection pool is exhausted. Confirm DATABASE_URL uses the pooled 6543 URL and restart the backend.";
+  }
+
+  if (
+    (normalized.includes("column") && normalized.includes("does not exist")) ||
+    (normalized.includes("relation") && normalized.includes("does not exist")) ||
+    normalized.includes("conversational schema is not fully installed")
+  ) {
+    return "Setup error: database schema is out of date. Re-run app/supabase/init.sql in Supabase and restart the backend.";
+  }
+
+  if (
     normalized.includes("database") ||
     normalized.includes("relation") ||
     normalized.includes("duplicate key") ||

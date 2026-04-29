@@ -17,6 +17,8 @@ import {
   Apple,
   Pill,
   Flower2,
+  Info,
+  Files,
 } from "lucide-react";
 import { useChatStore } from "@/hooks/useStore";
 import { useChatData } from "@/hooks/useChatData";
@@ -36,12 +38,36 @@ const allIcons: Record<string, React.ReactNode> = {
 };
 
 const SHORTCUTS: Record<string, string[]> = {
-  generalist: ["Analyze latest bloodwork", "Explain DEXA scan", "Review genetic variants"],
-  bloodwork: ["Optimize lipid panel", "Interpret hormone levels", "Check inflammation markers"],
-  nutrition: ["Build meal plan", "Optimize macros", "Training day timing"],
-  supplements: ["Review current stack", "Check interactions", "Sleep optimization"],
-  peptides: ["BPC-157 protocol", "TB-500 dosing", "Safety monitoring"],
-  psychedelics: ["Microdosing schedule", "Safety screening", "Integration practices"],
+  generalist: [
+    "Interpret my latest bloodwork",
+    "Explain my DEXA scan",
+    "Help me review genetic variants",
+  ],
+  bloodwork: [
+    "Help me optimize my lipid panel",
+    "Interpret my hormone levels",
+    "Check inflammation markers",
+  ],
+  nutrition: [
+    "Build me a meal plan",
+    "Help me optimize my macros",
+    "Suggest training-day nutrition",
+  ],
+  supplements: [
+    "Review my current supplement stack",
+    "Check supplement interactions",
+    "Suggest a sleep support stack",
+  ],
+  peptides: [
+    "Help me think through a BPC-157 protocol",
+    "Compare TB-500 dosing approaches",
+    "What labs should I monitor for peptides?",
+  ],
+  psychedelics: [
+    "Help me think through a microdosing schedule",
+    "What safety screening should I do first?",
+    "How should I approach integration practices?",
+  ],
 };
 
 export default function Chat() {
@@ -62,6 +88,7 @@ export default function Chat() {
   } = useChatData();
 
   const [input, setInput] = useState("");
+  const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -89,12 +116,17 @@ export default function Chat() {
     }
 
     const content = input.trim();
+    setPendingUserMessage(content);
     setInput("");
-    await sendMessage(content);
+    try {
+      await sendMessage(content);
+    } finally {
+      setPendingUserMessage(null);
+    }
   }, [input, isSending, sendMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void handleSend();
     }
@@ -144,7 +176,7 @@ export default function Chat() {
               onClick={() => setShowAgentPicker(!showAgentPicker)}
               className="flex items-center gap-1 rounded-md border border-border/40 bg-card/30 px-2.5 py-1.5 text-[11px] text-muted-foreground/50 hover:text-foreground hover:border-border/60 transition-all"
             >
-              <Plus className="h-3 w-3" /> Call agent
+              <Plus className="h-3 w-3" /> Add helper
             </button>
             <AnimatePresence>
               {showAgentPicker && (
@@ -155,7 +187,7 @@ export default function Chat() {
                   className="absolute right-0 top-full mt-1 z-50 w-56 rounded-xl border border-border/60 bg-card/95 backdrop-blur-md shadow-lg p-1.5"
                 >
                   <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/30">
-                    Available agents
+                    Available helpers
                   </p>
                   {availableAgents.map((agent) => (
                     <button
@@ -172,7 +204,7 @@ export default function Chat() {
                   ))}
                   {availableAgents.length === 0 && (
                     <p className="px-2 py-2 text-[11px] text-muted-foreground/25">
-                      All agents called
+                      All helpers added
                     </p>
                   )}
                 </motion.div>
@@ -197,7 +229,7 @@ export default function Chat() {
             <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
             Loading conversation...
           </div>
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && !pendingUserMessage ? (
           <EmptyState
             agentId={activeAgentId}
             onShortcutClick={(text) => setInput(text)}
@@ -207,6 +239,23 @@ export default function Chat() {
             {messages.map((message) => (
               <MessageBubble key={message.id} message={message} />
             ))}
+            {pendingUserMessage && (
+              <MessageBubble
+                message={{
+                  id: "pending-user-message",
+                  role: "user",
+                  content: pendingUserMessage,
+                  agentId: activeAgentId,
+                  timestamp: new Date(),
+                }}
+              />
+            )}
+            {isSending && (
+              <ThinkingBubble
+                agentName={activeAgent.name}
+                supportingCount={calledAgentIds.length}
+              />
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -229,7 +278,7 @@ export default function Chat() {
                       agent.color,
                     )}
                   >
-                    {allIcons[agent.icon]} {agent.name} assisting
+                    {allIcons[agent.icon]} {agent.name} on call
                   </span>
                 );
               })}
@@ -241,7 +290,7 @@ export default function Chat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`Ask about ${activeAgent.allowedVaultCategories.join(", ")}...`}
+              placeholder={`Ask ${activeAgent.name.toLowerCase()} anything about ${activeAgent.allowedVaultCategories.join(", ")}. Use @agent-name to force a specialist consult.`}
               className="min-h-[36px] resize-none border-0 bg-transparent p-0 text-[13px] leading-relaxed focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/30"
               rows={1}
             />
@@ -261,13 +310,14 @@ export default function Chat() {
             </Button>
           </div>
           {error && (
-            <p className="mt-2 text-[11px] text-destructive/80">
-              Chat error: {error}
-            </p>
+            <div className="mt-2 flex items-start gap-2 rounded-md border border-destructive/20 bg-destructive/5 px-2.5 py-2 text-[11px] text-destructive/80">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <p>{error}</p>
+            </div>
           )}
           {activeConversationId && (
             <p className="mt-2 text-[10px] text-muted-foreground/25">
-              Conversation #{activeConversationId} is saved automatically.
+              Conversation #{activeConversationId} is saved automatically. Helpers stay available, but only answer when tagged or when the lead agent consults them.
             </p>
           )}
         </div>
@@ -294,10 +344,10 @@ function EmptyState({
     >
       <Sparkles className="mb-4 h-5 w-5 text-muted-foreground/20" />
       <h2 className="text-[15px] font-medium text-foreground">
-        What would you like to know?
+        Start with a question or a result to review
       </h2>
       <p className="mt-1 text-[12px] text-muted-foreground/50">
-        Speaking with <span className={cn(agent.color)}>{agent.name}</span>
+        You're chatting with <span className={cn(agent.color)}>{agent.name}</span>
       </p>
 
       <div className="mt-6 flex flex-wrap justify-center gap-2">
@@ -324,6 +374,14 @@ function MessageBubble({
   const isUser = message.role === "user";
   const agent = AGENTS.find((item) => item.id === message.agentId);
   const calledAgents = message.metadata?.calledAgents;
+  const consultedAgentNames = message.metadata?.consultedAgentNames;
+  const relatedVaultFiles = message.metadata?.relatedVaultFiles ?? [];
+  const note = message.metadata?.note;
+  const responseMode = message.metadata?.responseMode;
+  const providerSlug = message.metadata?.providerSlug;
+  const modelName = message.metadata?.modelName;
+  const inputTokens = message.metadata?.inputTokens;
+  const outputTokens = message.metadata?.outputTokens;
 
   return (
     <motion.div
@@ -347,7 +405,7 @@ function MessageBubble({
           </span>
           {calledAgents && calledAgents.length > 0 && (
             <span className="text-[10px] text-muted-foreground/20">
-              +{calledAgents.length} assisting
+              +{calledAgents.length} consulted
             </span>
           )}
           <span className="text-[10px] text-muted-foreground/25">
@@ -371,18 +429,104 @@ function MessageBubble({
         </div>
 
         {!isUser && (
-          <div className="mt-1 flex items-center gap-0.5">
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground/25 hover:text-muted-foreground/50">
-              <Copy className="h-3 w-3" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground/25 hover:text-muted-foreground/50">
-              <ThumbsUp className="h-3 w-3" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground/25 hover:text-muted-foreground/50">
-              <ThumbsDown className="h-3 w-3" />
-            </Button>
-          </div>
+          <>
+            {(note ||
+              relatedVaultFiles.length > 0 ||
+              responseMode === "limited" ||
+              (consultedAgentNames && consultedAgentNames.length > 0)) && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {note && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-card/30 px-2 py-0.5 text-[10px] text-muted-foreground/55">
+                    <Info className="h-3 w-3" />
+                    {note}
+                  </span>
+                )}
+                {consultedAgentNames && consultedAgentNames.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-card/30 px-2 py-0.5 text-[10px] text-muted-foreground/55">
+                    <Sparkles className="h-3 w-3" />
+                    Consulted: {consultedAgentNames.join(", ")}
+                  </span>
+                )}
+                {providerSlug && modelName && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-card/30 px-2 py-0.5 text-[10px] text-muted-foreground/55">
+                    <Sparkles className="h-3 w-3" />
+                    {providerSlug} · {modelName}
+                  </span>
+                )}
+                {typeof inputTokens === "number" &&
+                  typeof outputTokens === "number" && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-2 py-0.5 text-[10px] text-emerald-200/80">
+                      Tokens: {inputTokens} in · {outputTokens} out
+                    </span>
+                  )}
+                {relatedVaultFiles.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-card/30 px-2 py-0.5 text-[10px] text-muted-foreground/55">
+                    <Files className="h-3 w-3" />
+                    {relatedVaultFiles.length} vault file
+                    {relatedVaultFiles.length > 1 ? "s" : ""} used
+                  </span>
+                )}
+                {responseMode === "limited" && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-[10px] text-amber-200/80">
+                    Limited mode
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="mt-1 flex items-center gap-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 text-muted-foreground/25 hover:text-muted-foreground/50"
+                onClick={() => {
+                  void navigator.clipboard.writeText(message.content);
+                }}
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground/25 hover:text-muted-foreground/50">
+                <ThumbsUp className="h-3 w-3" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground/25 hover:text-muted-foreground/50">
+                <ThumbsDown className="h-3 w-3" />
+              </Button>
+            </div>
+          </>
         )}
+      </div>
+    </motion.div>
+  );
+}
+
+function ThinkingBubble({
+  agentName,
+  supportingCount,
+}: {
+  agentName: string;
+  supportingCount: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex gap-3"
+    >
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground/40">
+        <Sparkles className="h-3 w-3" />
+      </div>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground/40">{agentName}</span>
+          <span className="text-[10px] text-muted-foreground/25">
+            {supportingCount > 0
+              ? `${supportingCount} helper${supportingCount > 1 ? "s" : ""} available if needed...`
+              : "thinking..."}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 rounded-2xl border border-border/40 bg-card/30 px-3 py-2 text-[12px] text-muted-foreground/50">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Analyzing your message
+        </div>
       </div>
     </motion.div>
   );

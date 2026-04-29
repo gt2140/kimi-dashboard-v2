@@ -2,20 +2,44 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
+  agentDefinitions,
+  agentRuns,
+  conversationAgents,
   conversations,
+  messageContextBlocks,
   messages,
-  type VaultFile as DbVaultFile,
-  vaultFiles,
+  modelEndpoints,
+  modelProviders,
 } from "@db/schema";
-import { AGENTS } from "@/lib/data";
 import { logServerDebug, logServerError } from "./lib/debug";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
+import {
+  ensureConversationalCatalogSeeded,
+  getActiveSystemPrompt,
+  getAgentDefinitionBySlug,
+} from "./queries/agents";
+import { resolveConsultationPlan } from "./services/consultation-policy";
+import { ModelGatewayService } from "./services/model-gateway";
+import { planConversationTurn } from "./services/conversation-orchestrator";
+import { buildContextAwareFallbackReply } from "./services/fallback-reply";
+import {
+  buildPrimarySystemPrompt,
+  buildSupportingSystemPrompt,
+} from "./services/prompt-composer";
 
 const chatMetadataSchema = z
   .object({
     calledAgents: z.array(z.string()).optional(),
     relatedVaultFiles: z.array(z.string()).optional(),
+    orchestrationMode: z.string().optional(),
+    note: z.string().optional(),
+    responseMode: z.enum(["model", "limited"]).optional(),
+    consultedAgentNames: z.array(z.string()).optional(),
+    providerSlug: z.string().optional(),
+    modelName: z.string().optional(),
+    inputTokens: z.number().optional(),
+    outputTokens: z.number().optional(),
   })
   .optional();
 
@@ -34,69 +58,6 @@ function parseMetadata(metadata: string | null) {
 function buildConversationTitle(content: string) {
   const trimmed = content.trim();
   return trimmed.slice(0, 60) + (trimmed.length > 60 ? "..." : "");
-}
-
-async function buildAssistantReply(params: {
-  userMessage: string;
-  agentId: string;
-  calledAgentIds: string[];
-  userId: number;
-}) {
-  type VaultCategory = DbVaultFile["category"];
-  const db = getDb();
-  const selectedAgentIds = [params.agentId, ...params.calledAgentIds];
-  const selectedAgents = AGENTS.filter(agent =>
-    selectedAgentIds.includes(agent.id)
-  );
-  const allowedCategories = Array.from(
-    new Set(selectedAgents.flatMap(agent => agent.allowedVaultCategories))
-  ) as VaultCategory[];
-
-  const accessibleFiles = allowedCategories.length
-    ? await db
-        .select({
-          id: vaultFiles.id,
-          filename: vaultFiles.filename,
-          category: vaultFiles.category,
-        })
-        .from(vaultFiles)
-        .where(
-          and(
-            eq(vaultFiles.userId, params.userId),
-            inArray(vaultFiles.category, allowedCategories)
-          )
-        )
-    : [];
-
-  const agent = AGENTS.find(item => item.id === params.agentId);
-  const supportingNames = params.calledAgentIds
-    .map(id => AGENTS.find(agentItem => agentItem.id === id)?.name)
-    .filter(Boolean) as string[];
-
-  const accessibleSummary =
-    accessibleFiles.length > 0
-      ? accessibleFiles
-          .slice(0, 3)
-          .map(file => `${file.filename} (${file.category})`)
-          .join(", ")
-      : "No compatible vault files are linked yet for this conversation.";
-
-  const sections = [
-    `Primary agent: ${agent?.name ?? params.agentId}.`,
-    supportingNames.length > 0
-      ? `Supporting agents: ${supportingNames.join(", ")}.`
-      : "No supporting agents were called in this turn.",
-    `User request: ${params.userMessage}`,
-    `Accessible vault context: ${accessibleSummary}`,
-    accessibleFiles.length > 0
-      ? "Next step: use the available vault files as evidence and expand this answer with real retrieval in the next phase."
-      : "Next step: upload vault files so future answers can ground on user-specific context.",
-  ];
-
-  return {
-    content: sections.join("\n\n"),
-    relatedVaultFiles: accessibleFiles.map(file => file.filename),
-  };
 }
 
 async function requireConversationOwner(
@@ -126,6 +87,421 @@ async function requireConversationOwner(
   return conversation;
 }
 
+async function syncConversationParticipants(params: {
+  conversationId: number;
+  primaryAgentSlug: string;
+  supportingAgentSlugs: string[];
+}) {
+  await ensureConversationalCatalogSeeded();
+  const db = getDb();
+  const slugs = [params.primaryAgentSlug, ...params.supportingAgentSlugs];
+  const definitions = await db
+    .select()
+    .from(agentDefinitions)
+    .where(inArray(agentDefinitions.slug, slugs));
+
+  const bySlug = new Map(definitions.map(definition => [definition.slug, definition]));
+
+  const primary = bySlug.get(params.primaryAgentSlug);
+  if (!primary) {
+    throw new Error(`Primary agent ${params.primaryAgentSlug} was not found`);
+  }
+
+  const activeSupportingIds = params.supportingAgentSlugs
+    .map(slug => bySlug.get(slug)?.id)
+    .filter((value): value is number => Boolean(value));
+
+  await db
+    .insert(conversationAgents)
+    .values({
+      conversationId: params.conversationId,
+      agentDefinitionId: primary.id,
+      role: "primary",
+      addedByUser: true,
+      position: 0,
+      isActive: true,
+    })
+    .onConflictDoUpdate({
+      target: [
+        conversationAgents.conversationId,
+        conversationAgents.agentDefinitionId,
+        conversationAgents.role,
+      ],
+      set: {
+        addedByUser: true,
+        position: 0,
+        isActive: true,
+      },
+    });
+
+  await db
+    .update(conversationAgents)
+    .set({ isActive: false })
+    .where(
+      and(
+        eq(conversationAgents.conversationId, params.conversationId),
+        eq(conversationAgents.role, "supporting")
+      )
+    );
+
+  for (const [index, slug] of params.supportingAgentSlugs.entries()) {
+    const supporting = bySlug.get(slug);
+    if (!supporting) {
+      continue;
+    }
+
+    await db
+      .insert(conversationAgents)
+      .values({
+        conversationId: params.conversationId,
+        agentDefinitionId: supporting.id,
+        role: "supporting",
+        addedByUser: true,
+        position: index + 1,
+        isActive: true,
+      })
+      .onConflictDoUpdate({
+        target: [
+          conversationAgents.conversationId,
+          conversationAgents.agentDefinitionId,
+          conversationAgents.role,
+        ],
+        set: {
+          addedByUser: true,
+          position: index + 1,
+          isActive: true,
+        },
+      });
+  }
+
+  if (activeSupportingIds.length > 0) {
+    await db
+      .update(conversationAgents)
+      .set({ isActive: true })
+      .where(
+        and(
+          eq(conversationAgents.conversationId, params.conversationId),
+          eq(conversationAgents.role, "supporting"),
+          inArray(conversationAgents.agentDefinitionId, activeSupportingIds)
+        )
+      );
+  }
+
+  return {
+    primary,
+    supporting: params.supportingAgentSlugs
+      .map(slug => bySlug.get(slug))
+      .filter(Boolean),
+  };
+}
+
+async function buildAssistantReply(params: {
+  userMessage: string;
+  agentId: string;
+  availableSupportingAgentIds: string[];
+  userId: number;
+  conversationId: number;
+}) {
+  const consultationPlan = resolveConsultationPlan({
+    primaryAgentSlug: params.agentId,
+    availableSupportingAgentSlugs: params.availableSupportingAgentIds,
+    userMessage: params.userMessage,
+  });
+
+  const orchestrationPlan = await planConversationTurn({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    primaryAgentSlug: params.agentId,
+    supportingAgentSlugs: consultationPlan.consultedAgentSlugs,
+    latestUserMessage: params.userMessage,
+  });
+
+  const primaryDefinition = await getAgentDefinitionBySlug(params.agentId);
+  const primaryPrompt = primaryDefinition
+    ? await getActiveSystemPrompt(primaryDefinition.id)
+    : null;
+  const supportingDefinitions = await Promise.all(
+    consultationPlan.consultedAgentSlugs.map(slug =>
+      getAgentDefinitionBySlug(slug)
+    )
+  );
+
+  const accessibleFiles = orchestrationPlan.primaryContext.accessibleFiles;
+  const supportingNames = supportingDefinitions
+    .filter(Boolean)
+    .map(agent => agent!.name);
+
+  const accessibleSummary =
+    accessibleFiles.length > 0
+      ? accessibleFiles
+          .slice(0, 4)
+          .map(file => `${file.filename} (${file.category})`)
+          .join(", ")
+      : "No compatible vault files are linked yet for this conversation.";
+
+  const recentSummary =
+    orchestrationPlan.primaryContext.recentMessages.length > 0
+      ? orchestrationPlan.primaryContext.recentMessages
+          .slice(-3)
+          .map(message => `${message.role}: ${message.content}`)
+          .join(" | ")
+      : "No prior message history.";
+
+  const sections = [
+    `Primary agent: ${primaryDefinition?.name ?? params.agentId}.`,
+    supportingNames.length > 0
+      ? `Supporting agents consulted: ${supportingNames.join(", ")}.`
+      : "No supporting agents were consulted in this turn.",
+    `Conversation mode: ${orchestrationPlan.orchestrationMode}.`,
+    `User request: ${params.userMessage}`,
+    `Recent conversation context: ${recentSummary}`,
+    `Accessible vault context: ${accessibleSummary}`,
+    orchestrationPlan.primaryContext.resolvedAgentProfile.customContext
+      ? `User-specific agent context: ${orchestrationPlan.primaryContext.resolvedAgentProfile.customContext}`
+      : "User-specific agent context: none configured yet.",
+    orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes
+      ? `Training notes: ${orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes}`
+      : "Training notes: none configured yet.",
+    supportingNames.length > 0
+      ? "Specialist consultation is active for this turn. If a model call fails, this preview becomes the fallback instead of breaking the chat."
+      : "The primary agent answers directly on the fast path. If the model call fails, this preview becomes the fallback instead of breaking the chat.",
+  ];
+
+  const previewContent = sections.join("\n\n");
+  const gateway = new ModelGatewayService();
+  const supportingRuns = await Promise.all(
+    orchestrationPlan.supportingContexts.map(async ({ agentSlug, context }) => {
+      const definition =
+        supportingDefinitions.find(agent => agent?.slug === agentSlug) ?? null;
+      const prompt = definition
+        ? await getActiveSystemPrompt(definition.id)
+        : null;
+      const supportingRecentSummary =
+        context.recentMessages.length > 0
+          ? context.recentMessages
+              .slice(-3)
+              .map(message => `${message.role}: ${message.content}`)
+              .join(" | ")
+          : "No prior message history.";
+      const supportingAccessibleSummary =
+        context.accessibleFiles.length > 0
+          ? context.accessibleFiles
+              .slice(0, 4)
+              .map(file => `${file.filename} (${file.category})`)
+              .join(", ")
+          : "No compatible vault files are linked yet for this conversation.";
+
+      try {
+        const generation = await gateway.generateText({
+          providerSlug: "openai",
+          systemPrompt: buildSupportingSystemPrompt({
+            agentName: definition?.name ?? agentSlug,
+            basePrompt:
+              prompt?.templateText ??
+              `You are ${definition?.name ?? agentSlug}. Provide concise specialist support to the primary agent.`,
+            responseStyle: context.resolvedAgentProfile.responseStyle,
+          }),
+          messages: [
+            {
+              role: "user",
+              content: [
+                `User request: ${params.userMessage}`,
+                `Recent conversation context: ${supportingRecentSummary}`,
+                `Accessible vault context: ${supportingAccessibleSummary}`,
+                context.resolvedAgentProfile.customContext
+                  ? `User-specific instructions: ${context.resolvedAgentProfile.customContext}`
+                  : "User-specific instructions: none configured yet.",
+                context.resolvedAgentProfile.trainingNotes
+                  ? `Training notes: ${context.resolvedAgentProfile.trainingNotes}`
+                  : "Training notes: none configured yet.",
+                "Return a short specialist consultation for the primary agent. Mention uncertainty instead of inventing facts.",
+              ].join("\n\n"),
+            },
+          ],
+        });
+
+        return {
+          agentSlug,
+          agentDefinitionId: definition?.id ?? null,
+          agentName: definition?.name ?? agentSlug,
+          content: generation.text,
+          status: "completed" as const,
+          providerSlug: generation.providerSlug,
+          modelName: generation.modelName,
+          inputTokens: generation.inputTokens,
+          outputTokens: generation.outputTokens,
+          errorMessage: null,
+        };
+      } catch (error) {
+        logServerError("chat.supporting-agent.fallback", error, {
+          conversationId: params.conversationId,
+          agentSlug,
+        });
+
+        return {
+          agentSlug,
+          agentDefinitionId: definition?.id ?? null,
+          agentName: definition?.name ?? agentSlug,
+          content: `Supporting consultation planned for ${definition?.name ?? agentSlug}, but the model call failed and the run fell back to preview mode.`,
+          status: "failed" as const,
+          providerSlug: "openai",
+          modelName: "fallback-preview",
+          inputTokens: undefined,
+          outputTokens: undefined,
+          errorMessage:
+            error instanceof Error ? error.message : "Supporting model call failed.",
+        };
+      }
+    })
+  );
+
+  const supportingSummary =
+    supportingRuns.length > 0
+      ? supportingRuns
+          .map(
+            run =>
+              `${run.agentName}: ${run.content}${run.status === "failed" ? " [fallback]" : ""}`
+          )
+          .join("\n\n")
+      : "No supporting specialists consulted in this turn.";
+
+  const modelMessages = [
+    {
+      role: "user" as const,
+      content: [
+        `User request: ${params.userMessage}`,
+        `Recent conversation context: ${recentSummary}`,
+        `Accessible vault context: ${accessibleSummary}`,
+        orchestrationPlan.primaryContext.resolvedAgentProfile.customContext
+          ? `User-specific instructions: ${orchestrationPlan.primaryContext.resolvedAgentProfile.customContext}`
+          : "User-specific instructions: none configured yet.",
+        orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes
+          ? `Training notes: ${orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes}`
+          : "Training notes: none configured yet.",
+        `Supporting specialist notes:\n${supportingSummary}`,
+        "Produce a helpful user-facing answer. If context is missing, say what is missing without inventing facts.",
+      ].join("\n\n"),
+    },
+  ];
+
+  try {
+    const generation = await gateway.generateText({
+      providerSlug: "openai",
+      systemPrompt: buildPrimarySystemPrompt({
+        agentName: primaryDefinition?.name ?? params.agentId,
+        basePrompt:
+          primaryPrompt?.templateText ??
+          `You are ${primaryDefinition?.name ?? params.agentId}. Answer helpfully and clearly.`,
+        responseStyle:
+          orchestrationPlan.primaryContext.resolvedAgentProfile.responseStyle,
+        canConsultSpecialists: consultationPlan.consultedAgentSlugs.length > 0,
+      }),
+      messages: modelMessages,
+    });
+
+    return {
+      content: generation.text,
+      relatedVaultFiles: accessibleFiles.map(file => file.filename),
+      orchestrationMode: orchestrationPlan.orchestrationMode,
+      consultedAgentSlugs: consultationPlan.consultedAgentSlugs,
+      supportingAgentNames: supportingNames,
+      supportingRuns,
+      note:
+        accessibleFiles.length === 0 &&
+        orchestrationPlan.primaryContext.resolvedAgentProfile.allowVaultContext
+          ? "Podes subir estudios o notas al vault para personalizar mejor la respuesta."
+          : null,
+      primaryRun: {
+        providerSlug: generation.providerSlug,
+        modelName: generation.modelName,
+        inputTokens: generation.inputTokens,
+        outputTokens: generation.outputTokens,
+        errorMessage: null,
+        usedFallback: false,
+      },
+      responseMode: "model" as const,
+    };
+  } catch (error) {
+    logServerError("chat.model-gateway.fallback", error, {
+      conversationId: params.conversationId,
+      agentId: params.agentId,
+    });
+  }
+
+  const gracefulFallback = buildContextAwareFallbackReply({
+    userMessage: params.userMessage,
+    agentName: primaryDefinition?.name ?? params.agentId,
+    allowedCategories:
+      orchestrationPlan.primaryContext.resolvedAgentProfile.allowedVaultCategories,
+    accessibleFileCount: accessibleFiles.length,
+  });
+
+  return {
+    content: gracefulFallback.content,
+    relatedVaultFiles: accessibleFiles.map(file => file.filename),
+    orchestrationMode: orchestrationPlan.orchestrationMode,
+    consultedAgentSlugs: consultationPlan.consultedAgentSlugs,
+    supportingAgentNames: supportingNames,
+    supportingRuns,
+    note: gracefulFallback.note,
+    primaryRun: {
+      providerSlug: "openai",
+      modelName: "fallback-preview",
+      inputTokens: undefined,
+      outputTokens: undefined,
+      errorMessage: previewContent,
+      usedFallback: true,
+    },
+    responseMode: "limited" as const,
+  };
+}
+
+async function resolveModelReference(providerSlug: string, modelName: string) {
+  const db = getDb();
+  const providerRows = await db
+    .select({ id: modelProviders.id })
+    .from(modelProviders)
+    .where(eq(modelProviders.slug, providerSlug))
+    .limit(1);
+
+  const providerId = providerRows[0]?.id ?? null;
+  if (!providerId) {
+    return {
+      providerId: null,
+      modelEndpointId: null,
+    };
+  }
+
+  const endpointRows = await db
+    .select({ id: modelEndpoints.id })
+    .from(modelEndpoints)
+    .where(
+      and(
+        eq(modelEndpoints.providerId, providerId),
+        eq(modelEndpoints.modelName, modelName)
+      )
+    )
+    .limit(1);
+
+  if (!endpointRows[0]) {
+    const fallbackEndpointRows = await db
+      .select({ id: modelEndpoints.id })
+      .from(modelEndpoints)
+      .where(eq(modelEndpoints.providerId, providerId))
+      .limit(1);
+
+    return {
+      providerId,
+      modelEndpointId: fallbackEndpointRows[0]?.id ?? null,
+    };
+  }
+
+  return {
+    providerId,
+    modelEndpointId: endpointRows[0]?.id ?? null,
+  };
+}
+
 export const chatRouter = createRouter({
   listConversations: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
@@ -136,6 +512,28 @@ export const chatRouter = createRouter({
         .where(eq(conversations.userId, ctx.user.id))
         .orderBy(desc(conversations.updatedAt));
 
+      const participants =
+        rows.length > 0
+          ? await db
+              .select({
+                conversationId: conversationAgents.conversationId,
+                role: conversationAgents.role,
+                isActive: conversationAgents.isActive,
+                agentSlug: agentDefinitions.slug,
+              })
+              .from(conversationAgents)
+              .innerJoin(
+                agentDefinitions,
+                eq(conversationAgents.agentDefinitionId, agentDefinitions.id)
+              )
+              .where(
+                inArray(
+                  conversationAgents.conversationId,
+                  rows.map(row => row.id)
+                )
+              )
+          : [];
+
       logServerDebug("chat.listConversations", {
         userId: ctx.user.id,
         count: rows.length,
@@ -143,7 +541,14 @@ export const chatRouter = createRouter({
 
       return rows.map(row => ({
         ...row,
-        calledAgentIds: [] as string[],
+        calledAgentIds: participants
+          .filter(
+            participant =>
+              participant.conversationId === row.id &&
+              participant.role === "supporting" &&
+              participant.isActive
+          )
+          .map(participant => participant.agentSlug),
       }));
     } catch (error) {
       logServerError("chat.listConversations.failed", error, {
@@ -168,13 +573,23 @@ export const chatRouter = createRouter({
         .where(eq(messages.conversationId, input.id))
         .orderBy(messages.createdAt);
 
+      const participants = await db
+        .select({
+          role: conversationAgents.role,
+          isActive: conversationAgents.isActive,
+          agentSlug: agentDefinitions.slug,
+        })
+        .from(conversationAgents)
+        .innerJoin(
+          agentDefinitions,
+          eq(conversationAgents.agentDefinitionId, agentDefinitions.id)
+        )
+        .where(eq(conversationAgents.conversationId, input.id));
+
       const parsedMessages = rows.map(message => ({
         ...message,
         metadata: parseMetadata(message.metadata),
       }));
-      const lastMessageWithAgents = [...parsedMessages]
-        .reverse()
-        .find(message => message.metadata?.calledAgents?.length);
 
       logServerDebug("chat.getConversation", {
         conversationId: input.id,
@@ -185,7 +600,11 @@ export const chatRouter = createRouter({
       return {
         conversation: {
           ...conversation,
-          calledAgentIds: lastMessageWithAgents?.metadata?.calledAgents ?? [],
+          calledAgentIds: participants
+            .filter(
+              participant => participant.role === "supporting" && participant.isActive
+            )
+            .map(participant => participant.agentSlug),
         },
         messages: parsedMessages,
       };
@@ -202,8 +621,15 @@ export const chatRouter = createRouter({
             userId: ctx.user.id,
             agentId: input.agentId,
             title: input.title || "New conversation",
+            orchestrationMode: "single_agent",
           })
           .returning({ id: conversations.id });
+
+        await syncConversationParticipants({
+          conversationId: result[0].id,
+          primaryAgentSlug: input.agentId,
+          supportingAgentSlugs: [],
+        });
 
         logServerDebug("chat.createConversation", {
           userId: ctx.user.id,
@@ -238,6 +664,12 @@ export const chatRouter = createRouter({
       );
 
       try {
+        const participants = await syncConversationParticipants({
+          conversationId: input.conversationId,
+          primaryAgentSlug: input.agentId,
+          supportingAgentSlugs: input.calledAgentIds,
+        });
+
         const userMetadata = {
           calledAgents:
             input.calledAgentIds.length > 0 ? input.calledAgentIds : undefined,
@@ -245,39 +677,140 @@ export const chatRouter = createRouter({
         const assistantReply = await buildAssistantReply({
           userMessage: input.content,
           agentId: input.agentId,
-          calledAgentIds: input.calledAgentIds,
+          availableSupportingAgentIds: input.calledAgentIds,
           userId: ctx.user.id,
+          conversationId: input.conversationId,
         });
-        await db.transaction(async tx => {
-          await tx.insert(messages).values({
-            conversationId: input.conversationId,
-            role: "user",
-            content: input.content,
-            agentId: input.agentId,
-            metadata: JSON.stringify(userMetadata),
-          });
+        const primaryModelReference = await resolveModelReference(
+          assistantReply.primaryRun.providerSlug,
+          assistantReply.primaryRun.modelName
+        );
+        const supportingModelReferences = await Promise.all(
+          assistantReply.supportingRuns.map(run =>
+            resolveModelReference(run.providerSlug, run.modelName)
+          )
+        );
 
-          await tx.insert(messages).values({
-            conversationId: input.conversationId,
-            role: "assistant",
-            content: assistantReply.content,
-            agentId: input.agentId,
-            metadata: JSON.stringify({
-              calledAgents:
-                input.calledAgentIds.length > 0
-                  ? input.calledAgentIds
-                  : undefined,
-              relatedVaultFiles: assistantReply.relatedVaultFiles,
-            }),
-          });
+        await db.transaction(async tx => {
+          const insertedUserMessage = await tx
+            .insert(messages)
+            .values({
+              conversationId: input.conversationId,
+              role: "user",
+              kind: "user",
+              content: input.content,
+              agentId: input.agentId,
+              metadata: JSON.stringify(userMetadata),
+            })
+            .returning({ id: messages.id });
+
+          const insertedAssistantMessage = await tx
+            .insert(messages)
+            .values({
+              conversationId: input.conversationId,
+              role: "assistant",
+              kind: "assistant",
+              content: assistantReply.content,
+              agentId: input.agentId,
+              metadata: JSON.stringify({
+                calledAgents:
+                  assistantReply.consultedAgentSlugs.length > 0
+                    ? assistantReply.consultedAgentSlugs
+                    : undefined,
+                relatedVaultFiles: assistantReply.relatedVaultFiles,
+                orchestrationMode: assistantReply.orchestrationMode,
+                note:
+                  assistantReply.note ??
+                  (assistantReply.responseMode === "limited"
+                    ? "OpenAI no respondio correctamente y esta respuesta salio en modo fallback."
+                    : "OpenAI respondio en vivo."),
+                responseMode: assistantReply.responseMode,
+                consultedAgentNames:
+                  assistantReply.supportingAgentNames.length > 0
+                    ? assistantReply.supportingAgentNames
+                    : undefined,
+                providerSlug: assistantReply.primaryRun.providerSlug,
+                modelName: assistantReply.primaryRun.modelName,
+                inputTokens: assistantReply.primaryRun.inputTokens,
+                outputTokens: assistantReply.primaryRun.outputTokens,
+              }),
+            })
+            .returning({ id: messages.id });
+
+          const primaryRun = await tx
+            .insert(agentRuns)
+            .values({
+              conversationId: input.conversationId,
+              messageId: insertedAssistantMessage[0].id,
+              agentDefinitionId: participants.primary.id,
+              runType: "primary_reply",
+              providerId: primaryModelReference.providerId,
+              modelEndpointId: primaryModelReference.modelEndpointId,
+              status: assistantReply.primaryRun.usedFallback ? "failed" : "completed",
+              resolvedUserContext: input.content,
+              outputText: assistantReply.content,
+              inputTokens: assistantReply.primaryRun.inputTokens,
+              outputTokens: assistantReply.primaryRun.outputTokens,
+              errorMessage: assistantReply.primaryRun.errorMessage,
+              completedAt: new Date(),
+            })
+            .returning({ id: agentRuns.id });
+
+          for (const [index, supportingRun] of assistantReply.supportingRuns.entries()) {
+            if (!supportingRun?.agentDefinitionId) {
+              continue;
+            }
+
+            await tx.insert(agentRuns).values({
+              conversationId: input.conversationId,
+              messageId: insertedUserMessage[0].id,
+              agentDefinitionId: supportingRun.agentDefinitionId,
+              runType: "supporting_consult",
+              providerId: supportingModelReferences[index]?.providerId ?? null,
+              modelEndpointId:
+                supportingModelReferences[index]?.modelEndpointId ?? null,
+              status: supportingRun?.status ?? "failed",
+              resolvedUserContext: input.content,
+              outputText:
+                supportingRun?.content ??
+                `Supporting consultation planned for ${supportingRun?.agentName ?? "specialist"}.`,
+              inputTokens: supportingRun?.inputTokens,
+              outputTokens: supportingRun?.outputTokens,
+              errorMessage:
+                supportingRun?.errorMessage ??
+                "Supporting run result was not available.",
+              completedAt: new Date(),
+            });
+          }
+
+          for (const filename of assistantReply.relatedVaultFiles) {
+            await tx.insert(messageContextBlocks).values({
+              conversationId: input.conversationId,
+              messageId: insertedAssistantMessage[0].id,
+              agentRunId: primaryRun[0].id,
+              sourceType: "vault_file",
+              sourceId: filename,
+              title: filename,
+              content: `Vault file available to the run: ${filename}`,
+              metadata: {
+                relation: "accessible_vault_file",
+              },
+            });
+          }
 
           await tx
             .update(conversations)
             .set({
+              agentId: input.agentId,
               title:
                 conversation.title === "New conversation" || !conversation.title
                   ? buildConversationTitle(input.content)
                   : conversation.title,
+              orchestrationMode: assistantReply.orchestrationMode as
+                | "single_agent"
+                | "primary_plus_supporting"
+                | "review_loop",
+              lastAgentRunAt: new Date(),
               updatedAt: new Date(),
             })
             .where(eq(conversations.id, input.conversationId));
@@ -287,6 +820,7 @@ export const chatRouter = createRouter({
           userId: ctx.user.id,
           conversationId: input.conversationId,
           agentId: input.agentId,
+          supportingAgentCount: input.calledAgentIds.length,
         });
 
         return { success: true };
@@ -308,6 +842,13 @@ export const chatRouter = createRouter({
 
       await db.transaction(async tx => {
         await tx.delete(messages).where(eq(messages.conversationId, input.id));
+        await tx
+          .delete(conversationAgents)
+          .where(eq(conversationAgents.conversationId, input.id));
+        await tx
+          .delete(messageContextBlocks)
+          .where(eq(messageContextBlocks.conversationId, input.id));
+        await tx.delete(agentRuns).where(eq(agentRuns.conversationId, input.id));
         await tx.delete(conversations).where(eq(conversations.id, input.id));
       });
       logServerDebug("chat.deleteConversation", {

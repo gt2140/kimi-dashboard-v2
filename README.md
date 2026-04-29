@@ -39,6 +39,10 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your_supabase_publishable_anon_key
 DATABASE_URL=postgresql://postgres:YOUR_DB_PASSWORD@aws-0-region.pooler.supabase.com:6543/postgres?sslmode=require
 OWNER_UNION_ID=supabase:YOUR_SUPABASE_AUTH_USER_ID
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+DEEPSEEK_API_KEY=
+KIMI_API_KEY=
 ```
 
 Notes:
@@ -47,6 +51,7 @@ Notes:
 - Prefer the current Supabase pooled Postgres connection string for local development if the direct `db.<project>.supabase.co` host is unreliable.
 - `DATABASE_URL` must be a real connection string, not a placeholder.
 - `OWNER_UNION_ID` is optional unless you want your own account promoted to `admin`.
+- Model provider API keys are optional until we connect a real model gateway.
 
 ## Supabase setup
 

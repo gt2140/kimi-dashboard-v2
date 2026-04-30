@@ -111,6 +111,9 @@ export default function Chat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeAgent = AGENTS.find((agent) => agent.id === activeAgentId) || AGENTS[0];
+  const composerPlaceholder = isMobile
+    ? `Ask ${activeAgent.name.toLowerCase()} about your health data...`
+    : `Ask ${activeAgent.name.toLowerCase()} anything about ${activeAgent.allowedVaultCategories.join(", ")}. Use @agent-name to force a specialist consult.`;
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -439,7 +442,7 @@ export default function Chat() {
         )}
       </div>
 
-      <div className="sticky bottom-0 z-10 border-t border-border/60 bg-background/95 px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur sm:px-6 sm:py-4">
+      <div className="sticky bottom-0 z-10 border-t border-border/60 bg-background/95 px-4 py-2.5 pb-[calc(env(safe-area-inset-bottom)+0.6rem)] backdrop-blur sm:px-6 sm:py-4">
         <div className="mx-auto max-w-2xl">
           {calledAgentIds.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1">
@@ -462,19 +465,19 @@ export default function Chat() {
               })}
             </div>
           )}
-          <div className="flex items-end gap-2 rounded-lg border border-border/60 bg-card/30 p-2.5 transition-colors focus-within:border-border focus-within:bg-card/60">
+          <div className="flex items-end gap-2 rounded-lg border border-border/60 bg-card/30 p-2 transition-colors focus-within:border-border focus-within:bg-card/60 sm:p-2.5">
             <Textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`Ask ${activeAgent.name.toLowerCase()} anything about ${activeAgent.allowedVaultCategories.join(", ")}. Use @agent-name to force a specialist consult.`}
-              className="min-h-[36px] resize-none border-0 bg-transparent p-0 text-[13px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0 focus-visible:ring-offset-0"
+              placeholder={composerPlaceholder}
+              className="min-h-[28px] max-h-[84px] resize-none border-0 bg-transparent p-0 text-[12px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0 focus-visible:ring-offset-0 sm:min-h-[36px] sm:max-h-[120px] sm:text-[13px]"
               rows={1}
             />
             <Button
               size="icon"
-              className="h-7 w-7 shrink-0 rounded-md"
+              className="h-9 w-9 shrink-0 rounded-md sm:h-7 sm:w-7"
               disabled={!input.trim() || isSending}
               onClick={() => {
                 void handleSend();
@@ -494,7 +497,7 @@ export default function Chat() {
             </div>
           )}
           {activeConversationId && (
-            <p className="mt-2 text-[10px] text-muted-foreground/25">
+            <p className="mt-2 hidden text-[10px] text-muted-foreground/25 sm:block">
               Conversation #{activeConversationId} is saved automatically. Helpers stay available, but only answer when tagged or when the lead agent consults them.
             </p>
           )}

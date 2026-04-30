@@ -9,6 +9,7 @@ import {
   type InsertAgentDefinition,
 } from "../../db/schema.js";
 import { getDb } from "./connection.js";
+import { logServerDebug } from "../lib/debug.js";
 
 const PROVIDER_SEEDS = [
   {
@@ -114,15 +115,32 @@ function buildAgentSeed(agent: (typeof AGENTS)[number]): InsertAgentDefinition {
 }
 
 let bootstrapPromise: Promise<void> | null = null;
+let catalogReady = false;
 
 export async function ensureConversationalCatalogSeeded() {
+  if (catalogReady) {
+    return;
+  }
+
   if (!bootstrapPromise) {
-    bootstrapPromise = seedConversationalCatalog().catch(error => {
+    bootstrapPromise = ensureConversationalCatalogReady().catch(error => {
       bootstrapPromise = null;
       throw mapConversationalSchemaError(error);
     });
   }
   return bootstrapPromise;
+}
+
+export function isConversationalCatalogReadyFromCounts(counts: {
+  providerCount: number;
+  agentCount: number;
+  promptCount: number;
+}) {
+  return (
+    counts.providerCount >= PROVIDER_SEEDS.length &&
+    counts.agentCount >= AGENTS.length &&
+    counts.promptCount >= AGENTS.length
+  );
 }
 
 function mapConversationalSchemaError(error: unknown) {
@@ -261,6 +279,40 @@ async function seedConversationalCatalog() {
         },
       });
   }
+}
+
+async function ensureConversationalCatalogReady() {
+  const readiness = await readConversationalCatalogCounts();
+
+  if (isConversationalCatalogReadyFromCounts(readiness)) {
+    catalogReady = true;
+    logServerDebug("agents.catalog.ready", readiness);
+    return;
+  }
+
+  logServerDebug("agents.catalog.seed.start", readiness);
+  await seedConversationalCatalog();
+  catalogReady = true;
+  logServerDebug("agents.catalog.seed.completed", {
+    providerCount: PROVIDER_SEEDS.length,
+    agentCount: AGENTS.length,
+    promptCount: AGENTS.length,
+  });
+}
+
+async function readConversationalCatalogCounts() {
+  const db = getDb();
+  const [providers, agents, prompts] = await Promise.all([
+    db.select({ id: modelProviders.id }).from(modelProviders).limit(PROVIDER_SEEDS.length),
+    db.select({ id: agentDefinitions.id }).from(agentDefinitions).limit(AGENTS.length),
+    db.select({ id: promptTemplates.id }).from(promptTemplates).limit(AGENTS.length),
+  ]);
+
+  return {
+    providerCount: providers.length,
+    agentCount: agents.length,
+    promptCount: prompts.length,
+  };
 }
 
 export async function listAgentDefinitions() {

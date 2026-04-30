@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   encodeChatStreamEvent,
+  isRecoverableChatStreamStatus,
   parseChatStreamChunk,
 } from "./chat-stream";
 
@@ -48,5 +49,11 @@ describe("chat-stream", () => {
       delta: "Your panel looks solid.",
     });
     expect(secondPass.remainder).toBe("");
+  });
+
+  it("marks missing or unsupported streaming endpoints as recoverable", () => {
+    expect(isRecoverableChatStreamStatus(404)).toBe(true);
+    expect(isRecoverableChatStreamStatus(405)).toBe(true);
+    expect(isRecoverableChatStreamStatus(401)).toBe(false);
   });
 });

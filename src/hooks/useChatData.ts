@@ -5,6 +5,7 @@ import { useChatStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug, logClientError } from "@/lib/debug";
 import {
+  isRecoverableChatStreamStatus,
   parseChatStreamChunk,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
@@ -171,8 +172,10 @@ export function useChatData() {
     return nextId;
   }
 
-  async function sendMessage(content: string) {
-    const conversationId = await ensureConversationId(content);
+  async function sendMessageToConversation(
+    conversationId: number,
+    content: string
+  ) {
     const result = await runWithAuthSyncRetry("send-message", () =>
       sendMessageMutation.mutateAsync({
         conversationId,
@@ -186,6 +189,11 @@ export function useChatData() {
       utils.chat.getConversation.invalidate({ id: conversationId }),
     ]);
     return result;
+  }
+
+  async function sendMessage(content: string) {
+    const conversationId = await ensureConversationId(content);
+    return sendMessageToConversation(conversationId, content);
   }
 
   async function streamMessage(
@@ -239,6 +247,45 @@ export function useChatData() {
       }
 
       if (!response.ok) {
+        if (isRecoverableChatStreamStatus(response.status)) {
+          const fallbackResult = await sendMessageToConversation(
+            conversationId,
+            content
+          );
+          const completedMessage = fallbackResult.assistantMessage;
+
+          if (completedMessage) {
+            handlers.onMessageComplete?.({
+              type: "message-complete",
+              message: {
+                id: String(completedMessage.id),
+                role: "assistant",
+                content: completedMessage.content,
+                agentId: completedMessage.agentId ?? activeAgentId,
+                createdAt:
+                  completedMessage.createdAt instanceof Date
+                    ? completedMessage.createdAt.toISOString()
+                    : new Date(completedMessage.createdAt).toISOString(),
+                metadata: completedMessage.metadata,
+              },
+            });
+          }
+
+          return completedMessage
+            ? {
+                id: String(completedMessage.id),
+                role: "assistant" as const,
+                content: completedMessage.content,
+                agentId: completedMessage.agentId ?? activeAgentId,
+                createdAt:
+                  completedMessage.createdAt instanceof Date
+                    ? completedMessage.createdAt.toISOString()
+                    : new Date(completedMessage.createdAt).toISOString(),
+                metadata: completedMessage.metadata,
+              }
+            : null;
+        }
+
         throw new Error(`Streaming request failed with HTTP ${response.status}.`);
       }
 

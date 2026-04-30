@@ -50,6 +50,10 @@ export function encodeChatStreamEvent(event: ChatStreamEvent) {
   return `${JSON.stringify(event)}\n`;
 }
 
+export function isRecoverableChatStreamStatus(status: number) {
+  return status === 404 || status === 405;
+}
+
 export function parseChatStreamChunk(buffer: string) {
   const lines = buffer.split("\n");
   const remainder = lines.pop() ?? "";

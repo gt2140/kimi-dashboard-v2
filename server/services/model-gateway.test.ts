@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  clearProviderOperationalBlock,
   extractOpenAIResponseText,
   extractOpenAIStreamEvents,
+  getProviderOperationalBlock,
   ModelGatewayService,
+  rememberProviderOperationalBlock,
 } from "./model-gateway.js";
 
 describe("extractOpenAIResponseText", () => {
@@ -92,5 +95,21 @@ describe("extractOpenAIResponseText", () => {
       },
     ]);
     expect(parsed.remainder).toBe("");
+  });
+
+  it("remembers provider operational blocks until they expire", () => {
+    clearProviderOperationalBlock("openai");
+    rememberProviderOperationalBlock(
+      "openai",
+      "OpenAI no pudo responder porque la cuota del proveedor esta agotada.",
+      1_000
+    );
+
+    expect(getProviderOperationalBlock("openai", 1_500)).toBe(
+      "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
+    );
+    expect(getProviderOperationalBlock("openai", 1_000 + 5 * 60_000 + 1)).toBe(
+      null
+    );
   });
 });

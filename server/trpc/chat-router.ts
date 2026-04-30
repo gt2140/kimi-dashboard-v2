@@ -25,6 +25,10 @@ import { ModelGatewayService } from "../services/model-gateway.js";
 import { planConversationTurn } from "../services/conversation-orchestrator.js";
 import { buildContextAwareFallbackReply } from "../services/fallback-reply.js";
 import {
+  buildOperationalFallbackNote,
+  extractOperationalFailureReason,
+} from "../services/chat-fallback.js";
+import {
   buildPrimarySystemPrompt,
   buildSupportingSystemPrompt,
 } from "../services/prompt-composer.js";
@@ -317,6 +321,7 @@ async function buildAssistantReply(params: {
     executionNotes?: string[];
     consultationMode?: "none" | "explicit" | "auto";
     consultationReason?: string | null;
+    operationalFailureReason?: string | null;
   }) => {
     const gracefulFallback = buildContextAwareFallbackReply({
       userMessage: params.userMessage,
@@ -354,7 +359,11 @@ async function buildAssistantReply(params: {
         ...(input.executionNotes ?? []),
       ],
       supportingRuns: [],
-      note: gracefulFallback.note ?? input.note,
+      operationalFailureReason: input.operationalFailureReason ?? null,
+      note: buildOperationalFallbackNote({
+        operationalFailureReason: input.operationalFailureReason ?? null,
+        fallbackReplyNote: gracefulFallback.note ?? input.note,
+      }),
       primaryRun: {
         providerSlug: defaultFallbackExecutionTarget.providerSlug,
         modelName: defaultFallbackExecutionTarget.modelName,
@@ -374,7 +383,7 @@ async function buildAssistantReply(params: {
         ],
         inputTokens: undefined,
         outputTokens: undefined,
-        errorMessage: input.note,
+        errorMessage: input.operationalFailureReason ?? input.note,
         usedFallback: true,
       },
       responseMode: "limited" as const,
@@ -723,6 +732,7 @@ async function buildAssistantReply(params: {
       missingContext,
       executionNotes: primaryExecutionTarget.executionNotes,
       supportingRuns,
+      operationalFailureReason: null,
       note:
         accessibleFiles.length === 0 &&
         primaryContext.resolvedAgentProfile.allowVaultContext
@@ -748,50 +758,58 @@ async function buildAssistantReply(params: {
       conversationId: params.conversationId,
       agentId: params.agentId,
     });
-  }
 
-  const gracefulFallback = buildContextAwareFallbackReply({
-    userMessage: params.userMessage,
-    agentName: primaryDefinition?.name ?? params.agentId,
-    allowedCategories:
-      orchestrationPlan.primaryContext.resolvedAgentProfile.allowedVaultCategories,
-    accessibleFileCount: accessibleFiles.length,
-  });
+    const operationalFailureReason = extractOperationalFailureReason(error);
 
-  if (params.streamPrimary) {
-    for (const chunk of splitMessageForReveal(gracefulFallback.content)) {
-      await params.onTextDelta?.(chunk);
+    const gracefulFallback = buildContextAwareFallbackReply({
+      userMessage: params.userMessage,
+      agentName: primaryDefinition?.name ?? params.agentId,
+      allowedCategories:
+        orchestrationPlan.primaryContext.resolvedAgentProfile.allowedVaultCategories,
+      accessibleFileCount: accessibleFiles.length,
+    });
+
+    if (params.streamPrimary) {
+      for (const chunk of splitMessageForReveal(gracefulFallback.content)) {
+        await params.onTextDelta?.(chunk);
+      }
     }
-  }
 
-  return {
-    content: gracefulFallback.content,
-    relatedVaultFiles: accessibleFiles.map(file => file.filename),
-    orchestrationMode: orchestrationPlan.orchestrationMode,
-    consultedAgentSlugs: consultationPlan.consultedAgentSlugs,
-    supportingAgentNames: supportingNames,
-    consultationMode: consultationPlan.mode,
-    consultationReason: consultationPlan.rationale,
-    contextSummary,
-    missingContext,
-    executionNotes: primaryExecutionTarget.executionNotes,
-    supportingRuns,
-    note: gracefulFallback.note,
-    primaryRun: {
-      providerSlug: primaryExecutionTarget.providerSlug,
-      modelName: "fallback-preview",
-      requestedProviderSlug: primaryExecutionTarget.requestedProviderSlug,
-      requestedModelName: primaryExecutionTarget.requestedModelName,
-      executionNotes: primaryExecutionTarget.executionNotes,
-      systemPrompt: primarySystemPrompt,
-      inputMessages: modelMessages,
-      inputTokens: undefined,
-      outputTokens: undefined,
-      errorMessage: previewContent,
-      usedFallback: true,
-    },
-    responseMode: "limited" as const,
-  };
+    return {
+      content: gracefulFallback.content,
+      relatedVaultFiles: accessibleFiles.map(file => file.filename),
+      orchestrationMode: orchestrationPlan.orchestrationMode,
+      consultedAgentSlugs: consultationPlan.consultedAgentSlugs,
+      supportingAgentNames: supportingNames,
+      consultationMode: consultationPlan.mode,
+      consultationReason: consultationPlan.rationale,
+      contextSummary,
+      missingContext,
+      executionNotes: operationalFailureReason
+        ? [...primaryExecutionTarget.executionNotes, operationalFailureReason]
+        : primaryExecutionTarget.executionNotes,
+      supportingRuns,
+      operationalFailureReason,
+      note: buildOperationalFallbackNote({
+        operationalFailureReason,
+        fallbackReplyNote: gracefulFallback.note,
+      }),
+      primaryRun: {
+        providerSlug: primaryExecutionTarget.providerSlug,
+        modelName: "fallback-preview",
+        requestedProviderSlug: primaryExecutionTarget.requestedProviderSlug,
+        requestedModelName: primaryExecutionTarget.requestedModelName,
+        executionNotes: primaryExecutionTarget.executionNotes,
+        systemPrompt: primarySystemPrompt,
+        inputMessages: modelMessages,
+        inputTokens: undefined,
+        outputTokens: undefined,
+        errorMessage: operationalFailureReason ?? previewContent,
+        usedFallback: true,
+      },
+      responseMode: "limited" as const,
+    };
+  }
 }
 
 async function resolveModelReference(providerSlug: string, modelName: string) {

@@ -3,6 +3,14 @@ import { env } from "../lib/env.js";
 export const LIVE_PROVIDER_SLUGS = ["openai"] as const;
 export type LiveProviderSlug = (typeof LIVE_PROVIDER_SLUGS)[number];
 const OPENAI_REQUEST_TIMEOUT_MS = 25_000;
+const PROVIDER_OPERATIONAL_BLOCK_MS = 5 * 60_000;
+const providerOperationalBlocks = new Map<
+  string,
+  {
+    message: string;
+    until: number;
+  }
+>();
 
 export type GenerateTextInput = {
   providerSlug: string;
@@ -51,6 +59,46 @@ type OpenAIStreamingEvent = {
     id?: string;
   };
 };
+
+function isQuotaExceededMessage(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("exceeded your current quota") ||
+    normalized.includes("billing details")
+  );
+}
+
+export function rememberProviderOperationalBlock(
+  providerSlug: string,
+  message: string,
+  now = Date.now()
+) {
+  providerOperationalBlocks.set(providerSlug, {
+    message,
+    until: now + PROVIDER_OPERATIONAL_BLOCK_MS,
+  });
+}
+
+export function getProviderOperationalBlock(
+  providerSlug: string,
+  now = Date.now()
+) {
+  const block = providerOperationalBlocks.get(providerSlug);
+  if (!block) {
+    return null;
+  }
+
+  if (block.until <= now) {
+    providerOperationalBlocks.delete(providerSlug);
+    return null;
+  }
+
+  return block.message;
+}
+
+export function clearProviderOperationalBlock(providerSlug: string) {
+  providerOperationalBlocks.delete(providerSlug);
+}
 
 export function extractOpenAIResponseText(payload: OpenAIResponsePayload) {
   if (payload.output_text?.trim()) {
@@ -169,6 +217,11 @@ export class ModelGatewayService {
       );
     }
 
+    const providerBlock = getProviderOperationalBlock("openai");
+    if (providerBlock) {
+      throw new Error(providerBlock);
+    }
+
     return this.generateWithOpenAI(input);
   }
 
@@ -183,6 +236,11 @@ export class ModelGatewayService {
       throw new Error(
         "OPENAI_API_KEY is missing. Add it to app/.env before using OpenAI generation."
       );
+    }
+
+    const providerBlock = getProviderOperationalBlock("openai");
+    if (providerBlock) {
+      throw new Error(providerBlock);
     }
 
     return this.streamWithOpenAI(input);
@@ -223,6 +281,12 @@ export class ModelGatewayService {
 
     if (!response.ok) {
       const body = await response.text();
+      if (isQuotaExceededMessage(body)) {
+        rememberProviderOperationalBlock(
+          "openai",
+          "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
+        );
+      }
       throw new Error(
         `OpenAI request failed (${response.status}): ${body.slice(0, 500)}`
       );
@@ -234,6 +298,8 @@ export class ModelGatewayService {
     if (!text.trim()) {
       throw new Error("OpenAI returned an empty output_text payload.");
     }
+
+    clearProviderOperationalBlock("openai");
 
     return {
       text,
@@ -280,6 +346,12 @@ export class ModelGatewayService {
 
     if (!response.ok) {
       const body = await response.text();
+      if (isQuotaExceededMessage(body)) {
+        rememberProviderOperationalBlock(
+          "openai",
+          "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
+        );
+      }
       throw new Error(
         `OpenAI streaming request failed (${response.status}): ${body.slice(0, 500)}`
       );
@@ -321,6 +393,12 @@ export class ModelGatewayService {
         }
 
         if (event.type === "error") {
+          if (event.error?.message && isQuotaExceededMessage(event.error.message)) {
+            rememberProviderOperationalBlock(
+              "openai",
+              "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
+            );
+          }
           throw new Error(
             event.error?.message || "OpenAI streaming response returned an error event."
           );
@@ -354,6 +432,12 @@ export class ModelGatewayService {
         }
 
         if (event.type === "error") {
+          if (event.error?.message && isQuotaExceededMessage(event.error.message)) {
+            rememberProviderOperationalBlock(
+              "openai",
+              "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
+            );
+          }
           throw new Error(
             event.error?.message || "OpenAI streaming response returned an error event."
           );
@@ -368,6 +452,8 @@ export class ModelGatewayService {
     if (!aggregatedText.trim()) {
       throw new Error("OpenAI streaming response completed without text output.");
     }
+
+    clearProviderOperationalBlock("openai");
 
     return {
       text: aggregatedText,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advanceRevealContent,
   buildPendingTurnStages,
   splitMessageForReveal,
 } from "./chat-experience";
@@ -45,5 +46,18 @@ describe("chat-experience", () => {
     expect(chunks.length).toBeGreaterThan(2);
     expect(chunks.join("")).toBe(content);
     expect(chunks.some(chunk => chunk.includes("What stands out"))).toBe(true);
+  });
+
+  it("reveals streamed content in natural reading steps", () => {
+    const target =
+      "Direct answer: ApoB matters most here. Next best step: repeat the panel in 8 weeks.";
+
+    const first = advanceRevealContent("", target);
+    const second = advanceRevealContent(first, target);
+
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.length).toBeLessThan(target.length);
+    expect(second.length).toBeGreaterThan(first.length);
+    expect(advanceRevealContent(target, target)).toBe(target);
   });
 });

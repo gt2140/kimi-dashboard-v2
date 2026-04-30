@@ -24,6 +24,8 @@ import { useChatStore } from "@/hooks/useStore";
 import { useChatData } from "@/hooks/useChatData";
 import { AGENTS } from "@/lib/data";
 import {
+  advanceRevealContent,
+  buildPendingTurnStages,
   type PendingTurnStage,
 } from "@/lib/chat-experience";
 import type { Message } from "@/types";
@@ -75,8 +77,9 @@ const SHORTCUTS: Record<string, string[]> = {
 
 type RevealingAssistantState = {
   message: Message;
-  fullContent: string;
+  targetContent: string;
   visibleContent: string;
+  isComplete: boolean;
 };
 
 export default function Chat() {
@@ -130,18 +133,32 @@ export default function Chat() {
   }, [input]);
 
   useEffect(() => {
-    if (!isSending || pendingStages.length <= 1) {
+    if (!revealingAssistant) {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
-      setActiveStageIndex((current) =>
-        current < pendingStages.length - 1 ? current + 1 : current,
-      );
-    }, 1100);
+    if (revealingAssistant.visibleContent === revealingAssistant.targetContent) {
+      return;
+    }
 
-    return () => window.clearInterval(intervalId);
-  }, [isSending, pendingStages]);
+    const timeoutId = window.setTimeout(() => {
+      setRevealingAssistant((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          visibleContent: advanceRevealContent(
+            current.visibleContent,
+            current.targetContent,
+          ),
+        };
+      });
+    }, 32);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [revealingAssistant]);
 
   useEffect(() => {
     if (!revealingAssistant) {
@@ -154,7 +171,8 @@ export default function Chat() {
 
     if (
       hasPersistedMessage &&
-      revealingAssistant.visibleContent === revealingAssistant.fullContent
+      revealingAssistant.isComplete &&
+      revealingAssistant.visibleContent === revealingAssistant.targetContent
     ) {
       setRevealingAssistant(null);
     }
@@ -188,9 +206,15 @@ export default function Chat() {
     }
 
     const content = input.trim();
-    setPendingStages([]);
+    const predictedStages = buildPendingTurnStages({
+      primaryAgentId: activeAgentId,
+      helperAgentIds: calledAgentIds,
+      userMessage: content,
+    });
+    setPendingStages(predictedStages);
     setActiveStageIndex(0);
     setPendingUserMessage(content);
+    setRevealingAssistant(null);
     setInput("");
 
     try {
@@ -209,12 +233,18 @@ export default function Chat() {
           });
         },
         onTextDelta: (event) => {
+          const draftStageIndex = predictedStages.findIndex(
+            (item) => item.id === "draft",
+          );
+          if (draftStageIndex >= 0) {
+            setActiveStageIndex((current) => Math.max(current, draftStageIndex));
+          }
+
           setRevealingAssistant((current) =>
             current
               ? {
                   ...current,
-                  fullContent: `${current.fullContent}${event.delta}`,
-                  visibleContent: `${current.visibleContent}${event.delta}`,
+                  targetContent: `${current.targetContent}${event.delta}`,
                 }
               : {
                   message: {
@@ -223,14 +253,15 @@ export default function Chat() {
                     content: "",
                     agentId: activeAgentId,
                     timestamp: new Date(),
-                },
-                  fullContent: event.delta,
-                  visibleContent: event.delta,
+                  },
+                  targetContent: event.delta,
+                  visibleContent: "",
+                  isComplete: false,
                 },
           );
         },
         onMessageComplete: (event) => {
-          setRevealingAssistant((_current) => {
+          setRevealingAssistant((current) => {
             const completedMessage: Message = {
               id: event.message.id,
               role: "assistant",
@@ -242,15 +273,16 @@ export default function Chat() {
 
             return {
               message: completedMessage,
-              fullContent: event.message.content,
-              visibleContent: event.message.content,
+              targetContent: event.message.content,
+              visibleContent: current?.visibleContent ?? "",
+              isComplete: true,
             };
           });
         },
       });
     } catch {
       setRevealingAssistant((current) =>
-        current?.visibleContent && current.visibleContent.length > 0
+        current?.targetContent && current.targetContent.length > 0
           ? current
           : null,
       );
@@ -259,7 +291,7 @@ export default function Chat() {
       setPendingStages([]);
       setActiveStageIndex(0);
     }
-  }, [activeAgentId, input, isSending, streamMessage]);
+  }, [activeAgentId, calledAgentIds, input, isSending, streamMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -378,7 +410,7 @@ export default function Chat() {
                 message={message}
                 isStreaming={
                   revealingAssistant?.message.id === message.id &&
-                  message.content !== revealingAssistant.fullContent
+                  message.content !== revealingAssistant.targetContent
                 }
               />
             ))}
@@ -393,7 +425,7 @@ export default function Chat() {
                 }}
               />
             )}
-            {isSending && (
+            {isSending && !revealingAssistant && (
               <ThinkingBubble
                 agentName={activeAgent.name}
                 stages={pendingStages}

@@ -221,4 +221,40 @@ export function splitMessageForReveal(content: string) {
   return chunks.length > 0 ? chunks : [source];
 }
 
+export function advanceRevealContent(visibleContent: string, targetContent: string) {
+  if (visibleContent.length >= targetContent.length) {
+    return targetContent;
+  }
+
+  const remaining = targetContent.slice(visibleContent.length);
+  const paragraphBreakIndex = remaining.indexOf("\n\n");
+
+  if (paragraphBreakIndex >= 0 && paragraphBreakIndex <= 24) {
+    return targetContent.slice(0, visibleContent.length + paragraphBreakIndex + 2);
+  }
+
+  const sentenceMatch = remaining.match(/^.{1,32}?[.!?:](?=\s|$)/s);
+  if (sentenceMatch) {
+    return targetContent.slice(
+      0,
+      visibleContent.length + sentenceMatch[0].length
+    );
+  }
+
+  const preferredSlice = remaining.slice(0, 24);
+  const wordBoundary = Math.max(
+    preferredSlice.lastIndexOf(" "),
+    preferredSlice.lastIndexOf("\n")
+  );
+
+  if (wordBoundary >= 10) {
+    return targetContent.slice(0, visibleContent.length + wordBoundary + 1);
+  }
+
+  return targetContent.slice(
+    0,
+    visibleContent.length + Math.min(12, remaining.length)
+  );
+}
+
 export type { PendingTurnStage };

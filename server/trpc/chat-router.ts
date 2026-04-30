@@ -50,9 +50,9 @@ type ChatTurnStreamHandlers = {
   streamPrimary?: boolean;
 };
 
-const CONTEXT_ASSEMBLY_TIMEOUT_MS = 8_000;
 const SUPPORTING_AGENT_TIMEOUT_MS = 15_000;
 const PRIMARY_AGENT_TIMEOUT_MS = 25_000;
+const TURN_SETUP_TIMEOUT_MS = 10_000;
 
 export const chatSendMessageInputSchema = z.object({
   conversationId: z.number(),
@@ -269,14 +269,14 @@ async function buildAssistantReply(params: {
 
   await emitStage("analyze");
 
-  const primaryDefinition = await getAgentDefinitionBySlug(params.agentId);
-  const primaryPrompt = primaryDefinition
-    ? await getActiveSystemPrompt(primaryDefinition.id)
-    : null;
-  const fallbackExecutionTarget = await resolveExecutionTarget({
-    providerId: null,
-    modelId: null,
-  });
+  const defaultFallbackExecutionTarget = {
+    requestedProviderSlug: null,
+    requestedModelName: null,
+    providerSlug: "openai",
+    modelName: "fallback-preview",
+    executionNotes: [] as string[],
+    usedFallback: true,
+  };
 
   const buildLimitedTurnReply = async (input: {
     note: string;
@@ -286,16 +286,14 @@ async function buildAssistantReply(params: {
   }) => {
     const gracefulFallback = buildContextAwareFallbackReply({
       userMessage: params.userMessage,
-      agentName: primaryDefinition?.name ?? params.agentId,
-      allowedCategories: primaryDefinition?.allowedVaultCategories ?? [],
+      agentName: "Generalist",
+      allowedCategories: [],
       accessibleFileCount: 0,
     });
     const primarySystemPrompt = buildPrimarySystemPrompt({
       agentSlug: params.agentId,
-      agentName: primaryDefinition?.name ?? params.agentId,
-      basePrompt:
-        primaryPrompt?.templateText ??
-        `You are ${primaryDefinition?.name ?? params.agentId}. Answer helpfully and clearly.`,
+      agentName: "Generalist",
+      basePrompt: "You are Generalist. Answer helpfully and clearly.",
       responseStyle: "detailed",
       canConsultSpecialists: consultationPlan.consultedAgentSlugs.length > 0,
     });
@@ -318,18 +316,19 @@ async function buildAssistantReply(params: {
         "Aura could not finish assembling the full turn context in time.",
       missingContext: ["Full turn context was not available in time."],
       executionNotes: [
-        ...fallbackExecutionTarget.executionNotes,
+        ...defaultFallbackExecutionTarget.executionNotes,
         ...(input.executionNotes ?? []),
       ],
       supportingRuns: [],
       note: gracefulFallback.note ?? input.note,
       primaryRun: {
-        providerSlug: fallbackExecutionTarget.providerSlug,
-        modelName: "fallback-preview",
-        requestedProviderSlug: fallbackExecutionTarget.requestedProviderSlug,
-        requestedModelName: fallbackExecutionTarget.requestedModelName,
+        providerSlug: defaultFallbackExecutionTarget.providerSlug,
+        modelName: defaultFallbackExecutionTarget.modelName,
+        requestedProviderSlug:
+          defaultFallbackExecutionTarget.requestedProviderSlug,
+        requestedModelName: defaultFallbackExecutionTarget.requestedModelName,
         executionNotes: [
-          ...fallbackExecutionTarget.executionNotes,
+          ...defaultFallbackExecutionTarget.executionNotes,
           ...(input.executionNotes ?? []),
         ],
         systemPrompt: primarySystemPrompt,
@@ -348,28 +347,85 @@ async function buildAssistantReply(params: {
     };
   };
 
-  let orchestrationPlan;
+  let primaryDefinition:
+    | Awaited<ReturnType<typeof getAgentDefinitionBySlug>>
+    | null = null;
+  let primaryPrompt:
+    | Awaited<ReturnType<typeof getActiveSystemPrompt>>
+    | null = null;
+  let orchestrationPlan: Awaited<ReturnType<typeof planConversationTurn>>;
+  let primaryExecutionTarget = defaultFallbackExecutionTarget as Awaited<
+    ReturnType<typeof resolveExecutionTarget>
+  >;
+  let supportingDefinitions: Array<
+    Awaited<ReturnType<typeof getAgentDefinitionBySlug>>
+  > = [];
+
+  type TurnSetupResult = {
+    primaryDefinition: Awaited<ReturnType<typeof getAgentDefinitionBySlug>>;
+    primaryPrompt: Awaited<ReturnType<typeof getActiveSystemPrompt>> | null;
+    orchestrationPlan: Awaited<ReturnType<typeof planConversationTurn>>;
+    primaryExecutionTarget: Awaited<ReturnType<typeof resolveExecutionTarget>>;
+    supportingDefinitions: Array<
+      Awaited<ReturnType<typeof getAgentDefinitionBySlug>>
+    >;
+  };
 
   try {
-    orchestrationPlan = await withTimeout(
-      planConversationTurn({
-        userId: params.userId,
-        conversationId: params.conversationId,
-        primaryAgentSlug: params.agentId,
-        supportingAgentSlugs: consultationPlan.consultedAgentSlugs,
-        latestUserMessage: params.userMessage,
-      }),
+    ({
+      primaryDefinition,
+      primaryPrompt,
+      orchestrationPlan,
+      primaryExecutionTarget,
+      supportingDefinitions,
+    } = await withTimeout(
+      (async (): Promise<TurnSetupResult> => {
+        const loadedPrimaryDefinition = await getAgentDefinitionBySlug(
+          params.agentId
+        );
+        const loadedPrimaryPrompt = loadedPrimaryDefinition
+          ? await getActiveSystemPrompt(loadedPrimaryDefinition.id)
+          : null;
+        const loadedOrchestrationPlan = await planConversationTurn({
+          userId: params.userId,
+          conversationId: params.conversationId,
+          primaryAgentSlug: params.agentId,
+          supportingAgentSlugs: consultationPlan.consultedAgentSlugs,
+          latestUserMessage: params.userMessage,
+        });
+        const loadedPrimaryExecutionTarget = await resolveExecutionTarget({
+          providerId:
+            loadedOrchestrationPlan.primaryContext.resolvedAgentProfile
+              .providerId ?? null,
+          modelId:
+            loadedOrchestrationPlan.primaryContext.resolvedAgentProfile.modelId ??
+            null,
+        });
+        const loadedSupportingDefinitions = await Promise.all(
+          consultationPlan.consultedAgentSlugs.map(slug =>
+            getAgentDefinitionBySlug(slug)
+          )
+        );
+
+        return {
+          primaryDefinition: loadedPrimaryDefinition,
+          primaryPrompt: loadedPrimaryPrompt,
+          orchestrationPlan: loadedOrchestrationPlan,
+          primaryExecutionTarget: loadedPrimaryExecutionTarget,
+          supportingDefinitions: loadedSupportingDefinitions,
+        };
+      })(),
       {
-        label: "Conversation context assembly",
-        timeoutMs: CONTEXT_ASSEMBLY_TIMEOUT_MS,
+        label: "Conversation turn setup",
+        timeoutMs: TURN_SETUP_TIMEOUT_MS,
       }
-    );
+    ));
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
-        : "Conversation context assembly timed out.";
-    logServerError("chat.context-timeout.fallback", error, {
+        : "Conversation turn setup timed out.";
+    logServerError("chat.turn-setup-timeout.fallback", error, {
       conversationId: params.conversationId,
       agentId: params.agentId,
     });
@@ -383,17 +439,6 @@ async function buildAssistantReply(params: {
   }
 
   await emitStage("context");
-
-  const primaryExecutionTarget = await resolveExecutionTarget({
-    providerId:
-      orchestrationPlan.primaryContext.resolvedAgentProfile.providerId ?? null,
-    modelId: orchestrationPlan.primaryContext.resolvedAgentProfile.modelId ?? null,
-  });
-  const supportingDefinitions = await Promise.all(
-    consultationPlan.consultedAgentSlugs.map(slug =>
-      getAgentDefinitionBySlug(slug)
-    )
-  );
 
   const primaryContext = orchestrationPlan.primaryContext;
   const accessibleFiles = primaryContext.accessibleFiles;

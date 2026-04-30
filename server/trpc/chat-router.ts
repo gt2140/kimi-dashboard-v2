@@ -34,6 +34,7 @@ import {
   formatPromptContext,
 } from "../services/context-prompt.js";
 import { withTimeout } from "../services/async-guard.js";
+import { withAbortableTimeout } from "../services/async-guard.js";
 import {
   buildPendingTurnStages,
   splitMessageForReveal,
@@ -542,13 +543,15 @@ async function buildAssistantReply(params: {
       });
 
       try {
-        const generation = await withTimeout(
-          gateway.generateText({
-            providerSlug: executionTarget.providerSlug,
-            modelName: executionTarget.modelName,
-            systemPrompt: supportingSystemPrompt,
-            messages: supportingMessages,
-          }),
+        const generation = await withAbortableTimeout(
+          signal =>
+            gateway.generateText({
+              providerSlug: executionTarget.providerSlug,
+              modelName: executionTarget.modelName,
+              systemPrompt: supportingSystemPrompt,
+              messages: supportingMessages,
+              signal,
+            }),
           {
             label: `${definition?.name ?? agentSlug} consultation`,
             timeoutMs: SUPPORTING_AGENT_TIMEOUT_MS,
@@ -635,26 +638,42 @@ async function buildAssistantReply(params: {
   try {
     await emitStage("draft");
 
-    const generation = await withTimeout(
-      params.streamPrimary
-        ? gateway.streamText({
-            providerSlug: primaryExecutionTarget.providerSlug,
-            modelName: primaryExecutionTarget.modelName,
-            systemPrompt: primarySystemPrompt,
-            messages: modelMessages,
-            onTextDelta: params.onTextDelta,
-          })
-        : gateway.generateText({
-            providerSlug: primaryExecutionTarget.providerSlug,
-            modelName: primaryExecutionTarget.modelName,
-            systemPrompt: primarySystemPrompt,
-            messages: modelMessages,
-          }),
+    logServerDebug("chat.primary-generation.start", {
+      conversationId: params.conversationId,
+      agentId: params.agentId,
+      providerSlug: primaryExecutionTarget.providerSlug,
+      modelName: primaryExecutionTarget.modelName,
+      streamedToClient: Boolean(params.streamPrimary),
+    });
+
+    const generation = await withAbortableTimeout(
+      signal =>
+        gateway.generateText({
+          providerSlug: primaryExecutionTarget.providerSlug,
+          modelName: primaryExecutionTarget.modelName,
+          systemPrompt: primarySystemPrompt,
+          messages: modelMessages,
+          signal,
+        }),
       {
         label: "Primary response generation",
         timeoutMs: PRIMARY_AGENT_TIMEOUT_MS,
       }
     );
+
+    if (params.streamPrimary) {
+      for (const chunk of splitMessageForReveal(generation.text)) {
+        await params.onTextDelta?.(chunk);
+      }
+    }
+
+    logServerDebug("chat.primary-generation.completed", {
+      conversationId: params.conversationId,
+      agentId: params.agentId,
+      providerSlug: generation.providerSlug,
+      modelName: generation.modelName,
+      outputTokens: generation.outputTokens,
+    });
 
     return {
       content: generation.text,

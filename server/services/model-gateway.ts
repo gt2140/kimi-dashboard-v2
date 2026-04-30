@@ -8,6 +8,7 @@ export type GenerateTextInput = {
   providerSlug: string;
   modelName?: string | null;
   systemPrompt?: string | null;
+  signal?: AbortSignal | null;
   messages: Array<{
     role: "system" | "user" | "assistant";
     content: string;
@@ -115,6 +116,33 @@ function normalizeOpenAITimeoutError(error: unknown, mode: "request" | "stream")
   return error;
 }
 
+function buildOpenAISignal(signal?: AbortSignal | null) {
+  const timeoutSignal = AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS);
+  if (!signal) {
+    return timeoutSignal;
+  }
+
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([timeoutSignal, signal]);
+  }
+
+  const controller = new AbortController();
+  const abort = (reason?: unknown) => {
+    if (!controller.signal.aborted) {
+      controller.abort(reason);
+    }
+  };
+
+  timeoutSignal.addEventListener("abort", () => abort(timeoutSignal.reason), {
+    once: true,
+  });
+  signal.addEventListener("abort", () => abort(signal.reason), {
+    once: true,
+  });
+
+  return controller.signal;
+}
+
 export class ModelGatewayService {
   supportsProvider(providerSlug: string): providerSlug is LiveProviderSlug {
     return LIVE_PROVIDER_SLUGS.includes(providerSlug as LiveProviderSlug);
@@ -174,7 +202,7 @@ export class ModelGatewayService {
           Authorization: `Bearer ${env.openaiApiKey}`,
           "Content-Type": "application/json",
         },
-        signal: AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS),
+        signal: buildOpenAISignal(input.signal),
         body: JSON.stringify({
           model,
           instructions: input.systemPrompt || undefined,
@@ -230,7 +258,7 @@ export class ModelGatewayService {
           Authorization: `Bearer ${env.openaiApiKey}`,
           "Content-Type": "application/json",
         },
-        signal: AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS),
+        signal: buildOpenAISignal(input.signal),
         body: JSON.stringify({
           model,
           stream: true,

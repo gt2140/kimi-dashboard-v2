@@ -6,19 +6,35 @@ import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import type { AppRouter } from "../../server/trpc/router";
 import { logClientDebug, logClientError } from "@/lib/debug";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
+import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 
 export const trpc = createTRPCReact<AppRouter>();
 
 const queryClient = new QueryClient();
+
+async function readAccessToken() {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  const { data } = await getSupabaseBrowserClient().auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
       async fetch(input, init) {
+        const headers = await buildAuthenticatedHeaders(
+          readAccessToken,
+          init?.headers
+        );
         const response = await globalThis.fetch(input, {
           ...(init ?? {}),
           credentials: "include",
+          headers,
         });
 
         if (!response.ok) {

@@ -31,6 +31,7 @@ import {
 import type { Message } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 const allIcons: Record<string, React.ReactNode> = {
@@ -83,6 +84,7 @@ type RevealingAssistantState = {
 };
 
 export default function Chat() {
+  const isMobile = useIsMobile();
   const activeAgentId = useChatStore((state) => state.activeAgentId);
   const calledAgentIds = useChatStore((state) => state.calledAgentIds);
   const callAgent = useChatStore((state) => state.callAgent);
@@ -305,8 +307,8 @@ export default function Chat() {
   );
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] flex-col">
-      <div className="flex items-center justify-between border-b border-border/60 px-6 py-3">
+    <div className="flex h-[calc(100dvh-3rem)] min-h-[calc(100dvh-3rem)] flex-col overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border/60 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-2.5">
           <span className={cn("text-muted-foreground/50", activeAgent.color)}>
             <Sparkles className="h-4 w-4" />
@@ -342,9 +344,9 @@ export default function Chat() {
           <div className="relative">
             <button
               onClick={() => setShowAgentPicker(!showAgentPicker)}
-              className="flex items-center gap-1 rounded-md border border-border/40 bg-card/30 px-2.5 py-1.5 text-[11px] text-muted-foreground/50 hover:text-foreground hover:border-border/60 transition-all"
+              className="flex items-center gap-1 rounded-md border border-border/40 bg-card/30 px-2 py-1.5 text-[11px] text-muted-foreground/50 hover:text-foreground hover:border-border/60 transition-all sm:px-2.5"
             >
-              <Plus className="h-3 w-3" /> Add helper
+              <Plus className="h-3 w-3" /> <span className={cn(isMobile && "hidden")}>Add helper</span>
             </button>
             <AnimatePresence>
               {showAgentPicker && (
@@ -384,14 +386,14 @@ export default function Chat() {
               clearChat();
               void startNewChat(activeAgentId);
             }}
-            className="text-[11px] text-muted-foreground/30 hover:text-foreground transition-colors px-2"
+            className="px-1 text-[11px] text-muted-foreground/30 transition-colors hover:text-foreground sm:px-2"
           >
             New
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 scrollbar-thin sm:px-6 sm:py-6">
         {isConversationLoading ? (
           <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground/40">
             <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -403,7 +405,7 @@ export default function Chat() {
             onShortcutClick={(text) => setInput(text)}
           />
         ) : (
-          <div className="mx-auto max-w-2xl space-y-8">
+          <div className="mx-auto max-w-2xl space-y-6 pb-4 sm:space-y-8">
             {displayedMessages.map((message) => (
               <MessageBubble
                 key={message.id}
@@ -437,7 +439,7 @@ export default function Chat() {
         )}
       </div>
 
-      <div className="border-t border-border/60 px-6 py-4">
+      <div className="sticky bottom-0 z-10 border-t border-border/60 bg-background/95 px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur sm:px-6 sm:py-4">
         <div className="mx-auto max-w-2xl">
           {calledAgentIds.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1">
@@ -460,14 +462,14 @@ export default function Chat() {
               })}
             </div>
           )}
-          <div className="flex items-end gap-2 rounded-lg border border-border/60 bg-card/30 p-2.5 focus-within:border-border focus-within:bg-card/60 transition-colors">
+          <div className="flex items-end gap-2 rounded-lg border border-border/60 bg-card/30 p-2.5 transition-colors focus-within:border-border focus-within:bg-card/60">
             <Textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={`Ask ${activeAgent.name.toLowerCase()} anything about ${activeAgent.allowedVaultCategories.join(", ")}. Use @agent-name to force a specialist consult.`}
-              className="min-h-[36px] resize-none border-0 bg-transparent p-0 text-[13px] leading-relaxed focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/30"
+              className="min-h-[36px] resize-none border-0 bg-transparent p-0 text-[13px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0 focus-visible:ring-offset-0"
               rows={1}
             />
             <Button
@@ -516,22 +518,22 @@ function EmptyState({
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex h-full flex-col items-center justify-center px-4"
+      className="flex h-full flex-col items-center justify-start px-4 pt-12 text-center sm:justify-center sm:pt-0"
     >
-      <Sparkles className="mb-4 h-5 w-5 text-muted-foreground/20" />
-      <h2 className="text-[15px] font-medium text-foreground">
+      <Sparkles className="mb-3 h-5 w-5 text-muted-foreground/20" />
+      <h2 className="text-[15px] font-medium text-foreground sm:text-[15px]">
         Start with a question or a result to review
       </h2>
       <p className="mt-1 text-[12px] text-muted-foreground/50">
         You're chatting with <span className={cn(agent.color)}>{agent.name}</span>
       </p>
 
-      <div className="mt-6 flex flex-wrap justify-center gap-2">
+      <div className="mt-5 flex w-full max-w-md flex-col gap-2 sm:mt-6 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center">
         {shortcuts.map((shortcut) => (
           <button
             key={shortcut}
             onClick={() => onShortcutClick(shortcut)}
-            className="flex items-center gap-1.5 rounded-md border border-border/60 bg-card/30 px-3 py-1.5 text-[12px] text-muted-foreground/60 transition-colors hover:text-foreground hover:border-border hover:bg-card/60"
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border/60 bg-card/30 px-3 py-2 text-[12px] text-muted-foreground/60 transition-colors hover:border-border hover:bg-card/60 hover:text-foreground sm:w-auto sm:justify-start sm:py-1.5"
           >
             <ArrowRight className="h-3 w-3" />
             {shortcut}

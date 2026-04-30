@@ -70,4 +70,27 @@ describe("extractOpenAIResponseText", () => {
     });
     expect(secondPass.remainder).toBe("");
   });
+
+  it("extracts semantic streaming events when SSE frames use CRLF separators", () => {
+    const parsed = extractOpenAIStreamEvents(
+      'event: response.output_text.delta\r\n' +
+        'data: {"type":"response.output_text.delta","delta":"Hola"}\r\n\r\n' +
+        'event: response.completed\r\n' +
+        'data: {"type":"response.completed","response":{"output_text":"Hola mundo"}}\r\n\r\n'
+    );
+
+    expect(parsed.events).toEqual([
+      {
+        type: "response.output_text.delta",
+        delta: "Hola",
+      },
+      {
+        type: "response.completed",
+        response: {
+          output_text: "Hola mundo",
+        },
+      },
+    ]);
+    expect(parsed.remainder).toBe("");
+  });
 });

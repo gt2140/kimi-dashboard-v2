@@ -67,7 +67,8 @@ export function extractOpenAIResponseText(payload: OpenAIResponsePayload) {
 }
 
 export function extractOpenAIStreamEvents(buffer: string) {
-  const eventBlocks = buffer.split("\n\n");
+  const normalizedBuffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const eventBlocks = normalizedBuffer.split("\n\n");
   const remainder = eventBlocks.pop() ?? "";
   const events: OpenAIStreamingEvent[] = [];
 

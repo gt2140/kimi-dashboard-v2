@@ -409,7 +409,7 @@ export function MobileSidebar() {
       </SheetTrigger>
       <SheetContent
         side="left"
-        className="w-[260px] border-r border-border bg-sidebar p-0"
+        className="w-[232px] border-r border-border bg-sidebar p-0 sm:w-[250px]"
       >
         <div className="flex h-full flex-col">
           <div className="flex h-12 items-center px-4 shrink-0">
@@ -430,7 +430,7 @@ export function MobileSidebar() {
                     setOpen(false);
                   }}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
                     isActive
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "text-sidebar-foreground/50 hover:text-sidebar-foreground/80"
@@ -461,7 +461,7 @@ export function MobileSidebar() {
                     setOpen(false);
                   }}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-all",
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-all",
                     isActive
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "text-sidebar-foreground/50 hover:text-sidebar-foreground/80"
@@ -506,7 +506,7 @@ export function MobileSidebar() {
                 {sessions.map(session => (
                   <div
                     key={session.id}
-                    className="group flex items-start gap-2 rounded-md px-2.5 py-1.5 text-sidebar-foreground/40 transition-all hover:bg-sidebar-accent/30 hover:text-sidebar-foreground/70"
+                    className="group flex items-start gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/40 transition-all hover:bg-sidebar-accent/30 hover:text-sidebar-foreground/70"
                   >
                     <button
                       onClick={() => {
@@ -517,7 +517,7 @@ export function MobileSidebar() {
                     >
                       <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[11px] leading-snug">
+                        <p className="truncate text-[10px] leading-snug">
                           {session.title}
                         </p>
                         <p className="text-[10px] text-sidebar-foreground/30">

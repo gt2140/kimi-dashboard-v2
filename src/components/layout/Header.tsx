@@ -12,11 +12,11 @@ export function Header() {
   const { user, logout } = useAuth();
 
   return (
-    <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border/60 bg-background/90 px-4 backdrop-blur-sm">
+    <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border/60 bg-background/90 px-3 sm:px-4 backdrop-blur-sm">
       <div className="flex items-center gap-2">
         <MobileSidebar />
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         <ThemeToggle />
         <div className="hidden items-center gap-2 sm:flex">
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/60 text-[11px] font-medium text-foreground/70">
@@ -34,13 +34,13 @@ export function Header() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 px-2 text-[12px] text-muted-foreground/60 hover:text-foreground"
+          className="h-7 gap-1 px-1.5 text-[11px] text-muted-foreground/60 hover:text-foreground sm:px-2 sm:text-[12px]"
           onClick={() => {
             void logout();
           }}
         >
           <LogOut className="h-3 w-3" />
-          Exit
+          <span className="hidden sm:inline">Exit</span>
         </Button>
       </div>
     </header>

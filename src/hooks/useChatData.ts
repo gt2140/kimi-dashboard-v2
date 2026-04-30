@@ -4,6 +4,8 @@ import { ensureBackendSession, trpc } from "@/providers/trpc";
 import { useChatStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug, logClientError } from "@/lib/debug";
+import { buildAuthenticatedHeaders } from "@/lib/request-auth";
+import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
   isRecoverableChatStreamStatus,
   parseChatStreamChunk,
@@ -112,6 +114,15 @@ export function useChatData() {
       calledAgentIds: conversation.calledAgentIds ?? [],
     });
   }, [conversationQuery.data?.conversation, hydrateConversation]);
+
+  async function readAccessToken() {
+    if (!isSupabaseConfigured) {
+      return null;
+    }
+
+    const { data } = await getSupabaseBrowserClient().auth.getSession();
+    return data.session?.access_token ?? null;
+  }
 
   async function runWithAuthSyncRetry<T>(
     label: string,
@@ -223,19 +234,21 @@ export function useChatData() {
 
     try {
       const makeStreamRequest = () =>
-        fetch("/api/chat/stream", {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            conversationId,
-            content,
-            agentId: activeAgentId,
-            calledAgentIds,
-          }),
-        });
+        buildAuthenticatedHeaders(readAccessToken, {
+          "Content-Type": "application/json",
+        }).then((headers) =>
+          fetch("/api/chat/stream", {
+            method: "POST",
+            credentials: "include",
+            headers,
+            body: JSON.stringify({
+              conversationId,
+              content,
+              agentId: activeAgentId,
+              calledAgentIds,
+            }),
+          })
+        );
 
       let response = await makeStreamRequest();
 

@@ -51,6 +51,39 @@ type ChatTurnStreamHandlers = {
   streamPrimary?: boolean;
 };
 
+export async function generatePrimaryReply(params: {
+  gateway: Pick<ModelGatewayService, "generateText" | "streamText">;
+  providerSlug: string;
+  modelName: string | null;
+  systemPrompt: string;
+  messages: Array<{
+    role: "system" | "user" | "assistant";
+    content: string;
+  }>;
+  signal?: AbortSignal | null;
+  streamPrimary?: boolean;
+  onTextDelta?: (delta: string) => void | Promise<void>;
+}) {
+  if (params.streamPrimary) {
+    return params.gateway.streamText({
+      providerSlug: params.providerSlug,
+      modelName: params.modelName,
+      systemPrompt: params.systemPrompt,
+      signal: params.signal,
+      messages: params.messages,
+      onTextDelta: params.onTextDelta,
+    });
+  }
+
+  return params.gateway.generateText({
+    providerSlug: params.providerSlug,
+    modelName: params.modelName,
+    systemPrompt: params.systemPrompt,
+    signal: params.signal,
+    messages: params.messages,
+  });
+}
+
 const SUPPORTING_AGENT_TIMEOUT_MS = 15_000;
 const PRIMARY_AGENT_TIMEOUT_MS = 25_000;
 const TURN_SETUP_TIMEOUT_MS = 10_000;
@@ -648,12 +681,15 @@ async function buildAssistantReply(params: {
 
     const generation = await withAbortableTimeout(
       signal =>
-        gateway.generateText({
+        generatePrimaryReply({
+          gateway,
           providerSlug: primaryExecutionTarget.providerSlug,
           modelName: primaryExecutionTarget.modelName,
           systemPrompt: primarySystemPrompt,
           messages: modelMessages,
           signal,
+          streamPrimary: params.streamPrimary,
+          onTextDelta: params.onTextDelta,
         }),
       {
         label: "Primary response generation",
@@ -661,7 +697,7 @@ async function buildAssistantReply(params: {
       }
     );
 
-    if (params.streamPrimary) {
+    if (!params.streamPrimary) {
       for (const chunk of splitMessageForReveal(generation.text)) {
         await params.onTextDelta?.(chunk);
       }

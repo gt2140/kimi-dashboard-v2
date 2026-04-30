@@ -6,27 +6,24 @@ loadEnv({
 });
 
 function required(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value && process.env.NODE_ENV === "production") {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value ?? "";
+  return process.env[name]?.trim() ?? "";
 }
 
-function optionalUrl(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(`Missing required environment variable: ${name}`);
+function optionalUrl(...names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (!value) {
+      continue;
     }
-    return "";
+
+    try {
+      return new URL(value).toString().replace(/\/$/, "");
+    } catch {
+      throw new Error(`Invalid URL in environment variable ${name}: ${value}`);
+    }
   }
 
-  try {
-    return new URL(value).toString().replace(/\/$/, "");
-  } catch {
-    throw new Error(`Invalid URL in environment variable ${name}: ${value}`);
-  }
+  return "";
 }
 
 function requiredOneOf(...names: string[]): string {
@@ -35,12 +32,6 @@ function requiredOneOf(...names: string[]): string {
     if (value) {
       return value;
     }
-  }
-
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      `Missing required environment variable. Expected one of: ${names.join(", ")}`,
-    );
   }
 
   return "";
@@ -59,6 +50,6 @@ export const env = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || "",
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
   kimiApiKey: process.env.KIMI_API_KEY?.trim() || "",
-  supabaseUrl: optionalUrl("SUPABASE_URL"),
+  supabaseUrl: optionalUrl("SUPABASE_URL", "VITE_SUPABASE_URL"),
   supabaseAnonKey: requiredOneOf("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"),
 };

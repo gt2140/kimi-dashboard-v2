@@ -12,7 +12,7 @@ import {
   userAgentSettings,
   users,
   vaultFiles,
-} from "./schema";
+} from "./schema.js";
 
 export const usersRelations = relations(users, ({ many }) => ({
   conversations: many(conversations),

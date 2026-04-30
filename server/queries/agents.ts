@@ -292,7 +292,7 @@ export async function getActiveSystemPrompt(agentDefinitionId: number) {
     )
     .orderBy(asc(promptTemplates.version));
 
-  return rows.at(-1) ?? null;
+  return rows.length > 0 ? rows[rows.length - 1] : null;
 }
 
 export async function listModelProvidersWithEndpoints() {

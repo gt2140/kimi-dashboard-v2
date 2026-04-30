@@ -1,5 +1,5 @@
-import { ensureConversationalCatalogSeeded } from "../api/queries/agents";
-import { getDb } from "../api/queries/connection";
+import { ensureConversationalCatalogSeeded } from "../server/queries/agents";
+import { getDb } from "../server/queries/connection";
 import { agentDefinitions, modelEndpoints, modelProviders } from "./schema";
 
 async function seed() {

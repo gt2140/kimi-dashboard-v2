@@ -3,7 +3,7 @@ import { httpBatchLink } from "@trpc/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import superjson from "superjson";
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
-import type { AppRouter } from "../../api/router";
+import type { AppRouter } from "../../server/trpc/router";
 import { logClientDebug, logClientError } from "@/lib/debug";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 

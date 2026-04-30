@@ -1,15 +1,15 @@
 import * as cookie from "cookie";
 import { TRPCError } from "@trpc/server";
-import { Session } from "../contracts/constants.js";
+import { Session } from "../../contracts/constants.js";
 import { createAppSessionFromSupabaseToken } from "./auth.js";
-import { logServerDebug, logServerError } from "../server/lib/debug.js";
-import { getSessionCookieOptions } from "../server/lib/cookies.js";
-import { env } from "../server/lib/env.js";
+import { logServerDebug, logServerError } from "../lib/debug.js";
+import { getSessionCookieOptions } from "../lib/cookies.js";
+import { env } from "../lib/env.js";
 import { createRouter, authedQuery, publicQuery } from "./middleware.js";
 import {
   checkDatabaseHealth,
   getDatabaseSetupState,
-} from "../server/queries/connection.js";
+} from "../queries/connection.js";
 import { z } from "zod";
 
 export const authRouter = createRouter({
@@ -59,6 +59,13 @@ export const authRouter = createRouter({
         hasCookieHeader: ctx.req.headers.has("cookie"),
       });
       try {
+        if (!env.appSecret) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Backend setup error: SESSION_SECRET is missing.",
+          });
+        }
+
         const dbHealth = await checkDatabaseHealth(true);
         if (!dbHealth.ok) {
           throw new TRPCError({

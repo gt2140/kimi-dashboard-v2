@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { LOGIN_PATH } from "@/const";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
+import { clearSupabaseBrowserState } from "@/lib/supabase-session";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { resetChatStore } from "@/hooks/useStore";
 
@@ -161,17 +162,7 @@ export function useAuth(options?: UseAuthOptions) {
       // Backend cookie cleanup is best-effort because Supabase owns the primary session.
     }
 
-    for (const key of Object.keys(window.localStorage)) {
-      if (key.startsWith("sb-")) {
-        window.localStorage.removeItem(key);
-      }
-    }
-
-    for (const key of Object.keys(window.sessionStorage)) {
-      if (key.startsWith("sb-")) {
-        window.sessionStorage.removeItem(key);
-      }
-    }
+    clearSupabaseBrowserState();
 
     resetChatStore();
     resetBackendSessionState();

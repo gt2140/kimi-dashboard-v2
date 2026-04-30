@@ -1,4 +1,4 @@
-import type { Agent, VaultFile } from "@/types";
+import type { Agent, VaultFile } from "../types/index.js";
 
 export const BUILT_IN_AGENTS: Agent[] = [
   {

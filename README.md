@@ -48,10 +48,26 @@ KIMI_API_KEY=
 Notes:
 
 - `SUPABASE_URL` and `VITE_SUPABASE_URL` should point to the same project.
+- The backend can fall back to `VITE_SUPABASE_URL` for Supabase token validation, but keeping both variables set is still the safest Vercel configuration.
 - Prefer the current Supabase pooled Postgres connection string for local development if the direct `db.<project>.supabase.co` host is unreliable.
 - `DATABASE_URL` must be a real connection string, not a placeholder.
 - `OWNER_UNION_ID` is optional unless you want your own account promoted to `admin`.
 - Model provider API keys are optional until we connect a real model gateway.
+
+## Vercel deployment
+
+Set these project environment variables in Vercel for `Production` and `Preview`:
+
+```env
+SESSION_SECRET=replace-with-a-random-long-string
+DATABASE_URL=postgresql://postgres:YOUR_DB_PASSWORD@aws-0-region.pooler.supabase.com:6543/postgres?sslmode=require
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your_supabase_publishable_anon_key
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your_supabase_publishable_anon_key
+```
+
+Also add each deployed `https://<your-domain>/auth/callback` URL to the Supabase Google OAuth redirect allow-list.
 
 ## Supabase setup
 

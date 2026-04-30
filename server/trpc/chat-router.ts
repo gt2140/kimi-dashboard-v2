@@ -10,23 +10,23 @@ import {
   messages,
   modelEndpoints,
   modelProviders,
-} from "../db/schema.js";
-import { logServerDebug, logServerError } from "../server/lib/debug.js";
+} from "../../db/schema.js";
+import { logServerDebug, logServerError } from "../lib/debug.js";
 import { createRouter, authedQuery } from "./middleware.js";
-import { getDb } from "../server/queries/connection.js";
+import { getDb } from "../queries/connection.js";
 import {
   ensureConversationalCatalogSeeded,
   getActiveSystemPrompt,
   getAgentDefinitionBySlug,
-} from "../server/queries/agents.js";
-import { resolveConsultationPlan } from "../server/services/consultation-policy.js";
-import { ModelGatewayService } from "../server/services/model-gateway.js";
-import { planConversationTurn } from "../server/services/conversation-orchestrator.js";
-import { buildContextAwareFallbackReply } from "../server/services/fallback-reply.js";
+} from "../queries/agents.js";
+import { resolveConsultationPlan } from "../services/consultation-policy.js";
+import { ModelGatewayService } from "../services/model-gateway.js";
+import { planConversationTurn } from "../services/conversation-orchestrator.js";
+import { buildContextAwareFallbackReply } from "../services/fallback-reply.js";
 import {
   buildPrimarySystemPrompt,
   buildSupportingSystemPrompt,
-} from "../server/services/prompt-composer.js";
+} from "../services/prompt-composer.js";
 
 const chatMetadataSchema = z
   .object({

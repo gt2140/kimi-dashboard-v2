@@ -1,12 +1,12 @@
 import * as cookie from "cookie";
-import { Session } from "../contracts/constants.js";
-import { Errors } from "../contracts/errors.js";
-import { env } from "../server/lib/env.js";
-import { logServerDebug, logServerError } from "../server/lib/debug.js";
-import { signSessionToken } from "../server/kimi/session.js";
-import { verifySessionToken } from "../server/kimi/session.js";
-import { findUserByUnionId, upsertUser } from "../server/queries/users.js";
-import { getSessionCookieOptions } from "../server/lib/cookies.js";
+import { Session } from "../../contracts/constants.js";
+import { Errors } from "../../contracts/errors.js";
+import { env } from "../lib/env.js";
+import { logServerDebug, logServerError } from "../lib/debug.js";
+import { signSessionToken } from "../kimi/session.js";
+import { verifySessionToken } from "../kimi/session.js";
+import { findUserByUnionId, upsertUser } from "../queries/users.js";
+import { getSessionCookieOptions } from "../lib/cookies.js";
 
 type SupabaseUserPayload = {
   id: string;
@@ -22,6 +22,16 @@ function getSupabaseUrl() {
   }
 
   return env.supabaseUrl;
+}
+
+function getSupabaseAnonKey() {
+  if (!env.supabaseAnonKey) {
+    throw new Error(
+      "SUPABASE_ANON_KEY is missing. Set it in your environment to enable Supabase Auth."
+    );
+  }
+
+  return env.supabaseAnonKey;
 }
 
 function pickString(value: unknown) {
@@ -62,7 +72,7 @@ export async function authenticateSupabaseAccessToken(accessToken: string) {
   const response = await fetch(`${getSupabaseUrl()}/auth/v1/user`, {
     headers: {
       authorization: `Bearer ${accessToken}`,
-      apikey: env.supabaseAnonKey,
+      apikey: getSupabaseAnonKey(),
     },
   });
 
@@ -162,6 +172,12 @@ export async function createAppSessionFromSupabaseToken(
   accessToken: string,
   headers: Headers
 ) {
+  if (!env.appSecret) {
+    throw new Error(
+      "SESSION_SECRET is missing. Set it in your environment before synchronizing auth sessions."
+    );
+  }
+
   const user = await authenticateSupabaseAccessToken(accessToken);
   const token = await signSessionToken({
     unionId: user.unionId,

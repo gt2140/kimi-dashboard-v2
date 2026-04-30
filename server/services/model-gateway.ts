@@ -2,6 +2,7 @@ import { env } from "../lib/env.js";
 
 export const LIVE_PROVIDER_SLUGS = ["openai"] as const;
 export type LiveProviderSlug = (typeof LIVE_PROVIDER_SLUGS)[number];
+const OPENAI_REQUEST_TIMEOUT_MS = 25_000;
 
 export type GenerateTextInput = {
   providerSlug: string;
@@ -100,6 +101,19 @@ export function extractOpenAIStreamEvents(buffer: string) {
   };
 }
 
+function normalizeOpenAITimeoutError(error: unknown, mode: "request" | "stream") {
+  if (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  ) {
+    return new Error(
+      `OpenAI ${mode} timed out after ${OPENAI_REQUEST_TIMEOUT_MS}ms.`
+    );
+  }
+
+  return error;
+}
+
 export class ModelGatewayService {
   supportsProvider(providerSlug: string): providerSlug is LiveProviderSlug {
     return LIVE_PROVIDER_SLUGS.includes(providerSlug as LiveProviderSlug);
@@ -150,26 +164,33 @@ export class ModelGatewayService {
   ): Promise<GenerateTextOutput> {
     const model = input.modelName || this.getDefaultModel("openai");
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.openaiApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        instructions: input.systemPrompt || undefined,
-        input: input.messages.map(message => ({
-          role: message.role,
-          content: [
-            {
-              type: "input_text",
-              text: message.content,
-            },
-          ],
-        })),
-      }),
-    });
+    let response: Response;
+
+    try {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.openaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        signal: AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS),
+        body: JSON.stringify({
+          model,
+          instructions: input.systemPrompt || undefined,
+          input: input.messages.map(message => ({
+            role: message.role,
+            content: [
+              {
+                type: "input_text",
+                text: message.content,
+              },
+            ],
+          })),
+        }),
+      });
+    } catch (error) {
+      throw normalizeOpenAITimeoutError(error, "request");
+    }
 
     if (!response.ok) {
       const body = await response.text();
@@ -199,27 +220,34 @@ export class ModelGatewayService {
   ): Promise<GenerateTextOutput> {
     const model = input.modelName || this.getDefaultModel("openai");
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.openaiApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        stream: true,
-        instructions: input.systemPrompt || undefined,
-        input: input.messages.map(message => ({
-          role: message.role,
-          content: [
-            {
-              type: "input_text",
-              text: message.content,
-            },
-          ],
-        })),
-      }),
-    });
+    let response: Response;
+
+    try {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.openaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        signal: AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS),
+        body: JSON.stringify({
+          model,
+          stream: true,
+          instructions: input.systemPrompt || undefined,
+          input: input.messages.map(message => ({
+            role: message.role,
+            content: [
+              {
+                type: "input_text",
+                text: message.content,
+              },
+            ],
+          })),
+        }),
+      });
+    } catch (error) {
+      throw normalizeOpenAITimeoutError(error, "stream");
+    }
 
     if (!response.ok) {
       const body = await response.text();

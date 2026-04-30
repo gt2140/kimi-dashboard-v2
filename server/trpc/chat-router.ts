@@ -33,6 +33,7 @@ import {
   collectMissingContext,
   formatPromptContext,
 } from "../services/context-prompt.js";
+import { withTimeout } from "../services/async-guard.js";
 import {
   buildPendingTurnStages,
   splitMessageForReveal,
@@ -48,6 +49,10 @@ type ChatTurnStreamHandlers = {
   onTextDelta?: (delta: string) => void | Promise<void>;
   streamPrimary?: boolean;
 };
+
+const CONTEXT_ASSEMBLY_TIMEOUT_MS = 8_000;
+const SUPPORTING_AGENT_TIMEOUT_MS = 15_000;
+const PRIMARY_AGENT_TIMEOUT_MS = 25_000;
 
 export const chatSendMessageInputSchema = z.object({
   conversationId: z.number(),
@@ -264,20 +269,121 @@ async function buildAssistantReply(params: {
 
   await emitStage("analyze");
 
-  const orchestrationPlan = await planConversationTurn({
-    userId: params.userId,
-    conversationId: params.conversationId,
-    primaryAgentSlug: params.agentId,
-    supportingAgentSlugs: consultationPlan.consultedAgentSlugs,
-    latestUserMessage: params.userMessage,
-  });
-
-  await emitStage("context");
-
   const primaryDefinition = await getAgentDefinitionBySlug(params.agentId);
   const primaryPrompt = primaryDefinition
     ? await getActiveSystemPrompt(primaryDefinition.id)
     : null;
+  const fallbackExecutionTarget = await resolveExecutionTarget({
+    providerId: null,
+    modelId: null,
+  });
+
+  const buildLimitedTurnReply = async (input: {
+    note: string;
+    executionNotes?: string[];
+    consultationMode?: "none" | "explicit" | "auto";
+    consultationReason?: string | null;
+  }) => {
+    const gracefulFallback = buildContextAwareFallbackReply({
+      userMessage: params.userMessage,
+      agentName: primaryDefinition?.name ?? params.agentId,
+      allowedCategories: primaryDefinition?.allowedVaultCategories ?? [],
+      accessibleFileCount: 0,
+    });
+    const primarySystemPrompt = buildPrimarySystemPrompt({
+      agentSlug: params.agentId,
+      agentName: primaryDefinition?.name ?? params.agentId,
+      basePrompt:
+        primaryPrompt?.templateText ??
+        `You are ${primaryDefinition?.name ?? params.agentId}. Answer helpfully and clearly.`,
+      responseStyle: "detailed",
+      canConsultSpecialists: consultationPlan.consultedAgentSlugs.length > 0,
+    });
+
+    if (params.streamPrimary) {
+      for (const chunk of splitMessageForReveal(gracefulFallback.content)) {
+        await params.onTextDelta?.(chunk);
+      }
+    }
+
+    return {
+      content: gracefulFallback.content,
+      relatedVaultFiles: [],
+      orchestrationMode: "single_agent" as const,
+      consultedAgentSlugs: consultationPlan.consultedAgentSlugs,
+      supportingAgentNames: [],
+      consultationMode: input.consultationMode ?? consultationPlan.mode,
+      consultationReason: input.consultationReason ?? consultationPlan.rationale,
+      contextSummary:
+        "Aura could not finish assembling the full turn context in time.",
+      missingContext: ["Full turn context was not available in time."],
+      executionNotes: [
+        ...fallbackExecutionTarget.executionNotes,
+        ...(input.executionNotes ?? []),
+      ],
+      supportingRuns: [],
+      note: gracefulFallback.note ?? input.note,
+      primaryRun: {
+        providerSlug: fallbackExecutionTarget.providerSlug,
+        modelName: "fallback-preview",
+        requestedProviderSlug: fallbackExecutionTarget.requestedProviderSlug,
+        requestedModelName: fallbackExecutionTarget.requestedModelName,
+        executionNotes: [
+          ...fallbackExecutionTarget.executionNotes,
+          ...(input.executionNotes ?? []),
+        ],
+        systemPrompt: primarySystemPrompt,
+        inputMessages: [
+          {
+            role: "user" as const,
+            content: params.userMessage,
+          },
+        ],
+        inputTokens: undefined,
+        outputTokens: undefined,
+        errorMessage: input.note,
+        usedFallback: true,
+      },
+      responseMode: "limited" as const,
+    };
+  };
+
+  let orchestrationPlan;
+
+  try {
+    orchestrationPlan = await withTimeout(
+      planConversationTurn({
+        userId: params.userId,
+        conversationId: params.conversationId,
+        primaryAgentSlug: params.agentId,
+        supportingAgentSlugs: consultationPlan.consultedAgentSlugs,
+        latestUserMessage: params.userMessage,
+      }),
+      {
+        label: "Conversation context assembly",
+        timeoutMs: CONTEXT_ASSEMBLY_TIMEOUT_MS,
+      }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Conversation context assembly timed out.";
+    logServerError("chat.context-timeout.fallback", error, {
+      conversationId: params.conversationId,
+      agentId: params.agentId,
+    });
+    return buildLimitedTurnReply({
+      note:
+        "Aura took too long to prepare the full context for this turn, so it returned a faster fallback instead of hanging.",
+      executionNotes: [message],
+      consultationMode: "none",
+      consultationReason: message,
+    });
+  }
+
+  await emitStage("context");
+
   const primaryExecutionTarget = await resolveExecutionTarget({
     providerId:
       orchestrationPlan.primaryContext.resolvedAgentProfile.providerId ?? null,
@@ -391,12 +497,18 @@ async function buildAssistantReply(params: {
       });
 
       try {
-        const generation = await gateway.generateText({
-          providerSlug: executionTarget.providerSlug,
-          modelName: executionTarget.modelName,
-          systemPrompt: supportingSystemPrompt,
-          messages: supportingMessages,
-        });
+        const generation = await withTimeout(
+          gateway.generateText({
+            providerSlug: executionTarget.providerSlug,
+            modelName: executionTarget.modelName,
+            systemPrompt: supportingSystemPrompt,
+            messages: supportingMessages,
+          }),
+          {
+            label: `${definition?.name ?? agentSlug} consultation`,
+            timeoutMs: SUPPORTING_AGENT_TIMEOUT_MS,
+          }
+        );
 
         return {
           agentSlug,
@@ -478,20 +590,26 @@ async function buildAssistantReply(params: {
   try {
     await emitStage("draft");
 
-    const generation = params.streamPrimary
-      ? await gateway.streamText({
-          providerSlug: primaryExecutionTarget.providerSlug,
-          modelName: primaryExecutionTarget.modelName,
-          systemPrompt: primarySystemPrompt,
-          messages: modelMessages,
-          onTextDelta: params.onTextDelta,
-        })
-      : await gateway.generateText({
-          providerSlug: primaryExecutionTarget.providerSlug,
-          modelName: primaryExecutionTarget.modelName,
-          systemPrompt: primarySystemPrompt,
-          messages: modelMessages,
-        });
+    const generation = await withTimeout(
+      params.streamPrimary
+        ? gateway.streamText({
+            providerSlug: primaryExecutionTarget.providerSlug,
+            modelName: primaryExecutionTarget.modelName,
+            systemPrompt: primarySystemPrompt,
+            messages: modelMessages,
+            onTextDelta: params.onTextDelta,
+          })
+        : gateway.generateText({
+            providerSlug: primaryExecutionTarget.providerSlug,
+            modelName: primaryExecutionTarget.modelName,
+            systemPrompt: primarySystemPrompt,
+            messages: modelMessages,
+          }),
+      {
+        label: "Primary response generation",
+        timeoutMs: PRIMARY_AGENT_TIMEOUT_MS,
+      }
+    );
 
     return {
       content: generation.text,

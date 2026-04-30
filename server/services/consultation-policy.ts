@@ -13,6 +13,7 @@ type ConsultationPlan = {
   explicitMentionedAgentSlugs: string[];
   autoConsultedAgentSlugs: string[];
   consultedAgentSlugs: string[];
+  rationale: string | null;
 };
 
 const AUTO_CONSULT_LIMIT = 2;
@@ -156,10 +157,12 @@ function scoreAgentForMessage(agentSlug: string, normalizedMessage: string) {
   const agent = AGENTS.find(item => item.id === agentSlug);
 
   let score = 0;
+  const matchedTerms = new Set<string>();
 
   for (const hint of hints) {
     if (normalizedMessage.includes(hint)) {
       score += 2;
+      matchedTerms.add(hint);
     }
   }
 
@@ -175,10 +178,14 @@ function scoreAgentForMessage(agentSlug: string, normalizedMessage: string) {
   for (const term of genericTerms) {
     if (normalizedMessage.includes(term)) {
       score += 1;
+      matchedTerms.add(term);
     }
   }
 
-  return score;
+  return {
+    score,
+    matchedTerms: Array.from(matchedTerms),
+  };
 }
 
 export function resolveConsultationPlan(
@@ -200,6 +207,10 @@ export function resolveConsultationPlan(
       explicitMentionedAgentSlugs: consultedAgentSlugs,
       autoConsultedAgentSlugs: [],
       consultedAgentSlugs,
+      rationale:
+        consultedAgentSlugs.length > 0
+          ? "You explicitly tagged specialist agents in the message."
+          : null,
     };
   }
 
@@ -209,6 +220,7 @@ export function resolveConsultationPlan(
       explicitMentionedAgentSlugs: [],
       autoConsultedAgentSlugs: [],
       consultedAgentSlugs: [],
+      rationale: null,
     };
   }
 
@@ -218,17 +230,31 @@ export function resolveConsultationPlan(
   })
     .map(slug => ({
       slug,
-      score: scoreAgentForMessage(slug, normalizedMessage),
+      ...scoreAgentForMessage(slug, normalizedMessage),
     }))
     .filter(candidate => candidate.score >= 2)
     .sort((left, right) => right.score - left.score)
-    .slice(0, AUTO_CONSULT_LIMIT)
-    .map(candidate => candidate.slug);
+    .slice(0, AUTO_CONSULT_LIMIT);
+
+  const consultedAgentSlugs = scoredCandidates.map(candidate => candidate.slug);
+  const rationale =
+    scoredCandidates.length > 0
+      ? `Aura auto-consulted specialists because the message matched ${scoredCandidates
+          .map(candidate => {
+            const agent = AGENTS.find(item => item.id === candidate.slug);
+            const matched = candidate.matchedTerms.slice(0, 3).join(", ");
+            return matched
+              ? `${agent?.name ?? candidate.slug} signals (${matched})`
+              : `${agent?.name ?? candidate.slug} signals`;
+          })
+          .join("; ")}.`
+      : null;
 
   return {
     mode: scoredCandidates.length > 0 ? "auto" : "none",
     explicitMentionedAgentSlugs: [],
-    autoConsultedAgentSlugs: scoredCandidates,
-    consultedAgentSlugs: scoredCandidates,
+    autoConsultedAgentSlugs: consultedAgentSlugs,
+    consultedAgentSlugs,
+    rationale,
   };
 }

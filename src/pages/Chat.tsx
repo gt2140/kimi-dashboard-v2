@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -23,6 +23,9 @@ import {
 import { useChatStore } from "@/hooks/useStore";
 import { useChatData } from "@/hooks/useChatData";
 import { AGENTS } from "@/lib/data";
+import {
+  type PendingTurnStage,
+} from "@/lib/chat-experience";
 import type { Message } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -70,6 +73,12 @@ const SHORTCUTS: Record<string, string[]> = {
   ],
 };
 
+type RevealingAssistantState = {
+  message: Message;
+  fullContent: string;
+  visibleContent: string;
+};
+
 export default function Chat() {
   const activeAgentId = useChatStore((state) => state.activeAgentId);
   const calledAgentIds = useChatStore((state) => state.calledAgentIds);
@@ -83,12 +92,16 @@ export default function Chat() {
     isConversationLoading,
     isSending,
     error,
-    sendMessage,
     startNewChat,
+    streamMessage,
   } = useChatData();
 
   const [input, setInput] = useState("");
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
+  const [pendingStages, setPendingStages] = useState<PendingTurnStage[]>([]);
+  const [activeStageIndex, setActiveStageIndex] = useState(0);
+  const [revealingAssistant, setRevealingAssistant] =
+    useState<RevealingAssistantState | null>(null);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -100,7 +113,13 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [
+    messages,
+    pendingUserMessage,
+    pendingStages,
+    revealingAssistant?.visibleContent,
+    scrollToBottom,
+  ]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -110,20 +129,137 @@ export default function Chat() {
     }
   }, [input]);
 
+  useEffect(() => {
+    if (!isSending || pendingStages.length <= 1) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setActiveStageIndex((current) =>
+        current < pendingStages.length - 1 ? current + 1 : current,
+      );
+    }, 1100);
+
+    return () => window.clearInterval(intervalId);
+  }, [isSending, pendingStages]);
+
+  useEffect(() => {
+    if (!revealingAssistant) {
+      return;
+    }
+
+    const hasPersistedMessage = messages.some(
+      (message) => message.id === revealingAssistant.message.id,
+    );
+
+    if (
+      hasPersistedMessage &&
+      revealingAssistant.visibleContent === revealingAssistant.fullContent
+    ) {
+      setRevealingAssistant(null);
+    }
+  }, [messages, revealingAssistant]);
+
+  const displayedMessages = useMemo(() => {
+    if (!revealingAssistant) {
+      return messages;
+    }
+
+    const revealedMessage = {
+      ...revealingAssistant.message,
+      content: revealingAssistant.visibleContent,
+    };
+    const existingIndex = messages.findIndex(
+      (message) => message.id === revealingAssistant.message.id,
+    );
+
+    if (existingIndex === -1) {
+      return [...messages, revealedMessage];
+    }
+
+    return messages.map((message) =>
+      message.id === revealingAssistant.message.id ? revealedMessage : message,
+    );
+  }, [messages, revealingAssistant]);
+
   const handleSend = useCallback(async () => {
     if (!input.trim() || isSending) {
       return;
     }
 
     const content = input.trim();
+    setPendingStages([]);
+    setActiveStageIndex(0);
     setPendingUserMessage(content);
     setInput("");
+
     try {
-      await sendMessage(content);
+      await streamMessage(content, {
+        onStage: (stage) => {
+          setPendingStages((current) => {
+            const existingIndex = current.findIndex((item) => item.id === stage.stageId);
+            if (existingIndex >= 0) {
+              setActiveStageIndex(existingIndex);
+              return current;
+            }
+
+            const next = [...current, { id: stage.stageId, label: stage.label }];
+            setActiveStageIndex(next.length - 1);
+            return next;
+          });
+        },
+        onTextDelta: (event) => {
+          setRevealingAssistant((current) =>
+            current
+              ? {
+                  ...current,
+                  fullContent: `${current.fullContent}${event.delta}`,
+                  visibleContent: `${current.visibleContent}${event.delta}`,
+                }
+              : {
+                  message: {
+                    id: "streaming-assistant",
+                    role: "assistant",
+                    content: "",
+                    agentId: activeAgentId,
+                    timestamp: new Date(),
+                },
+                  fullContent: event.delta,
+                  visibleContent: event.delta,
+                },
+          );
+        },
+        onMessageComplete: (event) => {
+          setRevealingAssistant((_current) => {
+            const completedMessage: Message = {
+              id: event.message.id,
+              role: "assistant",
+              content: event.message.content,
+              agentId: event.message.agentId,
+              timestamp: new Date(event.message.createdAt),
+              metadata: event.message.metadata as Message["metadata"],
+            };
+
+            return {
+              message: completedMessage,
+              fullContent: event.message.content,
+              visibleContent: event.message.content,
+            };
+          });
+        },
+      });
+    } catch {
+      setRevealingAssistant((current) =>
+        current?.visibleContent && current.visibleContent.length > 0
+          ? current
+          : null,
+      );
     } finally {
       setPendingUserMessage(null);
+      setPendingStages([]);
+      setActiveStageIndex(0);
     }
-  }, [input, isSending, sendMessage]);
+  }, [activeAgentId, input, isSending, streamMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -229,15 +365,22 @@ export default function Chat() {
             <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
             Loading conversation...
           </div>
-        ) : messages.length === 0 && !pendingUserMessage ? (
+        ) : displayedMessages.length === 0 && !pendingUserMessage ? (
           <EmptyState
             agentId={activeAgentId}
             onShortcutClick={(text) => setInput(text)}
           />
         ) : (
           <div className="mx-auto max-w-2xl space-y-8">
-            {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+            {displayedMessages.map((message) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isStreaming={
+                  revealingAssistant?.message.id === message.id &&
+                  message.content !== revealingAssistant.fullContent
+                }
+              />
             ))}
             {pendingUserMessage && (
               <MessageBubble
@@ -253,7 +396,8 @@ export default function Chat() {
             {isSending && (
               <ThinkingBubble
                 agentName={activeAgent.name}
-                supportingCount={calledAgentIds.length}
+                stages={pendingStages}
+                currentStageIndex={activeStageIndex}
               />
             )}
             <div ref={messagesEndRef} />
@@ -368,8 +512,10 @@ function EmptyState({
 
 function MessageBubble({
   message,
+  isStreaming = false,
 }: {
   message: Message;
+  isStreaming?: boolean;
 }) {
   const isUser = message.role === "user";
   const agent = AGENTS.find((item) => item.id === message.agentId);
@@ -378,10 +524,22 @@ function MessageBubble({
   const relatedVaultFiles = message.metadata?.relatedVaultFiles ?? [];
   const note = message.metadata?.note;
   const responseMode = message.metadata?.responseMode;
+  const consultationMode = message.metadata?.consultationMode;
+  const consultationReason = message.metadata?.consultationReason;
+  const contextSummary = message.metadata?.contextSummary;
+  const missingContext = message.metadata?.missingContext ?? [];
+  const executionNotes = message.metadata?.executionNotes ?? [];
   const providerSlug = message.metadata?.providerSlug;
   const modelName = message.metadata?.modelName;
+  const requestedProviderSlug = message.metadata?.requestedProviderSlug;
+  const requestedModelName = message.metadata?.requestedModelName;
   const inputTokens = message.metadata?.inputTokens;
   const outputTokens = message.metadata?.outputTokens;
+  const hasExplainability =
+    Boolean(consultationReason) ||
+    Boolean(contextSummary) ||
+    missingContext.length > 0 ||
+    executionNotes.length > 0;
 
   return (
     <motion.div
@@ -403,6 +561,9 @@ function MessageBubble({
           <span className="text-[11px] text-muted-foreground/40">
             {isUser ? "You" : agent?.name || "Aura"}
           </span>
+          {!isUser && isStreaming && (
+            <span className="text-[10px] text-sky-200/70">writing...</span>
+          )}
           {calledAgents && calledAgents.length > 0 && (
             <span className="text-[10px] text-muted-foreground/20">
               +{calledAgents.length} consulted
@@ -427,13 +588,18 @@ function MessageBubble({
             </div>
           )}
         </div>
+        {!isUser && isStreaming && (
+          <div className="mt-1 h-4 w-1 rounded-full bg-sky-300/70 animate-pulse" />
+        )}
 
         {!isUser && (
           <>
             {(note ||
               relatedVaultFiles.length > 0 ||
               responseMode === "limited" ||
-              (consultedAgentNames && consultedAgentNames.length > 0)) && (
+              (consultedAgentNames && consultedAgentNames.length > 0) ||
+              consultationMode === "explicit" ||
+              consultationMode === "auto") && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {note && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-card/30 px-2 py-0.5 text-[10px] text-muted-foreground/55">
@@ -447,16 +613,33 @@ function MessageBubble({
                     Consulted: {consultedAgentNames.join(", ")}
                   </span>
                 )}
+                {consultationMode && consultationMode !== "none" && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/20 bg-sky-500/5 px-2 py-0.5 text-[10px] text-sky-200/80">
+                    <Sparkles className="h-3 w-3" />
+                    {consultationMode === "explicit"
+                      ? "Explicit consult"
+                      : "Auto consult"}
+                  </span>
+                )}
                 {providerSlug && modelName && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-card/30 px-2 py-0.5 text-[10px] text-muted-foreground/55">
                     <Sparkles className="h-3 w-3" />
-                    {providerSlug} · {modelName}
+                    {providerSlug} | {modelName}
                   </span>
                 )}
+                {requestedProviderSlug &&
+                  (requestedProviderSlug !== providerSlug ||
+                    (requestedModelName && requestedModelName !== modelName)) && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-[10px] text-amber-200/80">
+                      <Info className="h-3 w-3" />
+                      Requested {requestedProviderSlug}
+                      {requestedModelName ? ` | ${requestedModelName}` : ""}
+                    </span>
+                  )}
                 {typeof inputTokens === "number" &&
                   typeof outputTokens === "number" && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-2 py-0.5 text-[10px] text-emerald-200/80">
-                      Tokens: {inputTokens} in · {outputTokens} out
+                      Tokens: {inputTokens} in | {outputTokens} out
                     </span>
                   )}
                 {relatedVaultFiles.length > 0 && (
@@ -472,6 +655,41 @@ function MessageBubble({
                   </span>
                 )}
               </div>
+            )}
+            {hasExplainability && (
+              <details className="mt-2 max-w-full rounded-lg border border-border/30 bg-card/20 px-3 py-2 text-[11px] text-muted-foreground/55">
+                <summary className="cursor-pointer list-none text-[11px] text-muted-foreground/45">
+                  How Aura built this answer
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {consultationReason && <p>{consultationReason}</p>}
+                  {contextSummary && <p>Context: {contextSummary}</p>}
+                  {missingContext.length > 0 && (
+                    <div>
+                      <p className="mb-1 text-muted-foreground/35">Missing context</p>
+                      <ul className="space-y-1 pl-4">
+                        {missingContext.map((item) => (
+                          <li key={item} className="list-disc">
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {executionNotes.length > 0 && (
+                    <div>
+                      <p className="mb-1 text-muted-foreground/35">Execution notes</p>
+                      <ul className="space-y-1 pl-4">
+                        {executionNotes.map((item) => (
+                          <li key={item} className="list-disc">
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </details>
             )}
             <div className="mt-1 flex items-center gap-0.5">
               <Button
@@ -500,11 +718,16 @@ function MessageBubble({
 
 function ThinkingBubble({
   agentName,
-  supportingCount,
+  stages,
+  currentStageIndex,
 }: {
   agentName: string;
-  supportingCount: number;
+  stages: PendingTurnStage[];
+  currentStageIndex: number;
 }) {
+  const activeStage =
+    stages[currentStageIndex] ?? stages[0] ?? { id: "draft", label: "Analyzing your message" };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -517,16 +740,31 @@ function ThinkingBubble({
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-muted-foreground/40">{agentName}</span>
-          <span className="text-[10px] text-muted-foreground/25">
-            {supportingCount > 0
-              ? `${supportingCount} helper${supportingCount > 1 ? "s" : ""} available if needed...`
-              : "thinking..."}
-          </span>
+          <span className="text-[10px] text-muted-foreground/25">working...</span>
         </div>
         <div className="flex items-center gap-2 rounded-2xl border border-border/40 bg-card/30 px-3 py-2 text-[12px] text-muted-foreground/50">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Analyzing your message
+          {activeStage.label}
         </div>
+        {stages.length > 1 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {stages.map((stage, index) => (
+              <span
+                key={stage.id}
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] transition-colors",
+                  index < currentStageIndex
+                    ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-200/70"
+                    : index === currentStageIndex
+                      ? "border-sky-500/20 bg-sky-500/5 text-sky-200/80"
+                      : "border-border/30 bg-card/20 text-muted-foreground/35",
+                )}
+              >
+                {stage.label}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );

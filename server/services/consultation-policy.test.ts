@@ -12,6 +12,7 @@ describe("resolveConsultationPlan", () => {
     expect(result.mode).toBe("explicit");
     expect(result.consultedAgentSlugs).toEqual(["nutrition"]);
     expect(result.explicitMentionedAgentSlugs).toEqual(["nutrition"]);
+    expect(result.rationale).toContain("explicitly tagged");
   });
 
   it("auto-consults a specialist for a strongly matched generalist request", () => {
@@ -24,6 +25,7 @@ describe("resolveConsultationPlan", () => {
 
     expect(result.mode).toBe("auto");
     expect(result.consultedAgentSlugs).toContain("bloodwork");
+    expect(result.rationale).toContain("Bloodwork");
   });
 
   it("prefers explicit mentions over automatic routing", () => {

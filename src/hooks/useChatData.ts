@@ -1,9 +1,13 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { ensureBackendSession, trpc } from "@/providers/trpc";
 import { useChatStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug, logClientError } from "@/lib/debug";
+import {
+  parseChatStreamChunk,
+  type ChatStreamEvent,
+} from "@/lib/chat-stream";
 import type { ChatSession, Message } from "@/types";
 
 function mapConversationSummary(item: {
@@ -63,6 +67,8 @@ export function useChatData() {
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
   const hydrateConversation = useChatStore(state => state.hydrateConversation);
   const clearChatStore = useChatStore(state => state.clearChat);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const rawConversationId = searchParams.get("conversation");
   const activeConversationId = rawConversationId
@@ -167,7 +173,7 @@ export function useChatData() {
 
   async function sendMessage(content: string) {
     const conversationId = await ensureConversationId(content);
-    await runWithAuthSyncRetry("send-message", () =>
+    const result = await runWithAuthSyncRetry("send-message", () =>
       sendMessageMutation.mutateAsync({
         conversationId,
         content,
@@ -179,6 +185,126 @@ export function useChatData() {
       utils.chat.listConversations.invalidate(),
       utils.chat.getConversation.invalidate({ id: conversationId }),
     ]);
+    return result;
+  }
+
+  async function streamMessage(
+    content: string,
+    handlers: {
+      onEvent?: (event: ChatStreamEvent) => void;
+      onStage?: (stage: Extract<ChatStreamEvent, { type: "stage" }>) => void;
+      onTextDelta?: (
+        event: Extract<ChatStreamEvent, { type: "text-delta" }>
+      ) => void;
+      onMessageComplete?: (
+        event: Extract<ChatStreamEvent, { type: "message-complete" }>
+      ) => void;
+    } = {}
+  ) {
+    const conversationId = await ensureConversationId(content);
+    const synced = await ensureBackendSession();
+
+    if (!synced) {
+      throw new Error(
+        "Your browser session exists, but the backend session is not ready yet."
+      );
+    }
+
+    setStreamError(null);
+    setIsStreaming(true);
+
+    try {
+      const makeStreamRequest = () =>
+        fetch("/api/chat/stream", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            conversationId,
+            content,
+            agentId: activeAgentId,
+            calledAgentIds,
+          }),
+        });
+
+      let response = await makeStreamRequest();
+
+      if (response.status === 401) {
+        const retrySynced = await ensureBackendSession({ force: true });
+        if (retrySynced) {
+          response = await makeStreamRequest();
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(`Streaming request failed with HTTP ${response.status}.`);
+      }
+
+      if (!response.body) {
+        throw new Error("Streaming response did not include a readable body.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completedMessage:
+        | Extract<ChatStreamEvent, { type: "message-complete" }>["message"]
+        | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+        const parsed = parseChatStreamChunk(buffer);
+        buffer = parsed.remainder;
+
+        for (const event of parsed.events) {
+          handlers.onEvent?.(event);
+
+          if (event.type === "stage") {
+            handlers.onStage?.(event);
+            continue;
+          }
+
+          if (event.type === "text-delta") {
+            handlers.onTextDelta?.(event);
+            continue;
+          }
+
+          if (event.type === "message-complete") {
+            completedMessage = event.message;
+            handlers.onMessageComplete?.(event);
+            continue;
+          }
+
+          if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        }
+
+        if (done) {
+          break;
+        }
+      }
+
+      await Promise.all([
+        utils.chat.listConversations.invalidate(),
+        utils.chat.getConversation.invalidate({ id: conversationId }),
+      ]);
+
+      return completedMessage;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Streaming the chat response failed unexpectedly.";
+      setStreamError(message);
+      throw error;
+    } finally {
+      setIsStreaming(false);
+    }
   }
 
   async function removeConversation(sessionId: string) {
@@ -198,6 +324,7 @@ export function useChatData() {
   }
 
   const error =
+    streamError ??
     createConversation.error ??
     sendMessageMutation.error ??
     deleteConversationMutation.error ??
@@ -210,11 +337,18 @@ export function useChatData() {
     messages,
     activeConversationId,
     isConversationLoading: conversationQuery.isLoading,
-    isSending: sendMessageMutation.isPending || createConversation.isPending,
-    error: error ? formatRuntimeError(error, "Chat") : null,
+    isSending:
+      isStreaming || sendMessageMutation.isPending || createConversation.isPending,
+    error:
+      typeof error === "string"
+        ? error
+        : error
+          ? formatRuntimeError(error, "Chat")
+          : null,
     selectConversation,
     startNewChat,
     sendMessage,
+    streamMessage,
     removeConversation,
   };
 }

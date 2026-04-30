@@ -20,6 +20,7 @@ import {
   getAgentDefinitionBySlug,
 } from "../queries/agents.js";
 import { resolveConsultationPlan } from "../services/consultation-policy.js";
+import { resolveExecutionTarget } from "../services/execution-target.js";
 import { ModelGatewayService } from "../services/model-gateway.js";
 import { planConversationTurn } from "../services/conversation-orchestrator.js";
 import { buildContextAwareFallbackReply } from "../services/fallback-reply.js";
@@ -27,6 +28,35 @@ import {
   buildPrimarySystemPrompt,
   buildSupportingSystemPrompt,
 } from "../services/prompt-composer.js";
+import {
+  buildContextSummary,
+  collectMissingContext,
+  formatPromptContext,
+} from "../services/context-prompt.js";
+import {
+  buildPendingTurnStages,
+  splitMessageForReveal,
+} from "../../src/lib/chat-experience.js";
+
+type ChatTurnStage = {
+  id: string;
+  label: string;
+};
+
+type ChatTurnStreamHandlers = {
+  onStage?: (stage: ChatTurnStage) => void | Promise<void>;
+  onTextDelta?: (delta: string) => void | Promise<void>;
+  streamPrimary?: boolean;
+};
+
+export const chatSendMessageInputSchema = z.object({
+  conversationId: z.number(),
+  content: z.string().min(1),
+  agentId: z.string(),
+  calledAgentIds: z.array(z.string()).default([]),
+});
+
+export type ChatSendMessageInput = z.infer<typeof chatSendMessageInputSchema>;
 
 const chatMetadataSchema = z
   .object({
@@ -36,8 +66,15 @@ const chatMetadataSchema = z
     note: z.string().optional(),
     responseMode: z.enum(["model", "limited"]).optional(),
     consultedAgentNames: z.array(z.string()).optional(),
+    consultationMode: z.enum(["none", "explicit", "auto"]).optional(),
+    consultationReason: z.string().optional(),
+    contextSummary: z.string().optional(),
+    missingContext: z.array(z.string()).optional(),
+    executionNotes: z.array(z.string()).optional(),
     providerSlug: z.string().optional(),
     modelName: z.string().optional(),
+    requestedProviderSlug: z.string().optional(),
+    requestedModelName: z.string().optional(),
     inputTokens: z.number().optional(),
     outputTokens: z.number().optional(),
   })
@@ -203,12 +240,29 @@ async function buildAssistantReply(params: {
   availableSupportingAgentIds: string[];
   userId: number;
   conversationId: number;
-}) {
+} & ChatTurnStreamHandlers) {
   const consultationPlan = resolveConsultationPlan({
     primaryAgentSlug: params.agentId,
     availableSupportingAgentSlugs: params.availableSupportingAgentIds,
     userMessage: params.userMessage,
   });
+  const stagePlan = buildPendingTurnStages({
+    primaryAgentId: params.agentId,
+    helperAgentIds: consultationPlan.consultedAgentSlugs,
+    userMessage: params.userMessage,
+  });
+  const emittedStages = new Set<string>();
+  const emitStage = async (stageId: string) => {
+    const stage = stagePlan.find(item => item.id === stageId);
+    if (!stage || emittedStages.has(stage.id)) {
+      return;
+    }
+
+    emittedStages.add(stage.id);
+    await params.onStage?.(stage);
+  };
+
+  await emitStage("analyze");
 
   const orchestrationPlan = await planConversationTurn({
     userId: params.userId,
@@ -218,17 +272,25 @@ async function buildAssistantReply(params: {
     latestUserMessage: params.userMessage,
   });
 
+  await emitStage("context");
+
   const primaryDefinition = await getAgentDefinitionBySlug(params.agentId);
   const primaryPrompt = primaryDefinition
     ? await getActiveSystemPrompt(primaryDefinition.id)
     : null;
+  const primaryExecutionTarget = await resolveExecutionTarget({
+    providerId:
+      orchestrationPlan.primaryContext.resolvedAgentProfile.providerId ?? null,
+    modelId: orchestrationPlan.primaryContext.resolvedAgentProfile.modelId ?? null,
+  });
   const supportingDefinitions = await Promise.all(
     consultationPlan.consultedAgentSlugs.map(slug =>
       getAgentDefinitionBySlug(slug)
     )
   );
 
-  const accessibleFiles = orchestrationPlan.primaryContext.accessibleFiles;
+  const primaryContext = orchestrationPlan.primaryContext;
+  const accessibleFiles = primaryContext.accessibleFiles;
   const supportingNames = supportingDefinitions
     .filter(Boolean)
     .map(agent => agent!.name);
@@ -241,13 +303,22 @@ async function buildAssistantReply(params: {
           .join(", ")
       : "No compatible vault files are linked yet for this conversation.";
 
-  const recentSummary =
-    orchestrationPlan.primaryContext.recentMessages.length > 0
-      ? orchestrationPlan.primaryContext.recentMessages
-          .slice(-3)
-          .map(message => `${message.role}: ${message.content}`)
-          .join(" | ")
-      : "No prior message history.";
+  const contextSummary = buildContextSummary({
+    recentMessages: primaryContext.recentMessages,
+    accessibleFiles,
+    conversationSummary: primaryContext.conversationSummary,
+    customContext: primaryContext.resolvedAgentProfile.customContext,
+    trainingNotes: primaryContext.resolvedAgentProfile.trainingNotes,
+    allowVaultContext: primaryContext.resolvedAgentProfile.allowVaultContext,
+  });
+  const missingContext = collectMissingContext({
+    recentMessages: primaryContext.recentMessages,
+    accessibleFiles,
+    conversationSummary: primaryContext.conversationSummary,
+    customContext: primaryContext.resolvedAgentProfile.customContext,
+    trainingNotes: primaryContext.resolvedAgentProfile.trainingNotes,
+    allowVaultContext: primaryContext.resolvedAgentProfile.allowVaultContext,
+  });
 
   const sections = [
     `Primary agent: ${primaryDefinition?.name ?? params.agentId}.`,
@@ -256,14 +327,23 @@ async function buildAssistantReply(params: {
       : "No supporting agents were consulted in this turn.",
     `Conversation mode: ${orchestrationPlan.orchestrationMode}.`,
     `User request: ${params.userMessage}`,
-    `Recent conversation context: ${recentSummary}`,
+    primaryContext.conversationSummary
+      ? `Conversation summary: ${primaryContext.conversationSummary}`
+      : "Conversation summary: none.",
     `Accessible vault context: ${accessibleSummary}`,
-    orchestrationPlan.primaryContext.resolvedAgentProfile.customContext
-      ? `User-specific agent context: ${orchestrationPlan.primaryContext.resolvedAgentProfile.customContext}`
+    primaryContext.resolvedAgentProfile.customContext
+      ? `User-specific agent context: ${primaryContext.resolvedAgentProfile.customContext}`
       : "User-specific agent context: none configured yet.",
-    orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes
-      ? `Training notes: ${orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes}`
+    primaryContext.resolvedAgentProfile.trainingNotes
+      ? `Training notes: ${primaryContext.resolvedAgentProfile.trainingNotes}`
       : "Training notes: none configured yet.",
+    `Context summary: ${contextSummary}.`,
+    missingContext.length > 0
+      ? `Missing context: ${missingContext.join(" | ")}`
+      : "Missing context: none identified.",
+    consultationPlan.rationale
+      ? `Consultation rationale: ${consultationPlan.rationale}`
+      : "Consultation rationale: none.",
     supportingNames.length > 0
       ? "Specialist consultation is active for this turn. If a model call fails, this preview becomes the fallback instead of breaking the chat."
       : "The primary agent answers directly on the fast path. If the model call fails, this preview becomes the fallback instead of breaking the chat.",
@@ -273,59 +353,60 @@ async function buildAssistantReply(params: {
   const gateway = new ModelGatewayService();
   const supportingRuns = await Promise.all(
     orchestrationPlan.supportingContexts.map(async ({ agentSlug, context }) => {
+      await emitStage(`consult-${agentSlug}`);
       const definition =
         supportingDefinitions.find(agent => agent?.slug === agentSlug) ?? null;
       const prompt = definition
         ? await getActiveSystemPrompt(definition.id)
         : null;
-      const supportingRecentSummary =
-        context.recentMessages.length > 0
-          ? context.recentMessages
-              .slice(-3)
-              .map(message => `${message.role}: ${message.content}`)
-              .join(" | ")
-          : "No prior message history.";
-      const supportingAccessibleSummary =
-        context.accessibleFiles.length > 0
-          ? context.accessibleFiles
-              .slice(0, 4)
-              .map(file => `${file.filename} (${file.category})`)
-              .join(", ")
-          : "No compatible vault files are linked yet for this conversation.";
+      const executionTarget = await resolveExecutionTarget({
+        providerId: context.resolvedAgentProfile.providerId ?? null,
+        modelId: context.resolvedAgentProfile.modelId ?? null,
+      });
+      const supportingMessages = [
+        {
+          role: "user" as const,
+          content: formatPromptContext({
+            userMessage: params.userMessage,
+            conversationSummary: context.conversationSummary,
+            recentMessages: context.recentMessages,
+            accessibleFiles: context.accessibleFiles,
+            customContext: context.resolvedAgentProfile.customContext,
+            trainingNotes: context.resolvedAgentProfile.trainingNotes,
+            allowVaultContext: context.resolvedAgentProfile.allowVaultContext,
+            consultationRationale: consultationPlan.rationale,
+            taskInstruction:
+              "Return a short specialist consultation for the primary assistant. Focus on the highest-signal domain insight and mention uncertainty instead of inventing facts.",
+          }),
+        },
+      ];
+
+      const supportingSystemPrompt = buildSupportingSystemPrompt({
+        agentSlug,
+        agentName: definition?.name ?? agentSlug,
+        basePrompt:
+          prompt?.templateText ??
+          `You are ${definition?.name ?? agentSlug}. Provide concise specialist support to the primary agent.`,
+        responseStyle: context.resolvedAgentProfile.responseStyle,
+      });
 
       try {
         const generation = await gateway.generateText({
-          providerSlug: "openai",
-          systemPrompt: buildSupportingSystemPrompt({
-            agentName: definition?.name ?? agentSlug,
-            basePrompt:
-              prompt?.templateText ??
-              `You are ${definition?.name ?? agentSlug}. Provide concise specialist support to the primary agent.`,
-            responseStyle: context.resolvedAgentProfile.responseStyle,
-          }),
-          messages: [
-            {
-              role: "user",
-              content: [
-                `User request: ${params.userMessage}`,
-                `Recent conversation context: ${supportingRecentSummary}`,
-                `Accessible vault context: ${supportingAccessibleSummary}`,
-                context.resolvedAgentProfile.customContext
-                  ? `User-specific instructions: ${context.resolvedAgentProfile.customContext}`
-                  : "User-specific instructions: none configured yet.",
-                context.resolvedAgentProfile.trainingNotes
-                  ? `Training notes: ${context.resolvedAgentProfile.trainingNotes}`
-                  : "Training notes: none configured yet.",
-                "Return a short specialist consultation for the primary agent. Mention uncertainty instead of inventing facts.",
-              ].join("\n\n"),
-            },
-          ],
+          providerSlug: executionTarget.providerSlug,
+          modelName: executionTarget.modelName,
+          systemPrompt: supportingSystemPrompt,
+          messages: supportingMessages,
         });
 
         return {
           agentSlug,
           agentDefinitionId: definition?.id ?? null,
           agentName: definition?.name ?? agentSlug,
+          requestedProviderSlug: executionTarget.requestedProviderSlug,
+          requestedModelName: executionTarget.requestedModelName,
+          executionNotes: executionTarget.executionNotes,
+          systemPrompt: supportingSystemPrompt,
+          inputMessages: supportingMessages,
           content: generation.text,
           status: "completed" as const,
           providerSlug: generation.providerSlug,
@@ -344,9 +425,14 @@ async function buildAssistantReply(params: {
           agentSlug,
           agentDefinitionId: definition?.id ?? null,
           agentName: definition?.name ?? agentSlug,
+          requestedProviderSlug: executionTarget.requestedProviderSlug,
+          requestedModelName: executionTarget.requestedModelName,
+          executionNotes: executionTarget.executionNotes,
+          systemPrompt: supportingSystemPrompt,
+          inputMessages: supportingMessages,
           content: `Supporting consultation planned for ${definition?.name ?? agentSlug}, but the model call failed and the run fell back to preview mode.`,
           status: "failed" as const,
-          providerSlug: "openai",
+          providerSlug: executionTarget.providerSlug,
           modelName: "fallback-preview",
           inputTokens: undefined,
           outputTokens: undefined,
@@ -357,49 +443,55 @@ async function buildAssistantReply(params: {
     })
   );
 
-  const supportingSummary =
-    supportingRuns.length > 0
-      ? supportingRuns
-          .map(
-            run =>
-              `${run.agentName}: ${run.content}${run.status === "failed" ? " [fallback]" : ""}`
-          )
-          .join("\n\n")
-      : "No supporting specialists consulted in this turn.";
-
   const modelMessages = [
     {
       role: "user" as const,
-      content: [
-        `User request: ${params.userMessage}`,
-        `Recent conversation context: ${recentSummary}`,
-        `Accessible vault context: ${accessibleSummary}`,
-        orchestrationPlan.primaryContext.resolvedAgentProfile.customContext
-          ? `User-specific instructions: ${orchestrationPlan.primaryContext.resolvedAgentProfile.customContext}`
-          : "User-specific instructions: none configured yet.",
-        orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes
-          ? `Training notes: ${orchestrationPlan.primaryContext.resolvedAgentProfile.trainingNotes}`
-          : "Training notes: none configured yet.",
-        `Supporting specialist notes:\n${supportingSummary}`,
-        "Produce a helpful user-facing answer. If context is missing, say what is missing without inventing facts.",
-      ].join("\n\n"),
+      content: formatPromptContext({
+        userMessage: params.userMessage,
+        conversationSummary: primaryContext.conversationSummary,
+        recentMessages: primaryContext.recentMessages,
+        accessibleFiles,
+        customContext: primaryContext.resolvedAgentProfile.customContext,
+        trainingNotes: primaryContext.resolvedAgentProfile.trainingNotes,
+        allowVaultContext: primaryContext.resolvedAgentProfile.allowVaultContext,
+        consultationRationale: consultationPlan.rationale,
+        supportingNotes: supportingRuns.map(run => ({
+          agentName: run.agentName,
+          content: run.content,
+          status: run.status,
+        })),
+        taskInstruction:
+          "Produce a helpful user-facing answer that stays grounded in the supplied context. Be explicit about what is known, what is inferred, and what is still missing.",
+      }),
     },
   ];
+  const primarySystemPrompt = buildPrimarySystemPrompt({
+    agentSlug: params.agentId,
+    agentName: primaryDefinition?.name ?? params.agentId,
+    basePrompt:
+      primaryPrompt?.templateText ??
+      `You are ${primaryDefinition?.name ?? params.agentId}. Answer helpfully and clearly.`,
+    responseStyle: primaryContext.resolvedAgentProfile.responseStyle,
+    canConsultSpecialists: consultationPlan.consultedAgentSlugs.length > 0,
+  });
 
   try {
-    const generation = await gateway.generateText({
-      providerSlug: "openai",
-      systemPrompt: buildPrimarySystemPrompt({
-        agentName: primaryDefinition?.name ?? params.agentId,
-        basePrompt:
-          primaryPrompt?.templateText ??
-          `You are ${primaryDefinition?.name ?? params.agentId}. Answer helpfully and clearly.`,
-        responseStyle:
-          orchestrationPlan.primaryContext.resolvedAgentProfile.responseStyle,
-        canConsultSpecialists: consultationPlan.consultedAgentSlugs.length > 0,
-      }),
-      messages: modelMessages,
-    });
+    await emitStage("draft");
+
+    const generation = params.streamPrimary
+      ? await gateway.streamText({
+          providerSlug: primaryExecutionTarget.providerSlug,
+          modelName: primaryExecutionTarget.modelName,
+          systemPrompt: primarySystemPrompt,
+          messages: modelMessages,
+          onTextDelta: params.onTextDelta,
+        })
+      : await gateway.generateText({
+          providerSlug: primaryExecutionTarget.providerSlug,
+          modelName: primaryExecutionTarget.modelName,
+          systemPrompt: primarySystemPrompt,
+          messages: modelMessages,
+        });
 
     return {
       content: generation.text,
@@ -407,15 +499,25 @@ async function buildAssistantReply(params: {
       orchestrationMode: orchestrationPlan.orchestrationMode,
       consultedAgentSlugs: consultationPlan.consultedAgentSlugs,
       supportingAgentNames: supportingNames,
+      consultationMode: consultationPlan.mode,
+      consultationReason: consultationPlan.rationale,
+      contextSummary,
+      missingContext,
+      executionNotes: primaryExecutionTarget.executionNotes,
       supportingRuns,
       note:
         accessibleFiles.length === 0 &&
-        orchestrationPlan.primaryContext.resolvedAgentProfile.allowVaultContext
+        primaryContext.resolvedAgentProfile.allowVaultContext
           ? "Podes subir estudios o notas al vault para personalizar mejor la respuesta."
           : null,
       primaryRun: {
         providerSlug: generation.providerSlug,
         modelName: generation.modelName,
+        requestedProviderSlug: primaryExecutionTarget.requestedProviderSlug,
+        requestedModelName: primaryExecutionTarget.requestedModelName,
+        executionNotes: primaryExecutionTarget.executionNotes,
+        systemPrompt: primarySystemPrompt,
+        inputMessages: modelMessages,
         inputTokens: generation.inputTokens,
         outputTokens: generation.outputTokens,
         errorMessage: null,
@@ -438,17 +540,33 @@ async function buildAssistantReply(params: {
     accessibleFileCount: accessibleFiles.length,
   });
 
+  if (params.streamPrimary) {
+    for (const chunk of splitMessageForReveal(gracefulFallback.content)) {
+      await params.onTextDelta?.(chunk);
+    }
+  }
+
   return {
     content: gracefulFallback.content,
     relatedVaultFiles: accessibleFiles.map(file => file.filename),
     orchestrationMode: orchestrationPlan.orchestrationMode,
     consultedAgentSlugs: consultationPlan.consultedAgentSlugs,
     supportingAgentNames: supportingNames,
+    consultationMode: consultationPlan.mode,
+    consultationReason: consultationPlan.rationale,
+    contextSummary,
+    missingContext,
+    executionNotes: primaryExecutionTarget.executionNotes,
     supportingRuns,
     note: gracefulFallback.note,
     primaryRun: {
-      providerSlug: "openai",
+      providerSlug: primaryExecutionTarget.providerSlug,
       modelName: "fallback-preview",
+      requestedProviderSlug: primaryExecutionTarget.requestedProviderSlug,
+      requestedModelName: primaryExecutionTarget.requestedModelName,
+      executionNotes: primaryExecutionTarget.executionNotes,
+      systemPrompt: primarySystemPrompt,
+      inputMessages: modelMessages,
       inputTokens: undefined,
       outputTokens: undefined,
       errorMessage: previewContent,
@@ -501,6 +619,241 @@ async function resolveModelReference(providerSlug: string, modelName: string) {
   return {
     providerId,
     modelEndpointId: endpointRows[0]?.id ?? null,
+  };
+}
+
+export async function sendChatMessage(params: {
+  input: ChatSendMessageInput;
+  userId: number;
+  streamPrimary?: boolean;
+  onStage?: (stage: ChatTurnStage) => void | Promise<void>;
+  onTextDelta?: (delta: string) => void | Promise<void>;
+}) {
+  const db = getDb();
+  const conversation = await requireConversationOwner(
+    params.input.conversationId,
+    params.userId
+  );
+
+  const participants = await syncConversationParticipants({
+    conversationId: params.input.conversationId,
+    primaryAgentSlug: params.input.agentId,
+    supportingAgentSlugs: params.input.calledAgentIds,
+  });
+
+  const userMetadata = {
+    calledAgents:
+      params.input.calledAgentIds.length > 0
+        ? params.input.calledAgentIds
+        : undefined,
+  };
+  const assistantReply = await buildAssistantReply({
+    userMessage: params.input.content,
+    agentId: params.input.agentId,
+    availableSupportingAgentIds: params.input.calledAgentIds,
+    userId: params.userId,
+    conversationId: params.input.conversationId,
+    streamPrimary: params.streamPrimary,
+    onStage: params.onStage,
+    onTextDelta: params.onTextDelta,
+  });
+  const primaryModelReference = await resolveModelReference(
+    assistantReply.primaryRun.providerSlug,
+    assistantReply.primaryRun.modelName
+  );
+  const supportingModelReferences = await Promise.all(
+    assistantReply.supportingRuns.map(run =>
+      resolveModelReference(run.providerSlug, run.modelName)
+    )
+  );
+  const assistantMetadata = {
+    calledAgents:
+      assistantReply.consultedAgentSlugs.length > 0
+        ? assistantReply.consultedAgentSlugs
+        : undefined,
+    relatedVaultFiles: assistantReply.relatedVaultFiles,
+    orchestrationMode: assistantReply.orchestrationMode,
+    note:
+      assistantReply.note ??
+      (assistantReply.responseMode === "limited"
+        ? `${assistantReply.primaryRun.providerSlug} no respondio correctamente y esta respuesta salio en modo fallback.`
+        : `${assistantReply.primaryRun.providerSlug} respondio en vivo.`),
+    responseMode: assistantReply.responseMode,
+    consultedAgentNames:
+      assistantReply.supportingAgentNames.length > 0
+        ? assistantReply.supportingAgentNames
+        : undefined,
+    consultationMode: assistantReply.consultationMode,
+    consultationReason: assistantReply.consultationReason ?? undefined,
+    contextSummary: assistantReply.contextSummary,
+    missingContext:
+      assistantReply.missingContext.length > 0
+        ? assistantReply.missingContext
+        : undefined,
+    executionNotes:
+      assistantReply.executionNotes.length > 0
+        ? assistantReply.executionNotes
+        : undefined,
+    providerSlug: assistantReply.primaryRun.providerSlug,
+    modelName: assistantReply.primaryRun.modelName,
+    requestedProviderSlug:
+      assistantReply.primaryRun.requestedProviderSlug ?? undefined,
+    requestedModelName:
+      assistantReply.primaryRun.requestedModelName ?? undefined,
+    inputTokens: assistantReply.primaryRun.inputTokens,
+    outputTokens: assistantReply.primaryRun.outputTokens,
+  };
+  let assistantMessageRecord:
+    | {
+        id: number;
+        createdAt: Date;
+      }
+    | undefined;
+
+  await db.transaction(async tx => {
+    const insertedUserMessage = await tx
+      .insert(messages)
+      .values({
+        conversationId: params.input.conversationId,
+        role: "user",
+        kind: "user",
+        content: params.input.content,
+        agentId: params.input.agentId,
+        metadata: JSON.stringify(userMetadata),
+      })
+      .returning({ id: messages.id });
+
+    const userMessageId = insertedUserMessage[0]?.id;
+    if (userMessageId == null) {
+      throw new Error("Failed to create the user message record.");
+    }
+
+    const insertedAssistantMessage = await tx
+      .insert(messages)
+      .values({
+        conversationId: params.input.conversationId,
+        role: "assistant",
+        kind: "assistant",
+        content: assistantReply.content,
+        agentId: params.input.agentId,
+        metadata: JSON.stringify(assistantMetadata),
+      })
+      .returning({ id: messages.id, createdAt: messages.createdAt });
+
+    assistantMessageRecord = insertedAssistantMessage[0];
+    const assistantMessageId = assistantMessageRecord?.id;
+    if (assistantMessageId == null) {
+      throw new Error("Failed to create the assistant message record.");
+    }
+
+    const primaryRun = await tx
+      .insert(agentRuns)
+      .values({
+        conversationId: params.input.conversationId,
+        messageId: assistantMessageId,
+        agentDefinitionId: participants.primary.id,
+        runType: "primary_reply",
+        providerId: primaryModelReference.providerId,
+        modelEndpointId: primaryModelReference.modelEndpointId,
+        status: assistantReply.primaryRun.usedFallback ? "failed" : "completed",
+        inputMessagesJson: assistantReply.primaryRun.inputMessages,
+        resolvedSystemPrompt: assistantReply.primaryRun.systemPrompt,
+        resolvedUserContext: params.input.content,
+        outputText: assistantReply.content,
+        inputTokens: assistantReply.primaryRun.inputTokens,
+        outputTokens: assistantReply.primaryRun.outputTokens,
+        errorMessage: assistantReply.primaryRun.errorMessage,
+        completedAt: new Date(),
+      })
+      .returning({ id: agentRuns.id });
+
+    const primaryRunId = primaryRun[0]?.id;
+    if (primaryRunId == null) {
+      throw new Error("Failed to persist the primary agent run.");
+    }
+
+    for (const [index, supportingRun] of assistantReply.supportingRuns.entries()) {
+      if (!supportingRun?.agentDefinitionId) {
+        continue;
+      }
+
+      await tx.insert(agentRuns).values({
+        conversationId: params.input.conversationId,
+        messageId: userMessageId,
+        agentDefinitionId: supportingRun.agentDefinitionId,
+        runType: "supporting_consult",
+        providerId: supportingModelReferences[index]?.providerId ?? null,
+        modelEndpointId:
+          supportingModelReferences[index]?.modelEndpointId ?? null,
+        status: supportingRun?.status ?? "failed",
+        inputMessagesJson: supportingRun?.inputMessages ?? [],
+        resolvedSystemPrompt: supportingRun?.systemPrompt ?? null,
+        resolvedUserContext: params.input.content,
+        outputText:
+          supportingRun?.content ??
+          `Supporting consultation planned for ${supportingRun?.agentName ?? "specialist"}.`,
+        inputTokens: supportingRun?.inputTokens,
+        outputTokens: supportingRun?.outputTokens,
+        errorMessage:
+          supportingRun?.errorMessage ??
+          "Supporting run result was not available.",
+        completedAt: new Date(),
+      });
+    }
+
+    for (const filename of assistantReply.relatedVaultFiles) {
+      await tx.insert(messageContextBlocks).values({
+        conversationId: params.input.conversationId,
+        messageId: assistantMessageId,
+        agentRunId: primaryRunId,
+        sourceType: "vault_file",
+        sourceId: filename,
+        title: filename,
+        content: `Vault file available to the run: ${filename}`,
+        metadata: {
+          relation: "accessible_vault_file",
+        },
+      });
+    }
+
+    await tx
+      .update(conversations)
+      .set({
+        agentId: params.input.agentId,
+        title:
+          conversation.title === "New conversation" || !conversation.title
+            ? buildConversationTitle(params.input.content)
+            : conversation.title,
+        orchestrationMode: assistantReply.orchestrationMode as
+          | "single_agent"
+          | "primary_plus_supporting"
+          | "review_loop",
+        lastAgentRunAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(conversations.id, params.input.conversationId));
+  });
+
+  logServerDebug("chat.sendMessage", {
+    userId: params.userId,
+    conversationId: params.input.conversationId,
+    agentId: params.input.agentId,
+    supportingAgentCount: params.input.calledAgentIds.length,
+    streamed: Boolean(params.streamPrimary),
+  });
+
+  return {
+    success: true,
+    assistantMessage: assistantMessageRecord
+      ? {
+          id: assistantMessageRecord.id,
+          role: "assistant" as const,
+          content: assistantReply.content,
+          agentId: params.input.agentId,
+          createdAt: assistantMessageRecord.createdAt,
+          metadata: assistantMetadata,
+        }
+      : null,
   };
 }
 
@@ -650,197 +1003,13 @@ export const chatRouter = createRouter({
     }),
 
   sendMessage: authedQuery
-    .input(
-      z.object({
-        conversationId: z.number(),
-        content: z.string().min(1),
-        agentId: z.string(),
-        calledAgentIds: z.array(z.string()).default([]),
-      })
-    )
+    .input(chatSendMessageInputSchema)
     .mutation(async ({ input, ctx }) => {
-      const db = getDb();
-      const conversation = await requireConversationOwner(
-        input.conversationId,
-        ctx.user.id
-      );
-
       try {
-        const participants = await syncConversationParticipants({
-          conversationId: input.conversationId,
-          primaryAgentSlug: input.agentId,
-          supportingAgentSlugs: input.calledAgentIds,
-        });
-
-        const userMetadata = {
-          calledAgents:
-            input.calledAgentIds.length > 0 ? input.calledAgentIds : undefined,
-        };
-        const assistantReply = await buildAssistantReply({
-          userMessage: input.content,
-          agentId: input.agentId,
-          availableSupportingAgentIds: input.calledAgentIds,
+        return await sendChatMessage({
+          input,
           userId: ctx.user.id,
-          conversationId: input.conversationId,
         });
-        const primaryModelReference = await resolveModelReference(
-          assistantReply.primaryRun.providerSlug,
-          assistantReply.primaryRun.modelName
-        );
-        const supportingModelReferences = await Promise.all(
-          assistantReply.supportingRuns.map(run =>
-            resolveModelReference(run.providerSlug, run.modelName)
-          )
-        );
-
-        await db.transaction(async tx => {
-          const insertedUserMessage = await tx
-            .insert(messages)
-            .values({
-              conversationId: input.conversationId,
-              role: "user",
-              kind: "user",
-              content: input.content,
-              agentId: input.agentId,
-              metadata: JSON.stringify(userMetadata),
-            })
-            .returning({ id: messages.id });
-
-          const userMessageId = insertedUserMessage[0]?.id;
-          if (userMessageId == null) {
-            throw new Error("Failed to create the user message record.");
-          }
-
-          const insertedAssistantMessage = await tx
-            .insert(messages)
-            .values({
-              conversationId: input.conversationId,
-              role: "assistant",
-              kind: "assistant",
-              content: assistantReply.content,
-              agentId: input.agentId,
-              metadata: JSON.stringify({
-                calledAgents:
-                  assistantReply.consultedAgentSlugs.length > 0
-                    ? assistantReply.consultedAgentSlugs
-                    : undefined,
-                relatedVaultFiles: assistantReply.relatedVaultFiles,
-                orchestrationMode: assistantReply.orchestrationMode,
-                note:
-                  assistantReply.note ??
-                  (assistantReply.responseMode === "limited"
-                    ? "OpenAI no respondio correctamente y esta respuesta salio en modo fallback."
-                    : "OpenAI respondio en vivo."),
-                responseMode: assistantReply.responseMode,
-                consultedAgentNames:
-                  assistantReply.supportingAgentNames.length > 0
-                    ? assistantReply.supportingAgentNames
-                    : undefined,
-                providerSlug: assistantReply.primaryRun.providerSlug,
-                modelName: assistantReply.primaryRun.modelName,
-                inputTokens: assistantReply.primaryRun.inputTokens,
-                outputTokens: assistantReply.primaryRun.outputTokens,
-              }),
-            })
-            .returning({ id: messages.id });
-
-          const assistantMessageId = insertedAssistantMessage[0]?.id;
-          if (assistantMessageId == null) {
-            throw new Error("Failed to create the assistant message record.");
-          }
-
-          const primaryRun = await tx
-            .insert(agentRuns)
-            .values({
-              conversationId: input.conversationId,
-              messageId: assistantMessageId,
-              agentDefinitionId: participants.primary.id,
-              runType: "primary_reply",
-              providerId: primaryModelReference.providerId,
-              modelEndpointId: primaryModelReference.modelEndpointId,
-              status: assistantReply.primaryRun.usedFallback ? "failed" : "completed",
-              resolvedUserContext: input.content,
-              outputText: assistantReply.content,
-              inputTokens: assistantReply.primaryRun.inputTokens,
-              outputTokens: assistantReply.primaryRun.outputTokens,
-              errorMessage: assistantReply.primaryRun.errorMessage,
-              completedAt: new Date(),
-            })
-            .returning({ id: agentRuns.id });
-
-          const primaryRunId = primaryRun[0]?.id;
-          if (primaryRunId == null) {
-            throw new Error("Failed to persist the primary agent run.");
-          }
-
-          for (const [index, supportingRun] of assistantReply.supportingRuns.entries()) {
-            if (!supportingRun?.agentDefinitionId) {
-              continue;
-            }
-
-            await tx.insert(agentRuns).values({
-              conversationId: input.conversationId,
-              messageId: userMessageId,
-              agentDefinitionId: supportingRun.agentDefinitionId,
-              runType: "supporting_consult",
-              providerId: supportingModelReferences[index]?.providerId ?? null,
-              modelEndpointId:
-                supportingModelReferences[index]?.modelEndpointId ?? null,
-              status: supportingRun?.status ?? "failed",
-              resolvedUserContext: input.content,
-              outputText:
-                supportingRun?.content ??
-                `Supporting consultation planned for ${supportingRun?.agentName ?? "specialist"}.`,
-              inputTokens: supportingRun?.inputTokens,
-              outputTokens: supportingRun?.outputTokens,
-              errorMessage:
-                supportingRun?.errorMessage ??
-                "Supporting run result was not available.",
-              completedAt: new Date(),
-            });
-          }
-
-          for (const filename of assistantReply.relatedVaultFiles) {
-            await tx.insert(messageContextBlocks).values({
-              conversationId: input.conversationId,
-              messageId: assistantMessageId,
-              agentRunId: primaryRunId,
-              sourceType: "vault_file",
-              sourceId: filename,
-              title: filename,
-              content: `Vault file available to the run: ${filename}`,
-              metadata: {
-                relation: "accessible_vault_file",
-              },
-            });
-          }
-
-          await tx
-            .update(conversations)
-            .set({
-              agentId: input.agentId,
-              title:
-                conversation.title === "New conversation" || !conversation.title
-                  ? buildConversationTitle(input.content)
-                  : conversation.title,
-              orchestrationMode: assistantReply.orchestrationMode as
-                | "single_agent"
-                | "primary_plus_supporting"
-                | "review_loop",
-              lastAgentRunAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(conversations.id, input.conversationId));
-        });
-
-        logServerDebug("chat.sendMessage", {
-          userId: ctx.user.id,
-          conversationId: input.conversationId,
-          agentId: input.agentId,
-          supportingAgentCount: input.calledAgentIds.length,
-        });
-
-        return { success: true };
       } catch (error) {
         logServerError("chat.sendMessage.failed", error, {
           userId: ctx.user.id,

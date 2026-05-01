@@ -9,9 +9,6 @@ import { useChatStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
-import {
-  type ChatStreamEvent,
-} from "@/lib/chat-stream";
 import type { ChatSession, Message } from "@/types";
 
 function mapConversationSummary(item: {
@@ -155,14 +152,15 @@ export function useKimiChatData() {
   async function streamMessage(
     content: string,
     handlers: {
-      onEvent?: (event: ChatStreamEvent) => void;
-      onStage?: (stage: Extract<ChatStreamEvent, { type: "stage" }>) => void;
-      onTextDelta?: (
-        event: Extract<ChatStreamEvent, { type: "text-delta" }>,
-      ) => void;
-      onMessageComplete?: (
-        event: Extract<ChatStreamEvent, { type: "message-complete" }>,
-      ) => void;
+      onTextDelta?: (delta: string) => void;
+      onMessageComplete?: (message: {
+        id: string;
+        role: "assistant";
+        content: string;
+        agentId: string;
+        createdAt: string;
+        metadata?: Record<string, unknown>;
+      }) => void;
     } = {},
   ) {
     const conversationId = await ensureConversationId(content);
@@ -204,39 +202,6 @@ export function useKimiChatData() {
         });
       }
 
-      handlers.onEvent?.({
-        type: "stage",
-        stageId: "analyze",
-        label: "Analyzing your message",
-      });
-      handlers.onStage?.({
-        type: "stage",
-        stageId: "analyze",
-        label: "Analyzing your message",
-      });
-
-      handlers.onEvent?.({
-        type: "stage",
-        stageId: "context",
-        label: "Reviewing available context",
-      });
-      handlers.onStage?.({
-        type: "stage",
-        stageId: "context",
-        label: "Reviewing available context",
-      });
-
-      handlers.onEvent?.({
-        type: "stage",
-        stageId: "draft",
-        label: "Drafting the answer",
-      });
-      handlers.onStage?.({
-        type: "stage",
-        stageId: "draft",
-        label: "Drafting the answer",
-      });
-
       let response = await requestResponse();
 
       if (response.status === 401) {
@@ -253,26 +218,18 @@ export function useKimiChatData() {
       }
 
       const payload = (await response.json()) as {
-        message: Extract<ChatStreamEvent, { type: "message-complete" }>["message"];
+        message: {
+          id: string;
+          role: "assistant";
+          content: string;
+          agentId: string;
+          createdAt: string;
+          metadata?: Record<string, unknown>;
+        };
       };
 
-      handlers.onEvent?.({
-        type: "text-delta",
-        delta: payload.message.content,
-      });
-      handlers.onTextDelta?.({
-        type: "text-delta",
-        delta: payload.message.content,
-      });
-
-      handlers.onEvent?.({
-        type: "message-complete",
-        message: payload.message,
-      });
-      handlers.onMessageComplete?.({
-        type: "message-complete",
-        message: payload.message,
-      });
+      handlers.onTextDelta?.(payload.message.content);
+      handlers.onMessageComplete?.(payload.message);
 
       await Promise.all([
         utils.chat.listConversations.invalidate(),

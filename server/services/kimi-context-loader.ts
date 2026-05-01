@@ -12,20 +12,10 @@ export async function loadKimiTurnContext(params: {
   const agent =
     AGENTS.find(candidate => candidate.id === params.agentSlug) ?? AGENTS[0];
 
-  const recentMessages = await getDb()
-    .select({
-      role: messages.role,
-      content: messages.content,
-    })
-    .from(messages)
-    .where(eq(messages.conversationId, params.conversationId))
-    .orderBy(desc(messages.createdAt))
-    .limit(8);
-
   return {
     systemPrompt: agent.systemPrompt,
     responseStyle: "detailed" as const,
-    recentMessages: recentMessages.reverse(),
+    recentMessages: [],
     thinkingMode: "disabled" as const,
     promptCacheKey: `kimi:v1:conversation:${params.conversationId}`,
     safetyIdentifier: `user-${params.userId}`,

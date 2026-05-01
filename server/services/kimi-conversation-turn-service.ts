@@ -108,11 +108,6 @@ export class KimiConversationTurnService {
       params.userId,
     );
 
-    await params.onStage?.({
-      id: "analyze",
-      label: "Analyzing your message",
-    });
-
     const context = await contextLoader({
       userId: params.userId,
       conversationId: params.input.conversationId,
@@ -143,25 +138,15 @@ export class KimiConversationTurnService {
       .filter(Boolean)
       .join("\n\n");
 
-    await params.onStage?.({
-      id: "context",
-      label: "Reviewing available context",
-    });
-
     const request = buildKimiChatRequest({
       model: "kimi-k2.6",
       systemPrompt: resolvedSystemPrompt,
-      messages: contextPayload.messages,
+      messages: [{ role: "user", content: params.input.content }],
       promptCacheKey:
         context.promptCacheKey ??
         buildKimiPromptCacheKey(params.input.conversationId),
       safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
       thinking: context.thinkingMode,
-    });
-
-    await params.onStage?.({
-      id: "draft",
-      label: "Drafting the answer",
     });
 
     const completion = params.streamPrimary
@@ -220,17 +205,9 @@ function buildContextPayload(input: {
     content: string;
   }>;
 }) {
-  const shortTerm = buildShortTermMemoryWindow({
-    messages: input.recentMessages,
-    maxRecentMessages: 6,
-  });
-
   return {
     systemContext: "",
-    messages: [
-      ...shortTerm.recentMessages,
-      { role: "user" as const, content: input.userMessage },
-    ],
+    messages: [{ role: "user" as const, content: input.userMessage }],
   };
 }
 

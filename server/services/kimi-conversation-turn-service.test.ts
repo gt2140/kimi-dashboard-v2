@@ -103,18 +103,7 @@ describe("KimiConversationTurnService", () => {
       "assistant-message",
       "conversation-update",
     ]);
-    expect(onStage).toHaveBeenNthCalledWith(1, {
-      id: "analyze",
-      label: "Analyzing your message",
-    });
-    expect(onStage).toHaveBeenNthCalledWith(2, {
-      id: "context",
-      label: "Reviewing available context",
-    });
-    expect(onStage).toHaveBeenNthCalledWith(3, {
-      id: "draft",
-      label: "Drafting the answer",
-    });
+    expect(onStage).not.toHaveBeenCalled();
     expect(onTextDelta).toHaveBeenNthCalledWith(1, "ApoB");
     expect(onTextDelta).toHaveBeenNthCalledWith(2, " looks improved.");
     expect(result.assistantMessage?.content).toBe("ApoB looks improved.");
@@ -191,6 +180,13 @@ describe("KimiConversationTurnService", () => {
     expect(kimiClient.streamChatCompletion).not.toHaveBeenCalled();
     expect(result.assistantMessage?.content).toBe(
       "Te respondo con el agente principal solamente.",
+    );
+    expect(kimiClient.createChatCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          { role: "user", content: "Analiza esto sin helpers." },
+        ]),
+      }),
     );
     expect(conversationRepository.createUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({

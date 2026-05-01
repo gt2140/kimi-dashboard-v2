@@ -6,9 +6,10 @@ describe("KimiConversationTurnService", () => {
 
   beforeEach(() => {
     callOrder = [];
+    vi.restoreAllMocks();
   });
 
-  it("persists tool-call state before streaming the final assistant answer", async () => {
+  it("persists the user message, streams the Kimi answer, and saves the assistant reply", async () => {
     const conversationRepository = {
       requireConversationOwner: vi.fn().mockResolvedValue({
         id: 12,
@@ -25,58 +26,15 @@ describe("KimiConversationTurnService", () => {
           createdAt: new Date("2026-05-01T03:00:00.000Z"),
         };
       }),
-      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const agentRunRepository = {
-      createPrimaryRun: vi.fn().mockImplementation(async () => {
-        callOrder.push("primary-run");
-        return { id: 303 };
+      updateConversationAfterTurn: vi.fn().mockImplementation(async () => {
+        callOrder.push("conversation-update");
       }),
-      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
-      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
-      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
-      saveToolCallBatch: vi.fn().mockImplementation(async () => {
-        callOrder.push("persist-tool-calls");
-      }),
-      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
     };
 
     const kimiClient = {
-      createChatCompletion: vi
-        .fn()
-        .mockImplementationOnce(async () => {
-          callOrder.push("initial-completion");
-          return {
-            id: "chatcmpl-initial",
-            choices: [
-              {
-                finish_reason: "tool_calls",
-                message: {
-                  role: "assistant",
-                  content: "",
-                  tool_calls: [
-                    {
-                      id: "tool-1",
-                      type: "function",
-                      function: {
-                        name: "search_memory",
-                        arguments: JSON.stringify({ query: "ldl apob trend" }),
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-            usage: {
-              prompt_tokens: 120,
-              completion_tokens: 20,
-              total_tokens: 140,
-            },
-          };
-        }),
+      createChatCompletion: vi.fn(),
       streamChatCompletion: vi.fn().mockImplementation(async (_request, handlers) => {
-        callOrder.push("final-stream");
+        callOrder.push("kimi-stream");
         await handlers.onTextDelta?.("ApoB");
         await handlers.onTextDelta?.(" looks improved.");
         return {
@@ -91,52 +49,37 @@ describe("KimiConversationTurnService", () => {
             },
           ],
           usage: {
-            prompt_tokens: 180,
-            completion_tokens: 32,
-            total_tokens: 212,
+            prompt_tokens: 42,
+            completion_tokens: 12,
+            total_tokens: 54,
           },
         };
       }),
     };
 
-    const toolExecutor = {
-      getEnabledTools: vi.fn().mockResolvedValue([
-        {
-          function: {
-            name: "search_memory",
+    const contextLoader = vi.fn().mockImplementation(async () => {
+      callOrder.push("context");
+      return {
+        systemPrompt: "You are Cardio Deep.",
+        responseStyle: "detailed" as const,
+        recentMessages: [
+          {
+            role: "user" as const,
+            content: "How are my lipids trending?",
           },
-        },
-      ]),
-      executeToolCalls: vi.fn().mockResolvedValue([
-        {
-          toolCallId: "tool-1",
-          toolName: "search_memory",
-          content: JSON.stringify({
-            result: "Stored memory says the user is working on LDL and ApoB.",
-          }),
-        },
-      ]),
-    };
-
-    const contextLoader = vi.fn().mockResolvedValue({
-      systemPrompt: "You are Generalist.",
-      responseStyle: "detailed",
-      recentMessages: [],
-      conversationSummary: "Prior turns discussed lipids.",
-      longTermMemories: [{ key: "goal", value: "Lower ApoB" }],
-      selectedVaultChunks: [],
-      relatedVaultFiles: [],
-      enabledFormulaTools: ["moonshot/memory:latest"],
-      thinkingMode: "enabled",
-      promptCacheKey: "kimi:v1:conversation:12",
-      safetyIdentifier: "user-12",
+        ],
+        thinkingMode: "disabled" as const,
+        promptCacheKey: "kimi:v1:conversation:12",
+        safetyIdentifier: "user-7",
+      };
     });
+
+    const onTextDelta = vi.fn();
+    const onStage = vi.fn();
 
     const service = new KimiConversationTurnService({
       conversationRepository,
-      agentRunRepository,
       kimiClient,
-      toolExecutor,
       contextLoader,
     });
 
@@ -144,48 +87,50 @@ describe("KimiConversationTurnService", () => {
       input: {
         conversationId: 12,
         content: "How is my ApoB trend looking?",
-        agentId: "generalist",
+        agentId: "cardio-deep",
         calledAgentIds: [],
       },
       userId: 7,
       streamPrimary: true,
-      onTextDelta: vi.fn(),
-      onStage: vi.fn(),
+      onTextDelta,
+      onStage,
     });
 
     expect(callOrder).toEqual([
+      "context",
       "user-message",
-      "primary-run",
-      "initial-completion",
-      "persist-tool-calls",
-      "final-stream",
+      "kimi-stream",
       "assistant-message",
+      "conversation-update",
     ]);
-    expect(agentRunRepository.finalizePrimaryRun).toHaveBeenCalledWith(
-      303,
+    expect(onStage).toHaveBeenNthCalledWith(1, {
+      id: "analyze",
+      label: "Analyzing your message",
+    });
+    expect(onStage).toHaveBeenNthCalledWith(2, {
+      id: "context",
+      label: "Reviewing available context",
+    });
+    expect(onStage).toHaveBeenNthCalledWith(3, {
+      id: "draft",
+      label: "Drafting the answer",
+    });
+    expect(onTextDelta).toHaveBeenNthCalledWith(1, "ApoB");
+    expect(onTextDelta).toHaveBeenNthCalledWith(2, " looks improved.");
+    expect(result.assistantMessage?.content).toBe("ApoB looks improved.");
+    expect(conversationRepository.createAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "completed",
-        outputText: "ApoB looks improved.",
-        finishReason: "stop",
-        providerRequestId: "chatcmpl-final",
-        toolCallsJson: [
-          expect.objectContaining({
-            id: "tool-1",
-          }),
-        ],
-        usageJson: expect.objectContaining({
-          totalTokens: 212,
-        }),
+        content: "ApoB looks improved.",
+        agentId: "cardio-deep",
       }),
     );
-    expect(result.assistantMessage?.content).toBe("ApoB looks improved.");
   });
 
-  it("falls back to a direct Kimi answer when official tools are unavailable", async () => {
+  it("ignores helper agent ids and completes the turn as a single-agent Kimi request", async () => {
     const conversationRepository = {
       requireConversationOwner: vi.fn().mockResolvedValue({
         id: 18,
-        title: "Fallback conversation",
+        title: "Single agent conversation",
       }),
       createUserMessage: vi.fn().mockResolvedValue({ id: 111 }),
       createAssistantMessage: vi.fn().mockResolvedValue({
@@ -193,15 +138,6 @@ describe("KimiConversationTurnService", () => {
         createdAt: new Date("2026-05-01T04:00:00.000Z"),
       }),
       updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const agentRunRepository = {
-      createPrimaryRun: vi.fn().mockResolvedValue({ id: 333 }),
-      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
-      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
-      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
-      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
-      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
     };
 
     const kimiClient = {
@@ -212,92 +148,60 @@ describe("KimiConversationTurnService", () => {
             finish_reason: "stop",
             message: {
               role: "assistant",
-              content: "Te respondo directamente sin tools oficiales.",
+              content: "Te respondo con el agente principal solamente.",
             },
           },
         ],
         usage: {
-          prompt_tokens: 80,
-          completion_tokens: 24,
-          total_tokens: 104,
+          prompt_tokens: 24,
+          completion_tokens: 14,
+          total_tokens: 38,
         },
       }),
-      streamChatCompletion: vi.fn().mockResolvedValue({
-        id: "chatcmpl-fallback-stream",
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              role: "assistant",
-              content: "Te respondo directamente sin tools oficiales.",
-            },
-          },
-        ],
-        usage: {
-          prompt_tokens: 80,
-          completion_tokens: 24,
-          total_tokens: 104,
-        },
-      }),
-    };
-
-    const toolExecutor = {
-      getEnabledTools: vi
-        .fn()
-        .mockRejectedValue(new Error("Tool registry unavailable")),
-      executeToolCalls: vi.fn(),
+      streamChatCompletion: vi.fn(),
     };
 
     const contextLoader = vi.fn().mockResolvedValue({
       systemPrompt: "You are Generalist.",
-      responseStyle: "detailed",
+      responseStyle: "detailed" as const,
       recentMessages: [],
-      conversationSummary: null,
-      longTermMemories: [],
-      selectedVaultChunks: [],
-      relatedVaultFiles: [],
-      enabledFormulaTools: [
-        "moonshot/memory:latest",
-        "moonshot/web-search:latest",
-      ],
-      thinkingMode: "enabled",
+      thinkingMode: "disabled" as const,
       promptCacheKey: "kimi:v1:conversation:18",
-      safetyIdentifier: "user-18",
+      safetyIdentifier: "user-9",
     });
 
     const service = new KimiConversationTurnService({
       conversationRepository,
-      agentRunRepository,
       kimiClient,
-      toolExecutor,
       contextLoader,
     });
 
     const result = await service.executeTurn({
       input: {
         conversationId: 18,
-        content: "Analiza este caso aunque no tengas tools.",
+        content: "Analiza esto sin helpers.",
         agentId: "generalist",
-        calledAgentIds: [],
+        calledAgentIds: ["bloodwork", "cardio-deep"],
       },
       userId: 9,
       streamPrimary: false,
     });
 
-    expect(toolExecutor.getEnabledTools).toHaveBeenCalledTimes(1);
-    expect(kimiClient.createChatCompletion).toHaveBeenCalled();
-    expect(kimiClient.createChatCompletion.mock.calls[0]?.[0]).not.toHaveProperty(
-      "tools",
-    );
-    expect(toolExecutor.executeToolCalls).not.toHaveBeenCalled();
+    expect(kimiClient.createChatCompletion).toHaveBeenCalledTimes(1);
+    expect(kimiClient.streamChatCompletion).not.toHaveBeenCalled();
     expect(result.assistantMessage?.content).toBe(
-      "Te respondo directamente sin tools oficiales.",
+      "Te respondo con el agente principal solamente.",
     );
-    expect(agentRunRepository.finalizePrimaryRun).toHaveBeenCalledWith(
-      333,
+    expect(conversationRepository.createUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "completed",
-        toolCallsJson: [],
+        metadata: expect.objectContaining({
+          ignoredHelperAgentIds: ["bloodwork", "cardio-deep"],
+        }),
+      }),
+    );
+    expect(conversationRepository.updateConversationAfterTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orchestrationMode: "single_agent",
       }),
     );
   });

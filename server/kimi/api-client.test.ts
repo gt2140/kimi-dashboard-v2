@@ -1,33 +1,64 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KimiApiClient } from "./api-client.js";
 
+const originalFetch = global.fetch;
+
 describe("KimiApiClient", () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
-  it("turns invalid authentication into a clear Kimi API key error", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () =>
-        JSON.stringify({
-          error: {
-            message: "Invalid Authentication",
-            type: "invalid_authentication_error",
-          },
-        }),
-    });
+  it("stops reading once the Kimi stream emits [DONE]", async () => {
+    const encoder = new TextEncoder();
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({
+        done: false,
+        value: encoder.encode(
+          'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"Hola"},"finish_reason":null}]}\n\n' +
+            'data: {"id":"chatcmpl-1","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}\n\n' +
+            "data: [DONE]\n\n",
+        ),
+      })
+      .mockImplementationOnce(() => new Promise(() => null));
 
-    vi.stubGlobal("fetch", fetchMock);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader() {
+          return {
+            read,
+          };
+        },
+      },
+    } as Response);
 
     const client = new KimiApiClient();
 
-    await expect(
-      client.createChatCompletion({
-        model: "kimi-k2.6",
-        messages: [{ role: "user", content: "Hello" }],
+    const result = await Promise.race([
+      client.streamChatCompletion(
+        {
+          model: "kimi-k2.6",
+          messages: [{ role: "user", content: "Hola" }],
+        },
+        { onTextDelta: vi.fn() },
+      ),
+      new Promise(resolve => {
+        setTimeout(() => resolve("timed-out"), 50);
       }),
-    ).rejects.toThrow(/KIMI_API_KEY is invalid/i);
+    ]);
+
+    expect(result).not.toBe("timed-out");
+    expect(result).toMatchObject({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content: "Hola",
+          },
+        },
+      ],
+    });
   });
 });

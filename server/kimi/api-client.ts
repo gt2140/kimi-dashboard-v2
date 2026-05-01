@@ -130,6 +130,7 @@ export class KimiApiClient {
     const decoder = new TextDecoder();
     let buffer = "";
     let finalPayload: KimiCompletionResponse = {};
+    let accumulatedContent = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -141,6 +142,7 @@ export class KimiApiClient {
         const choice = payload.choices?.[0];
         const delta = choice && "delta" in choice ? (choice as { delta?: { content?: string } }).delta : undefined;
         if (delta?.content) {
+          accumulatedContent += delta.content;
           await handlers.onTextDelta?.(delta.content);
         }
 
@@ -153,8 +155,10 @@ export class KimiApiClient {
                 message: {
                   role: "assistant",
                   content:
-                    (finalPayload.choices?.[0]?.message?.content ?? "") +
-                    collectedContentFromPayloads(parsed.payloads),
+                    accumulatedContent ||
+                    choice.message?.content ||
+                    finalPayload.choices?.[0]?.message?.content ||
+                    "",
                 },
               },
             ],
@@ -162,13 +166,16 @@ export class KimiApiClient {
         }
       }
 
-      if (done) {
+      if (done || parsed.sawDone) {
         break;
       }
     }
 
     if (!finalPayload.choices?.[0]?.message?.content) {
-      const allContent = collectedContentFromPayloads(parseKimiSseBuffer(buffer).payloads);
+      const trailing = parseKimiSseBuffer(`${buffer}\n\n`);
+      const allContent =
+        accumulatedContent ||
+        collectedContentFromPayloads(trailing.payloads);
       finalPayload = {
         ...finalPayload,
         choices: [
@@ -222,6 +229,7 @@ function parseKimiSseBuffer(buffer: string) {
   const blocks = buffer.split("\n\n");
   const remainder = blocks.pop() ?? "";
   const payloads: Array<Record<string, any>> = [];
+  let sawDone = false;
 
   for (const block of blocks) {
     const payload = block
@@ -231,7 +239,12 @@ function parseKimiSseBuffer(buffer: string) {
       .map(line => line.slice(5).trim())
       .join("\n");
 
-    if (!payload || payload === "[DONE]") {
+    if (!payload) {
+      continue;
+    }
+
+    if (payload === "[DONE]") {
+      sawDone = true;
       continue;
     }
 
@@ -245,6 +258,7 @@ function parseKimiSseBuffer(buffer: string) {
   return {
     payloads,
     remainder,
+    sawDone,
   };
 }
 

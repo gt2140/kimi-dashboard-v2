@@ -2,24 +2,15 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
   agentDefinitions,
-  agentRuns,
   conversationAgents,
   conversations,
-  messageContextBlocks,
   messages,
 } from "../../db/schema.js";
 import { logServerDebug, logServerError } from "../lib/debug.js";
 import { getDb } from "../queries/connection.js";
 import { ConversationRepository } from "../repositories/conversation-repository.js";
-import { type ChatTurnStage, generatePrimaryReply } from "../services/chat-reply-builder.js";
 import { syncConversationParticipants } from "../services/conversation-participants.js";
-import {
-  ConversationTurnService,
-  type ConversationTurnInput,
-} from "../services/conversation-turn-service.js";
 import { createRouter, authedQuery } from "./middleware.js";
-
-export { generatePrimaryReply };
 
 export const chatSendMessageInputSchema = z.object({
   conversationId: z.number(),
@@ -53,9 +44,6 @@ const chatMetadataSchema = z
   .optional();
 
 const conversationRepository = new ConversationRepository();
-const conversationTurnService = new ConversationTurnService({
-  conversationRepository,
-});
 
 function parseMetadata(metadata: string | null) {
   if (!metadata) {
@@ -67,16 +55,6 @@ function parseMetadata(metadata: string | null) {
   } catch {
     return undefined;
   }
-}
-
-export async function sendChatMessage(params: {
-  input: ConversationTurnInput;
-  userId: number;
-  streamPrimary?: boolean;
-  onStage?: (stage: ChatTurnStage) => void | Promise<void>;
-  onTextDelta?: (delta: string) => void | Promise<void>;
-}) {
-  return conversationTurnService.executeTurn(params);
 }
 
 export const chatRouter = createRouter({
@@ -225,24 +203,6 @@ export const chatRouter = createRouter({
       }
     }),
 
-  sendMessage: authedQuery
-    .input(chatSendMessageInputSchema)
-    .mutation(async ({ input, ctx }) => {
-      try {
-        return await sendChatMessage({
-          input,
-          userId: ctx.user.id,
-        });
-      } catch (error) {
-        logServerError("chat.sendMessage.failed", error, {
-          userId: ctx.user.id,
-          conversationId: input.conversationId,
-          agentId: input.agentId,
-        });
-        throw error;
-      }
-    }),
-
   deleteConversation: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
@@ -254,10 +214,6 @@ export const chatRouter = createRouter({
         await tx
           .delete(conversationAgents)
           .where(eq(conversationAgents.conversationId, input.id));
-        await tx
-          .delete(messageContextBlocks)
-          .where(eq(messageContextBlocks.conversationId, input.id));
-        await tx.delete(agentRuns).where(eq(agentRuns.conversationId, input.id));
         await tx.delete(conversations).where(eq(conversations.id, input.id));
       });
       logServerDebug("chat.deleteConversation", {

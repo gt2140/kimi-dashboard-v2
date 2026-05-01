@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { app } from "./http-app.js";
 
 describe("Kimi HTTP routes", () => {
+  it("does not expose the legacy chat stream anymore", async () => {
+    const response = await app.fetch(
+      new Request("http://localhost/api/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+  });
+
   it("protects kimi chat stream with auth", async () => {
     const response = await app.fetch(
       new Request("http://localhost/api/kimi/chat/stream", {

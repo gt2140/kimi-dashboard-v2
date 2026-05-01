@@ -185,7 +185,6 @@ export function useAuth(options?: UseAuthOptions) {
   const authLoading =
     !sessionReady ||
     logoutMutation.isPending ||
-    authStatus.isLoading ||
     (hasSupabaseSession &&
       backendSession.phase === "syncing" &&
       !backendSession.backendReady) ||

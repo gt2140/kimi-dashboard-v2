@@ -71,6 +71,13 @@ describe("ConversationTurnService", () => {
       primary: { id: 1 },
       supporting: [],
     });
+    syncParticipants.mockImplementation(async () => {
+      callOrder.push("sync-participants");
+      return {
+        primary: { id: 1 },
+        supporting: [],
+      };
+    });
     const resolveModelReference = vi.fn().mockResolvedValue({
       providerId: 1,
       modelEndpointId: 2,
@@ -100,8 +107,9 @@ describe("ConversationTurnService", () => {
       userId: 1,
     });
 
-    expect(callOrder.slice(0, 3)).toEqual([
+    expect(callOrder.slice(0, 4)).toEqual([
       "user-message",
+      "sync-participants",
       "primary-run",
       "reply-builder",
     ]);

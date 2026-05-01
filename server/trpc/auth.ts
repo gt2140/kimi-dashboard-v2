@@ -7,6 +7,9 @@ import { signSessionToken } from "../kimi/session.js";
 import { verifySessionToken } from "../kimi/session.js";
 import { findUserByUnionId, upsertUser } from "../queries/users.js";
 import { getSessionCookieOptions } from "../lib/cookies.js";
+import { withAbortableTimeout } from "../services/async-guard.js";
+
+const SUPABASE_AUTH_TIMEOUT_MS = 10_000;
 
 type SupabaseUserPayload = {
   id: string;
@@ -69,11 +72,24 @@ export async function authenticateSupabaseAccessToken(accessToken: string) {
 
   logServerDebug("auth.supabase-token.validate.start");
 
-  const response = await fetch(`${getSupabaseUrl()}/auth/v1/user`, {
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      apikey: getSupabaseAnonKey(),
-    },
+  const response = await withAbortableTimeout(
+    signal =>
+      fetch(`${getSupabaseUrl()}/auth/v1/user`, {
+        signal,
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          apikey: getSupabaseAnonKey(),
+        },
+      }),
+    {
+      label: "Supabase access token validation",
+      timeoutMs: SUPABASE_AUTH_TIMEOUT_MS,
+    }
+  ).catch(error => {
+    logServerError("auth.supabase-token.validate.timeout", error);
+    throw Errors.forbidden(
+      "Authentication provider took too long to validate the session."
+    );
   });
 
   if (!response.ok) {

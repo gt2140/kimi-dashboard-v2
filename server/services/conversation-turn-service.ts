@@ -4,12 +4,16 @@ import {
   resolveModelReference,
 } from "../repositories/agent-run-repository.js";
 import { ConversationRepository } from "../repositories/conversation-repository.js";
+import { withTimeout } from "./async-guard.js";
 import {
   buildAssistantReply,
   type AssistantReply,
   type ChatTurnStage,
 } from "./chat-reply-builder.js";
 import { syncConversationParticipants } from "./conversation-participants.js";
+
+const TURN_OWNERSHIP_TIMEOUT_MS = 5_000;
+const TURN_PARTICIPANT_SYNC_TIMEOUT_MS = 8_000;
 
 export type ConversationTurnInput = {
   conversationId: number;
@@ -116,16 +120,23 @@ export class ConversationTurnService {
     onStage?: (stage: ChatTurnStage) => void | Promise<void>;
     onTextDelta?: (delta: string) => void | Promise<void>;
   }) {
-    const conversation = await this.conversationRepository.requireConversationOwner(
-      params.input.conversationId,
-      params.userId
-    );
-
-    const participants = await this.syncParticipants({
+    logServerDebug("chat.turn.execute.start", {
       conversationId: params.input.conversationId,
-      primaryAgentSlug: params.input.agentId,
-      supportingAgentSlugs: params.input.calledAgentIds,
+      userId: params.userId,
+      agentId: params.input.agentId,
+      supportingAgentCount: params.input.calledAgentIds.length,
+      streamed: Boolean(params.streamPrimary),
     });
+    const conversation = await withTimeout(
+      this.conversationRepository.requireConversationOwner(
+        params.input.conversationId,
+        params.userId
+      ),
+      {
+        label: "Conversation ownership check",
+        timeoutMs: TURN_OWNERSHIP_TIMEOUT_MS,
+      }
+    );
 
     const userMessage = await this.conversationRepository.createUserMessage({
       conversationId: params.input.conversationId,
@@ -133,14 +144,43 @@ export class ConversationTurnService {
       agentId: params.input.agentId,
       metadata: buildUserMetadata(params.input),
     });
+    logServerDebug("chat.turn.user-message.persisted", {
+      conversationId: params.input.conversationId,
+      userMessageId: userMessage.id,
+    });
+
+    const participants = await withTimeout(
+      this.syncParticipants({
+        conversationId: params.input.conversationId,
+        primaryAgentSlug: params.input.agentId,
+        supportingAgentSlugs: params.input.calledAgentIds,
+      }),
+      {
+        label: "Conversation participant sync",
+        timeoutMs: TURN_PARTICIPANT_SYNC_TIMEOUT_MS,
+      }
+    );
+    logServerDebug("chat.turn.participants.synced", {
+      conversationId: params.input.conversationId,
+      primaryAgentDefinitionId: participants.primary.id,
+      supportingAgentCount: participants.supporting.length,
+    });
 
     const primaryRun = await this.agentRunRepository.createPrimaryRun({
       conversationId: params.input.conversationId,
       agentDefinitionId: participants.primary.id,
       resolvedUserContext: params.input.content,
     });
+    logServerDebug("chat.turn.primary-run.created", {
+      conversationId: params.input.conversationId,
+      primaryRunId: primaryRun.id,
+    });
 
     await this.agentRunRepository.markPrimaryRunRunning(primaryRun.id);
+    logServerDebug("chat.turn.primary-run.running", {
+      conversationId: params.input.conversationId,
+      primaryRunId: primaryRun.id,
+    });
 
     let primaryRunFinalized = false;
 
@@ -164,6 +204,11 @@ export class ConversationTurnService {
           agentId: params.input.agentId,
           metadata: assistantMetadata,
         });
+      logServerDebug("chat.turn.assistant-message.persisted", {
+        conversationId: params.input.conversationId,
+        assistantMessageId: assistantMessage.id,
+        primaryRunId: primaryRun.id,
+      });
 
       const primaryModelReference = await this.resolveModelReference(
         assistantReply.primaryRun.providerSlug,
@@ -210,6 +255,11 @@ export class ConversationTurnService {
         errorMessage: assistantReply.primaryRun.errorMessage,
       });
       primaryRunFinalized = true;
+      logServerDebug("chat.turn.primary-run.finalized", {
+        conversationId: params.input.conversationId,
+        primaryRunId: primaryRun.id,
+        status: assistantReply.primaryRun.usedFallback ? "failed" : "completed",
+      });
 
       logServerDebug("chat.sendMessage", {
         userId: params.userId,
@@ -239,6 +289,14 @@ export class ConversationTurnService {
               : "Conversation turn failed unexpectedly.",
         });
       }
+      logServerDebug("chat.turn.execute.failed", {
+        conversationId: params.input.conversationId,
+        primaryRunId: primaryRun.id,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : "Conversation turn failed unexpectedly.",
+      });
 
       throw error;
     }

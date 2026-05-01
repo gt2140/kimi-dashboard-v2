@@ -8,7 +8,7 @@ import {
   chatSendMessageInputSchema,
   sendChatMessage,
 } from "./trpc/chat-router.js";
-import { encodeChatStreamEvent } from "../src/lib/chat-stream.js";
+import { TurnStreamController } from "./services/turn-stream-controller.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 app.use("/api/trpc/*", async (c) => {
@@ -44,9 +44,14 @@ app.post("/api/chat/stream", async (c) => {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
-      const writeEvent = (payload: string) => {
-        controller.enqueue(encoder.encode(payload));
-      };
+      const streamController = new TurnStreamController({
+        write: (payload) => {
+          controller.enqueue(encoder.encode(payload));
+        },
+        close: () => {
+          controller.close();
+        },
+      });
 
       void (async () => {
         try {
@@ -55,51 +60,34 @@ app.post("/api/chat/stream", async (c) => {
             userId: user.id,
             streamPrimary: true,
             onStage: async (stage) => {
-              writeEvent(
-                encodeChatStreamEvent({
-                  type: "stage",
-                  stageId: stage.id,
-                  label: stage.label,
-                })
-              );
+              streamController.emitStage(stage);
             },
             onTextDelta: async (delta) => {
-              writeEvent(
-                encodeChatStreamEvent({
-                  type: "text-delta",
-                  delta,
-                })
-              );
+              streamController.emitDelta(delta);
             },
           });
 
           if (result.assistantMessage) {
-            writeEvent(
-              encodeChatStreamEvent({
-                type: "message-complete",
-                message: {
-                  id: String(result.assistantMessage.id),
-                  role: "assistant",
-                  content: result.assistantMessage.content,
-                  agentId: result.assistantMessage.agentId,
-                  createdAt: result.assistantMessage.createdAt.toISOString(),
-                  metadata: result.assistantMessage.metadata,
-                },
-              })
-            );
+            streamController.complete({
+              id: String(result.assistantMessage.id),
+              role: "assistant",
+              content: result.assistantMessage.content,
+              agentId: result.assistantMessage.agentId,
+              createdAt: result.assistantMessage.createdAt.toISOString(),
+              metadata: result.assistantMessage.metadata,
+            });
+            return;
           }
-        } catch (error) {
-          writeEvent(
-            encodeChatStreamEvent({
-              type: "error",
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Chat streaming failed unexpectedly.",
-            })
+
+          streamController.fail(
+            "Chat turn finished without a persisted assistant message."
           );
-        } finally {
-          controller.close();
+        } catch (error) {
+          streamController.fail(
+            error instanceof Error
+              ? error.message
+              : "Chat streaming failed unexpectedly."
+          );
         }
       })();
     },

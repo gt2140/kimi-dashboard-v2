@@ -92,10 +92,15 @@ function normalizeTemperature(value?: number | null) {
   return Math.max(0, Math.min(1, value));
 }
 
+function usesFixedSamplingModel(model: string) {
+  return model.startsWith("kimi-k2.6") || model.startsWith("kimi-k2.5");
+}
+
 export function buildKimiChatRequest(
   input: BuildKimiChatRequestInput,
 ): KimiChatRequest {
   const temperature = normalizeTemperature(input.temperature);
+  const fixedSamplingModel = usesFixedSamplingModel(input.model);
   const request: KimiChatRequest = {
     model: input.model,
     messages: [
@@ -128,7 +133,7 @@ export function buildKimiChatRequest(
     request.thinking = { type: input.thinking };
   }
 
-  if (temperature !== undefined) {
+  if (!fixedSamplingModel && temperature !== undefined) {
     request.temperature = temperature;
   }
 
@@ -149,7 +154,9 @@ export function buildKimiChatRequest(
     request.response_format = { type: "json_object" };
   }
 
-  if (temperature !== undefined && temperature <= 0.001) {
+  if (fixedSamplingModel) {
+    request.n = 1;
+  } else if (temperature !== undefined && temperature <= 0.001) {
     request.n = 1;
   } else if (input.n && input.n > 0) {
     request.n = input.n;

@@ -21,7 +21,8 @@ describe("buildKimiChatRequest", () => {
     expect(request.model).toBe("kimi-k2.6");
     expect(request.prompt_cache_key).toBe("kimi:v1:conversation:42");
     expect(request.safety_identifier).toBe("user-hash-1");
-    expect(request.temperature).toBe(0.2);
+    expect(request.temperature).toBeUndefined();
+    expect(request.n).toBe(1);
     expect(request.max_completion_tokens).toBe(2048);
     expect(request.messages).toEqual([
       { role: "system", content: "You are Generalist." },
@@ -30,7 +31,7 @@ describe("buildKimiChatRequest", () => {
     expect(request.thinking).toEqual({ type: "disabled" });
   });
 
-  it("forces n=1 when temperature is effectively zero", () => {
+  it("forces fixed sampling defaults for kimi-k2.6", () => {
     const request = buildKimiChatRequest({
       model: "kimi-k2.6",
       messages: [{ role: "user", content: "Hello" }],
@@ -38,7 +39,7 @@ describe("buildKimiChatRequest", () => {
       n: 3,
     });
 
-    expect(request.temperature).toBe(0);
+    expect(request.temperature).toBeUndefined();
     expect(request.n).toBe(1);
   });
 

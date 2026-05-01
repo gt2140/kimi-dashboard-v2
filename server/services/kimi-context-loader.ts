@@ -88,6 +88,8 @@ export async function loadKimiTurnContext(params: {
     systemPrompt:
       promptTemplate?.templateText ??
       "You are Generalist, a practical health intelligence assistant for Aura.",
+    customContext: userSetting?.customContext ?? null,
+    trainingNotes: userSetting?.trainingNotes ?? null,
     responseStyle: userSetting?.responseStyle ?? "detailed",
     recentMessages: recentMessages.reverse(),
     conversationSummary: latestSummary[0]?.summary ?? null,

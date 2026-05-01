@@ -164,7 +164,8 @@ export class KimiApiClient {
     purpose?: "file-extract";
   }) {
     const form = new FormData();
-    const blob = new Blob([params.bytes], { type: params.contentType });
+    const fileBytes = Uint8Array.from(params.bytes);
+    const blob = new Blob([fileBytes], { type: params.contentType });
     form.append("file", blob, params.filename);
     form.append("purpose", params.purpose ?? "file-extract");
 
@@ -179,6 +180,12 @@ export class KimiApiClient {
   async getFileContent(fileId: string) {
     const response = await kimiFetch(`/v1/files/${fileId}/content`);
     return await response.text();
+  }
+
+  async deleteFile(fileId: string) {
+    await kimiFetch(`/v1/files/${fileId}`, {
+      method: "DELETE",
+    });
   }
 }
 

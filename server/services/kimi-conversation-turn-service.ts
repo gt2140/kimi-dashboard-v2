@@ -10,6 +10,7 @@ import {
   buildLongTermMemorySnippet,
   buildShortTermMemoryWindow,
 } from "./kimi-memory.js";
+import { persistKimiTurnMemory } from "./kimi-memory-persistence.js";
 
 type ConversationTurnInput = {
   conversationId: number;
@@ -55,6 +56,8 @@ type RunMessage = {
 type ContextLoaderResult = {
   agentDefinitionId?: number;
   systemPrompt: string;
+  customContext?: string | null;
+  trainingNotes?: string | null;
   responseStyle: "concise" | "detailed" | "academic";
   recentMessages: Array<{
     role: "user" | "assistant";
@@ -234,12 +237,21 @@ export class KimiConversationTurnService {
       });
       const resolvedSystemPrompt = [
         context.systemPrompt,
+        context.customContext?.trim()
+          ? `Persistent user-agent context:\n${context.customContext.trim()}`
+          : "",
+        context.trainingNotes?.trim()
+          ? `Agent operating notes:\n${context.trainingNotes.trim()}`
+          : "",
+        buildResponseStyleInstruction(context.responseStyle),
         contextPayload.systemContext,
       ]
         .filter(Boolean)
         .join("\n\n");
 
       const tools = await toolExecutor.getEnabledTools(context.enabledFormulaTools);
+      const effectiveThinkingMode =
+        tools.length > 0 ? "disabled" : context.thinkingMode;
       let request = buildKimiChatRequest({
         model: "kimi-k2.6",
         systemPrompt: resolvedSystemPrompt,
@@ -248,7 +260,7 @@ export class KimiConversationTurnService {
           context.promptCacheKey ??
           buildKimiPromptCacheKey(params.input.conversationId),
         safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
-        thinking: context.thinkingMode,
+        thinking: effectiveThinkingMode,
         tools,
       });
 
@@ -284,7 +296,7 @@ export class KimiConversationTurnService {
             context.promptCacheKey ??
             buildKimiPromptCacheKey(params.input.conversationId),
           safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
-          thinking: context.thinkingMode,
+          thinking: effectiveThinkingMode,
           messages: [
             ...contextPayload.messages,
             {
@@ -322,7 +334,8 @@ export class KimiConversationTurnService {
         promptCacheKey:
           context.promptCacheKey ??
           buildKimiPromptCacheKey(params.input.conversationId),
-        thinkingMode: context.thinkingMode,
+        thinkingMode: effectiveThinkingMode,
+        requestedThinkingMode: context.thinkingMode,
         relatedVaultFiles: context.relatedVaultFiles,
         contextSummary: context.conversationSummary ?? undefined,
         memoryApplied: context.longTermMemories.length > 0,
@@ -367,10 +380,29 @@ export class KimiConversationTurnService {
         outputTokens: extractKimiUsage(finalCompletion).outputTokens,
         providerRequestId: finalCompletion.id ?? null,
         finishReason: finalCompletion.choices?.[0]?.finish_reason ?? null,
-        thinkingMode: context.thinkingMode,
+        thinkingMode: effectiveThinkingMode,
         toolCallsJson: toolCalls,
         usageJson: extractKimiUsage(finalCompletion),
       });
+
+      await persistKimiTurnMemory({
+        userId: params.userId,
+        conversationId: params.input.conversationId,
+        sourceRunId: primaryRun.id,
+        existingSummary: context.conversationSummary,
+        recentMessages: [
+          ...context.recentMessages.slice(-8),
+          {
+            role: "user",
+            content: params.input.content,
+          },
+          {
+            role: "assistant",
+            content: outputText,
+          },
+        ],
+        kimiClient,
+      }).catch(() => null);
 
       return {
         success: true,
@@ -457,4 +489,18 @@ function serializeRunMessages(messages: KimiChatRequest["messages"]): RunMessage
       };
     })
     .filter((message): message is RunMessage => Boolean(message));
+}
+
+function buildResponseStyleInstruction(
+  responseStyle: "concise" | "detailed" | "academic",
+) {
+  switch (responseStyle) {
+    case "concise":
+      return "Response style: keep answers compact, direct, and easy to scan.";
+    case "academic":
+      return "Response style: use a technical tone, distinguish evidence from inference, and surface uncertainty clearly.";
+    case "detailed":
+    default:
+      return "Response style: be structured, practical, and sufficiently detailed without drifting into filler.";
+  }
 }

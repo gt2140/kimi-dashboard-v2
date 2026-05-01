@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { vaultFiles } from "../../db/schema.js";
+import { KimiApiClient } from "../kimi/api-client.js";
 import { createRouter, authedQuery } from "./middleware.js";
 import { getDb } from "../queries/connection.js";
 
@@ -15,6 +16,7 @@ const vaultCategorySchema = z.enum([
 ]);
 
 const vaultStatusSchema = z.enum(["ready", "processing", "failed"]);
+const kimiClient = new KimiApiClient();
 
 export const vaultRouter = createRouter({
   list: authedQuery
@@ -89,6 +91,14 @@ export const vaultRouter = createRouter({
           code: "NOT_FOUND",
           message: "File not found.",
         });
+      }
+
+      if (file[0].remoteFileId) {
+        try {
+          await kimiClient.deleteFile(file[0].remoteFileId);
+        } catch {
+          // Continue with local cleanup even if the remote file is already gone.
+        }
       }
 
       await db.delete(vaultFiles).where(eq(vaultFiles.id, input.id));

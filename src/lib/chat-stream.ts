@@ -26,6 +26,12 @@ type ChatStreamErrorEvent = {
   message: string;
 };
 
+type ChatStreamWatchdog = {
+  signal: AbortSignal;
+  touch: () => void;
+  cancel: () => void;
+};
+
 type ChatStreamEvent =
   | ChatStreamStageEvent
   | ChatStreamTextDeltaEvent
@@ -89,6 +95,45 @@ export function isRecoverableChatStreamError(error: unknown) {
   }
 
   return isRecoverableChatStreamStatus(Number(statusMatch[1]));
+}
+
+export function createChatStreamWatchdog(
+  timeoutMs: number,
+  label = "Chat stream"
+): ChatStreamWatchdog {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const arm = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+
+    timeoutId = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        controller.abort(new Error(`${label} timed out after ${timeoutMs}ms.`));
+      }
+    }, timeoutMs);
+  };
+
+  arm();
+
+  return {
+    signal: controller.signal,
+    touch() {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      arm();
+    },
+    cancel() {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    },
+  };
 }
 
 export function parseChatStreamChunk(buffer: string) {

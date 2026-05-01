@@ -7,12 +7,15 @@ import { logClientDebug, logClientError } from "@/lib/debug";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
+  createChatStreamWatchdog,
   isRecoverableChatStreamError,
   isRecoverableChatStreamStatus,
   parseChatStreamChunk,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
 import type { ChatSession, Message } from "@/types";
+
+const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 
 function mapConversationSummary(item: {
   id: number;
@@ -233,6 +236,11 @@ export function useChatData() {
     setStreamError(null);
     setIsStreaming(true);
     let streamStarted = false;
+    let receivedAssistantText = false;
+    const streamWatchdog = createChatStreamWatchdog(
+      CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
+      "Chat stream"
+    );
 
     const emitFallbackCompletion = async () => {
       const fallbackResult = await sendMessageToConversation(
@@ -281,6 +289,7 @@ export function useChatData() {
           fetch("/api/chat/stream", {
             method: "POST",
             credentials: "include",
+            signal: streamWatchdog.signal,
             headers,
             body: JSON.stringify({
               conversationId,
@@ -321,6 +330,7 @@ export function useChatData() {
 
       while (true) {
         const { done, value } = await reader.read();
+        streamWatchdog.touch();
         buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
         const parsed = parseChatStreamChunk(buffer);
@@ -336,6 +346,7 @@ export function useChatData() {
           }
 
           if (event.type === "text-delta") {
+            receivedAssistantText = true;
             handlers.onTextDelta?.(event);
             continue;
           }
@@ -367,11 +378,12 @@ export function useChatData() {
         logClientDebug("chat.stream.recoverable-fallback", {
           conversationId,
           streamStarted,
+          receivedAssistantText,
           error:
             error instanceof Error ? error.message : "recoverable-stream-error",
         });
 
-        if (!streamStarted) {
+        if (!receivedAssistantText) {
           return emitFallbackCompletion();
         }
       }
@@ -383,6 +395,7 @@ export function useChatData() {
       setStreamError(message);
       throw error;
     } finally {
+      streamWatchdog.cancel();
       setIsStreaming(false);
     }
   }

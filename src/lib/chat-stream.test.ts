@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createChatStreamWatchdog,
   encodeChatStreamEvent,
   isRecoverableChatStreamError,
   isRecoverableChatStreamStatus,
@@ -7,6 +8,10 @@ import {
 } from "./chat-stream";
 
 describe("chat-stream", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("encodes events as newline-delimited json", () => {
     const payload = encodeChatStreamEvent({
       type: "stage",
@@ -77,5 +82,46 @@ describe("chat-stream", () => {
     expect(
       isRecoverableChatStreamError(new Error("Invalid authentication token."))
     ).toBe(false);
+  });
+
+  it("aborts a stalled chat stream after the inactivity timeout", () => {
+    vi.useFakeTimers();
+
+    const watchdog = createChatStreamWatchdog(5_000, "Chat stream");
+
+    expect(watchdog.signal.aborted).toBe(false);
+
+    vi.advanceTimersByTime(5_001);
+
+    expect(watchdog.signal.aborted).toBe(true);
+    expect(String(watchdog.signal.reason)).toContain(
+      "Chat stream timed out after 5000ms."
+    );
+  });
+
+  it("resets the inactivity timeout when the stream keeps moving", () => {
+    vi.useFakeTimers();
+
+    const watchdog = createChatStreamWatchdog(5_000, "Chat stream");
+
+    vi.advanceTimersByTime(4_000);
+    watchdog.touch();
+    vi.advanceTimersByTime(4_000);
+
+    expect(watchdog.signal.aborted).toBe(false);
+
+    vi.advanceTimersByTime(1_100);
+
+    expect(watchdog.signal.aborted).toBe(true);
+  });
+
+  it("does not abort after the watchdog is cancelled", () => {
+    vi.useFakeTimers();
+
+    const watchdog = createChatStreamWatchdog(5_000, "Chat stream");
+    watchdog.cancel();
+    vi.advanceTimersByTime(10_000);
+
+    expect(watchdog.signal.aborted).toBe(false);
   });
 });

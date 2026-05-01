@@ -1,13 +1,8 @@
 import { useEffect, useMemo } from "react";
-import {
-  trpc,
-  ensureBackendSession,
-  useBackendSessionState,
-} from "@/providers/trpc";
+import { trpc, ensureBackendSession } from "@/providers/trpc";
 import { useFavoriteAgentsStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { AGENTS } from "@/lib/data";
-import { isSupabaseConfigured } from "@/lib/supabase";
 
 function isUnauthorizedError(error: unknown) {
   if (!error || typeof error !== "object") {
@@ -23,7 +18,6 @@ function isUnauthorizedError(error: unknown) {
 
 export function useAgentCatalog() {
   const utils = trpc.useUtils();
-  const backendSession = useBackendSessionState();
   const localFavoriteAgentIds = useFavoriteAgentsStore(
     state => state.favoriteAgentIds
   );
@@ -32,10 +26,8 @@ export function useAgentCatalog() {
   );
 
   const agentsQuery = trpc.agents.list.useQuery();
-  const userSettingsEnabled =
-    !isSupabaseConfigured || backendSession.backendReady;
   const userSettingsQuery = trpc.agents.listUserSettings.useQuery(undefined, {
-    enabled: userSettingsEnabled,
+    enabled: true,
     retry: false,
   });
   const saveUserSettingsMutation = trpc.agents.saveUserSettings.useMutation();
@@ -122,13 +114,6 @@ export function useAgentCatalog() {
     enabledFormulaTools?: string[];
     allowedContextOverrides?: string[];
   }) {
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet."
-      );
-    }
-
     try {
       const result = await saveUserSettingsMutation.mutateAsync(input);
       await Promise.all([
@@ -143,10 +128,7 @@ export function useAgentCatalog() {
         throw error;
       }
 
-      const retrySynced = await ensureBackendSession({ force: true });
-      if (!retrySynced) {
-        throw error;
-      }
+      await ensureBackendSession({ force: true });
 
       const result = await saveUserSettingsMutation.mutateAsync(input);
       await Promise.all([

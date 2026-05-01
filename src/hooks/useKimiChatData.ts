@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import {
-  ensureBackendSession,
-  trpc,
-  useBackendSessionState,
-} from "@/providers/trpc";
+import { ensureBackendSession, trpc } from "@/providers/trpc";
 import { useChatStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
@@ -51,7 +47,6 @@ function mapMessage(item: {
 export function useKimiChatData() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const backendSession = useBackendSessionState();
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const calledAgentIds = useChatStore(state => state.calledAgentIds);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
@@ -64,8 +59,7 @@ export function useKimiChatData() {
   const activeConversationId = rawConversationId
     ? Number(rawConversationId)
     : null;
-  const authedQueriesEnabled =
-    !isSupabaseConfigured || backendSession.backendReady;
+  const authedQueriesEnabled = true;
 
   const utils = trpc.useUtils();
   const conversationsQuery = trpc.chat.listConversations.useQuery(undefined, {
@@ -132,13 +126,6 @@ export function useKimiChatData() {
       return activeConversationId;
     }
 
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
-
     const created = await createConversation.mutateAsync({
       agentId: activeAgentId,
       title: firstMessage ? firstMessage.slice(0, 60) : undefined,
@@ -164,13 +151,6 @@ export function useKimiChatData() {
     } = {},
   ) {
     const conversationId = await ensureConversationId(content);
-    const synced = await ensureBackendSession();
-
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
 
     setStreamError(null);
     setIsStreaming(true);
@@ -178,12 +158,7 @@ export function useKimiChatData() {
     try {
       async function requestResponse(forceSessionRefresh = false) {
         if (forceSessionRefresh) {
-          const refreshed = await ensureBackendSession({ force: true });
-          if (!refreshed) {
-            throw new Error(
-              "Your browser session exists, but the backend session is not ready yet.",
-            );
-          }
+          await ensureBackendSession({ force: true });
         }
 
         const headers = await buildAuthenticatedHeaders(readAccessToken, {
@@ -250,13 +225,6 @@ export function useKimiChatData() {
   }
 
   async function removeConversation(sessionId: string) {
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
-
     const numericId = Number(sessionId);
     await deleteConversationMutation.mutateAsync({ id: numericId });
 

@@ -11,6 +11,10 @@ import { LOGIN_PATH } from "@/const";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import { clearSupabaseBrowserState } from "@/lib/supabase-session";
 import { formatRuntimeError } from "@/lib/app-errors";
+import {
+  canUseAuthenticatedApi,
+  shouldShowAuthLoading,
+} from "@/lib/auth-access";
 import { resetChatStore } from "@/hooks/useStore";
 
 type UseAuthOptions = {
@@ -68,6 +72,11 @@ export function useAuth(options?: UseAuthOptions) {
   const backendSession = useBackendSessionState();
   const [sessionReady, setSessionReady] = useState(!isSupabaseConfigured);
   const [hasSupabaseSession, setHasSupabaseSession] = useState(false);
+  const authedApiReady = canUseAuthenticatedApi({
+    supabaseConfigured: isSupabaseConfigured,
+    hasSupabaseSession,
+    backendReady: backendSession.backendReady,
+  });
 
   const utils = trpc.useUtils();
   const authStatus = trpc.auth.status.useQuery(undefined, {
@@ -80,10 +89,7 @@ export function useAuth(options?: UseAuthOptions) {
     error,
     refetch,
   } = trpc.auth.me.useQuery(undefined, {
-    enabled:
-      sessionReady &&
-      (!isSupabaseConfigured ||
-        (hasSupabaseSession && backendSession.backendReady)),
+    enabled: sessionReady && authedApiReady,
     staleTime: 1000 * 60 * 5,
     retry: false,
   });
@@ -184,13 +190,14 @@ export function useAuth(options?: UseAuthOptions) {
     (!backendUser && error ? formatRuntimeError(error, "Auth") : null);
 
   const isAuthenticated = Boolean(backendUser);
-  const authLoading =
-    !sessionReady ||
-    logoutMutation.isPending ||
-    (hasSupabaseSession &&
-      backendSession.phase === "syncing" &&
-      !backendSession.backendReady) ||
-    (hasSupabaseSession && backendSession.backendReady && isLoading);
+  const authLoading = shouldShowAuthLoading({
+    sessionReady,
+    logoutPending: logoutMutation.isPending,
+    supabaseConfigured: isSupabaseConfigured,
+    hasSupabaseSession,
+    backendLoading: isLoading,
+    isAuthenticated,
+  });
 
   useEffect(() => {
     if (redirectOnUnauthenticated && !authLoading && !isAuthenticated) {
@@ -213,7 +220,7 @@ export function useAuth(options?: UseAuthOptions) {
       isAuthenticated,
       isLoading: authLoading,
       error: resolvedError,
-      backendReady: Boolean(backendUser),
+      backendReady: authedApiReady,
       backendLoading: isLoading,
       hasSupabaseSession,
       logout,
@@ -223,6 +230,7 @@ export function useAuth(options?: UseAuthOptions) {
     [
       authLoading,
       authStatus.data,
+      authedApiReady,
       backendUser,
       hasSupabaseSession,
       isAuthenticated,

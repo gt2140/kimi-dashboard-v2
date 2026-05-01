@@ -32,7 +32,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useChatStore } from "@/hooks/useStore";
-import { useChatData } from "@/hooks/useChatData";
+import { useKimiChatData } from "@/hooks/useKimiChatData";
 import { useAgentCatalog } from "@/hooks/useAgentCatalog";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -110,7 +110,6 @@ function ConversationList({
 }) {
   const location = useLocation();
   const [showHistory, setShowHistory] = useState(true);
-  const isKimiRoute = location.pathname.startsWith("/kimi");
 
   if (collapsed) {
     return (
@@ -147,13 +146,12 @@ function ConversationList({
           <ChevronRight className="h-3 w-3" />
         )}
       </button>
-      {showHistory && !isKimiRoute && (
+      {showHistory && (
         <div className="mt-1 flex-1 space-y-0.5 overflow-y-auto scrollbar-thin">
           {sessions.map(session => {
             const isActive =
               Number(session.id) === activeConversationId &&
-              (location.pathname === "/chat" ||
-                location.pathname === "/kimi/chat");
+              location.pathname === "/kimi/chat";
 
             return (
               <div
@@ -193,11 +191,6 @@ function ConversationList({
           })}
         </div>
       )}
-      {showHistory && isKimiRoute && (
-        <div className="mt-2 rounded-md border border-border/30 bg-card/20 px-2.5 py-2 text-[10px] text-sidebar-foreground/35">
-          Kimi V1 usa su propia vista de conversaciones dentro de la nueva capa.
-        </div>
-      )}
     </div>
   );
 }
@@ -221,7 +214,7 @@ export function Sidebar({
     activeConversationId,
     selectConversation,
     removeConversation,
-  } = useChatData();
+  } = useKimiChatData();
   return (
     <aside
       className={cn(
@@ -404,9 +397,8 @@ export function MobileSidebar() {
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
   const { favoriteAgents } = useAgentCatalog();
-  const { sessions, selectConversation, removeConversation } = useChatData();
+  const { sessions, selectConversation, removeConversation } = useKimiChatData();
   const [showHistory, setShowHistory] = useState(true);
-  const isKimiRoute = location.pathname.startsWith("/kimi");
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -511,7 +503,7 @@ export function MobileSidebar() {
                 <ChevronRight className="h-3 w-3" />
               )}
             </button>
-            {showHistory && !isKimiRoute && (
+            {showHistory && (
               <div className="mt-1 flex-1 space-y-0.5 overflow-y-auto scrollbar-thin">
                 {sessions.map(session => (
                   <div
@@ -547,11 +539,6 @@ export function MobileSidebar() {
                     </button>
                   </div>
                 ))}
-              </div>
-            )}
-            {showHistory && isKimiRoute && (
-              <div className="mt-2 rounded-md border border-border/30 bg-card/20 px-2.5 py-2 text-[10px] text-sidebar-foreground/35">
-                Kimi V1 usa su propia vista de conversaciones.
               </div>
             )}
           </div>

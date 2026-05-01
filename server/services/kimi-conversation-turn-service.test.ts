@@ -9,7 +9,7 @@ describe("MinimalKimiChatService", () => {
     vi.restoreAllMocks();
   });
 
-  it("persists the user message, streams the Kimi answer, and saves the assistant reply", async () => {
+  it("persists the user message, calls Kimi once, and saves the assistant reply", async () => {
     const conversationRepository = {
       requireConversationOwner: vi.fn().mockResolvedValue({
         id: 12,
@@ -32,11 +32,8 @@ describe("MinimalKimiChatService", () => {
     };
 
     const kimiClient = {
-      createChatCompletion: vi.fn(),
-      streamChatCompletion: vi.fn().mockImplementation(async (_request, handlers) => {
-        callOrder.push("kimi-stream");
-        await handlers.onTextDelta?.("ApoB");
-        await handlers.onTextDelta?.(" looks improved.");
+      createChatCompletion: vi.fn().mockImplementation(async () => {
+        callOrder.push("kimi-request");
         return {
           id: "chatcmpl-final",
           choices: [
@@ -57,9 +54,6 @@ describe("MinimalKimiChatService", () => {
       }),
     };
 
-    const onTextDelta = vi.fn();
-    const onStage = vi.fn();
-
     const service = new MinimalKimiChatService({
       conversationRepository,
       kimiClient,
@@ -73,20 +67,14 @@ describe("MinimalKimiChatService", () => {
         calledAgentIds: [],
       },
       userId: 7,
-      streamPrimary: true,
-      onTextDelta,
-      onStage,
     });
 
     expect(callOrder).toEqual([
       "user-message",
-      "kimi-stream",
+      "kimi-request",
       "assistant-message",
       "conversation-update",
     ]);
-    expect(onStage).not.toHaveBeenCalled();
-    expect(onTextDelta).toHaveBeenNthCalledWith(1, "ApoB");
-    expect(onTextDelta).toHaveBeenNthCalledWith(2, " looks improved.");
     expect(result.assistantMessage?.content).toBe("ApoB looks improved.");
     expect(conversationRepository.createAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -128,7 +116,6 @@ describe("MinimalKimiChatService", () => {
           total_tokens: 38,
         },
       }),
-      streamChatCompletion: vi.fn(),
     };
 
     const service = new MinimalKimiChatService({
@@ -144,11 +131,9 @@ describe("MinimalKimiChatService", () => {
         calledAgentIds: ["bloodwork", "cardio-deep"],
       },
       userId: 9,
-      streamPrimary: false,
     });
 
     expect(kimiClient.createChatCompletion).toHaveBeenCalledTimes(1);
-    expect(kimiClient.streamChatCompletion).not.toHaveBeenCalled();
     expect(result.assistantMessage?.content).toBe(
       "Te respondo con el agente principal solamente.",
     );

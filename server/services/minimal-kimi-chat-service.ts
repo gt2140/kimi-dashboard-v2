@@ -57,10 +57,6 @@ type KimiCompletionResponse = {
 
 type KimiClientLike = {
   createChatCompletion: (request: KimiChatRequest) => Promise<KimiCompletionResponse>;
-  streamChatCompletion: (
-    request: KimiChatRequest,
-    handlers: { onTextDelta?: (delta: string) => void | Promise<void> },
-  ) => Promise<KimiCompletionResponse>;
 };
 
 export class MinimalKimiChatService {
@@ -74,8 +70,6 @@ export class MinimalKimiChatService {
   async executeTurn(params: {
     input: ConversationTurnInput;
     userId: number;
-    streamPrimary?: boolean;
-    onTextDelta?: (delta: string) => void | Promise<void>;
   }) {
     const { conversationRepository, kimiClient } = this.dependencies;
     const conversation = await conversationRepository.requireConversationOwner(
@@ -104,13 +98,12 @@ export class MinimalKimiChatService {
       thinking: "disabled",
     });
 
-    const completion = params.streamPrimary
-      ? await kimiClient.streamChatCompletion(request, {
-          onTextDelta: params.onTextDelta,
-        })
-      : await kimiClient.createChatCompletion(request);
+    const completion = await kimiClient.createChatCompletion(request);
 
     const outputText = extractKimiAssistantText(completion);
+    if (!outputText) {
+      throw new Error("Kimi returned an empty assistant message.");
+    }
     const assistantMetadata = {
       engine: "kimi-v0-direct",
       providerSlug: "kimi",

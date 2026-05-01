@@ -68,7 +68,7 @@ export default function KimiAgents() {
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {filteredAgents.map(agent => {
           const setting = settingsBySlug.get(agent.slug);
           const tools = Array.from(
@@ -83,7 +83,7 @@ export default function KimiAgents() {
           return (
             <div
               key={agent.slug}
-              className="rounded-3xl border border-border/35 bg-card/20 p-4"
+              className="rounded-3xl border border-border/35 bg-card/20 p-3.5"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -95,17 +95,17 @@ export default function KimiAgents() {
                   >
                     {agent.slug}
                   </p>
-                  <h2 className="mt-1 text-[16px] font-medium text-foreground">
+                  <h2 className="mt-1 text-[15px] font-medium text-foreground">
                     {agent.name}
                   </h2>
-                  <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground/45">
+                  <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground/45">
                     {agent.description}
                   </p>
                 </div>
-                <Sparkles className="h-5 w-5 text-amber-200/70" />
+                <Sparkles className="h-4.5 w-4.5 text-amber-200/70" />
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-1.5">
                 <Pill icon={<Brain className="h-3 w-3" />}>
                   thinking {setting?.kimiThinkingMode ?? "enabled"}
                 </Pill>
@@ -117,11 +117,11 @@ export default function KimiAgents() {
                 </Pill>
               </div>
 
-              <div className="mt-3">
+              <div className="mt-2.5">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground/35">
                   Enabled tools
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {tools.length > 0 ? (
                     tools.map(tool => (
                       <Pill key={tool} icon={<Wrench className="h-3 w-3" />}>
@@ -136,19 +136,19 @@ export default function KimiAgents() {
                 </div>
               </div>
 
-              <div className="mt-4 flex gap-2">
+              <div className="mt-3 flex gap-2">
                 <button
                   onClick={() => {
                     setActiveAgent(agent.slug);
                     navigate("/kimi/chat");
                   }}
-                  className="flex flex-1 items-center justify-center gap-1 rounded-full bg-foreground/6 px-3 py-2 text-[11px] text-foreground transition-colors hover:bg-foreground/10"
+                  className="flex flex-1 items-center justify-center gap-1 rounded-full bg-foreground/6 px-3 py-1.5 text-[10px] text-foreground transition-colors hover:bg-foreground/10"
                 >
                   Chat with agent
                 </button>
                 <button
                   onClick={() => navigate(`/kimi/agents/${agent.slug}`)}
-                  className="inline-flex items-center justify-center gap-1 rounded-full border border-border/30 px-3 py-2 text-[11px] text-muted-foreground/55 transition-colors hover:text-foreground"
+                  className="inline-flex items-center justify-center gap-1 rounded-full border border-border/30 px-3 py-1.5 text-[10px] text-muted-foreground/55 transition-colors hover:text-foreground"
                 >
                   <Settings2 className="h-3.5 w-3.5" />
                   Settings

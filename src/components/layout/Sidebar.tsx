@@ -21,14 +21,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pill,
-  Shield,
   ShieldAlert,
   Sparkles,
   Stethoscope,
   Target,
   Trash2,
   TrendingUp,
-  Users,
   Venus,
   X,
   Zap,
@@ -71,9 +69,6 @@ const navItems = [
     icon: LayoutDashboard,
     path: "/dashboard",
   },
-  { id: "agents", label: "Agents", icon: Users, path: "/agents" },
-  { id: "chat", label: "Chat", icon: MessageSquare, path: "/chat" },
-  { id: "vault", label: "Vault", icon: Shield, path: "/vault" },
   { id: "kimi-chat", label: "Kimi Chat", icon: Sparkles, path: "/kimi/chat" },
   { id: "kimi-agents", label: "Kimi Agents", icon: Brain, path: "/kimi/agents" },
   { id: "kimi-vault", label: "Kimi Vault", icon: Zap, path: "/kimi/vault" },
@@ -227,8 +222,6 @@ export function Sidebar({
     selectConversation,
     removeConversation,
   } = useChatData();
-  const isKimiRoute = location.pathname.startsWith("/kimi");
-
   return (
     <aside
       className={cn(
@@ -315,7 +308,7 @@ export function Sidebar({
               key={agent.slug}
               onClick={() => {
                 setActiveAgent(agent.slug);
-                navigate(isKimiRoute ? "/kimi/chat" : "/chat");
+                navigate("/kimi/chat");
               }}
               className={cn(
                 "relative flex items-center rounded-md py-1.5 text-[13px] transition-all",
@@ -474,7 +467,7 @@ export function MobileSidebar() {
                   key={agent.slug}
                   onClick={() => {
                     setActiveAgent(agent.slug);
-                    navigate(isKimiRoute ? "/kimi/chat" : "/chat");
+                    navigate("/kimi/chat");
                     setOpen(false);
                   }}
                   className={cn(

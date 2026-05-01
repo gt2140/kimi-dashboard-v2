@@ -8,9 +8,13 @@ import {
   chatSendMessageInputSchema,
   sendChatMessage,
 } from "./trpc/chat-router.js";
+import { and, eq } from "drizzle-orm";
+import { vaultFiles } from "../db/schema.js";
 import { TurnStreamController } from "./services/turn-stream-controller.js";
 import { kimiConversationTurnService } from "./services/kimi-runtime.js";
 import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
+import { getDb } from "./queries/connection.js";
+import { readOriginalVaultFile } from "./services/vault-original-file.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 app.use("/api/trpc/*", async (c) => {
@@ -207,6 +211,7 @@ app.post("/api/kimi/vault/upload", async c => {
   try {
     const arrayBuffer = await file.arrayBuffer();
     const uploaded = await ingestKimiVaultFile({
+      headers: c.req.raw.headers,
       userId: user.id,
       filename: file.name,
       fileType: inferFileType(file.name),
@@ -223,6 +228,61 @@ app.post("/api/kimi/vault/upload", async c => {
           error instanceof Error
             ? error.message
             : "Kimi vault upload failed unexpectedly.",
+      },
+      500,
+    );
+  }
+});
+app.get("/api/kimi/vault/file/:id", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const fileId = Number(c.req.param("id"));
+  if (!Number.isFinite(fileId) || fileId <= 0) {
+    return c.json({ error: "Invalid file id." }, 400);
+  }
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(vaultFiles)
+    .where(and(eq(vaultFiles.id, fileId), eq(vaultFiles.userId, user.id)))
+    .limit(1);
+
+  const file = rows[0];
+  if (!file) {
+    return c.json({ error: "File not found." }, 404);
+  }
+
+  if (!file.encryptedUrl) {
+    return c.json({ error: "Original file preview is not available yet." }, 404);
+  }
+
+  try {
+    const original = await readOriginalVaultFile({
+      headers: c.req.raw.headers,
+      reference: file.encryptedUrl,
+    });
+
+    return new Response(original.bytes, {
+      headers: {
+        "content-type": original.contentType,
+        "content-disposition": `inline; filename="${file.filename}"`,
+        "cache-control": "private, max-age=60",
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Vault preview failed unexpectedly.",
       },
       500,
     );

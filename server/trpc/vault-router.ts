@@ -5,6 +5,7 @@ import { vaultFiles } from "../../db/schema.js";
 import { KimiApiClient } from "../kimi/api-client.js";
 import { createRouter, authedQuery } from "./middleware.js";
 import { getDb } from "../queries/connection.js";
+import { deleteOriginalVaultFile } from "../services/vault-original-file.js";
 
 const vaultCategorySchema = z.enum([
   "bloodwork",
@@ -100,6 +101,11 @@ export const vaultRouter = createRouter({
           // Continue with local cleanup even if the remote file is already gone.
         }
       }
+
+      await deleteOriginalVaultFile({
+        headers: ctx.req.headers,
+        reference: file[0].encryptedUrl,
+      });
 
       await db.delete(vaultFiles).where(eq(vaultFiles.id, input.id));
       return { success: true };

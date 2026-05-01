@@ -8,6 +8,7 @@ import {
   FileSearch,
   FileSpreadsheet,
   FileText,
+  ImageIcon,
   Loader2,
   RefreshCw,
   Search,
@@ -44,6 +45,7 @@ type KimiVaultFile = {
   extractedAt?: string | Date | null;
   extractionError?: string | null;
   contentHash?: string | null;
+  encryptedUrl?: string | null;
 };
 
 type DerivedVaultState = "ready" | "processing" | "failed" | "needs-reupload";
@@ -123,6 +125,11 @@ export default function KimiVault() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [previewFile, setPreviewFile] = useState<KimiVaultFile | null>(null);
+  const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [previewMimeType, setPreviewMimeType] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   const files = (filesQuery.data ?? []) as KimiVaultFile[];
   const filteredFiles = useMemo(
@@ -154,6 +161,14 @@ export default function KimiVault() {
 
     return () => window.clearInterval(timer);
   }, [pendingFiles, refreshVault]);
+
+  useEffect(() => {
+    return () => {
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+      }
+    };
+  }, [previewObjectUrl]);
 
   async function readAccessToken() {
     if (!isSupabaseConfigured) {
@@ -226,6 +241,101 @@ export default function KimiVault() {
     await refreshVault();
   }
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadPreview() {
+      if (!previewFile) {
+        setPreviewText(null);
+        setPreviewMimeType(null);
+        setPreviewError(null);
+        setIsPreviewLoading(false);
+        if (previewObjectUrl) {
+          URL.revokeObjectURL(previewObjectUrl);
+          setPreviewObjectUrl(null);
+        }
+        return;
+      }
+
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+        setPreviewObjectUrl(null);
+      }
+
+      setPreviewError(null);
+      setPreviewText(null);
+      setPreviewMimeType(null);
+
+      if (!previewFile.encryptedUrl) {
+        return;
+      }
+
+      setIsPreviewLoading(true);
+
+      try {
+        const headers = await buildAuthenticatedHeaders(readAccessToken);
+        const response = await fetch(`/api/kimi/vault/file/${previewFile.id}`, {
+          credentials: "include",
+          headers,
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(
+            payload?.error || `Vault preview failed with HTTP ${response.status}.`,
+          );
+        }
+
+        const blob = await response.blob();
+        if (!active) {
+          return;
+        }
+
+        const mimeType = blob.type || "application/octet-stream";
+        setPreviewMimeType(mimeType);
+
+        if (
+          mimeType.startsWith("text/") ||
+          mimeType === "application/json" ||
+          mimeType === "text/csv"
+        ) {
+          setPreviewText(await blob.text());
+          return;
+        }
+
+        const objectUrl = URL.createObjectURL(blob);
+        if (!active) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        setPreviewObjectUrl(objectUrl);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setPreviewError(
+          error instanceof Error
+            ? error.message
+            : "Vault preview failed unexpectedly.",
+        );
+      } finally {
+        if (active) {
+          setIsPreviewLoading(false);
+        }
+      }
+    }
+
+    void loadPreview();
+
+    return () => {
+      active = false;
+    };
+  }, [previewFile]);
+
   return (
     <div className="mx-auto w-full max-w-[1500px] min-w-0 p-3 sm:p-4 lg:p-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -271,7 +381,7 @@ export default function KimiVault() {
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="mt-5">
         <section className="rounded-3xl border border-border/35 bg-card/20 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -292,14 +402,6 @@ export default function KimiVault() {
               )}
             </div>
           </div>
-
-          {legacyFiles > 0 && (
-            <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-400/8 px-4 py-3 text-[12px] text-amber-100/80">
-              Los archivos marcados como <strong>needs reupload</strong> no estan
-              vinculados a Kimi. No quedan listos para chat hasta borrarlos y
-              subirlos otra vez desde esta vista.
-            </div>
-          )}
 
           <div className="relative mt-4 max-w-sm">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/25" />
@@ -385,27 +487,6 @@ export default function KimiVault() {
             </p>
           )}
         </section>
-
-        <aside className="hidden space-y-4 xl:block">
-          <SideStat
-            title="Extraction flow"
-            lines={[
-              "1. Upload file to Files API",
-              "2. Read extracted text from Kimi",
-              "3. Chunk it locally for retrieval",
-              "4. Inject relevant chunks into chat",
-            ]}
-          />
-          <SideStat
-            title="How to read the status"
-            lines={[
-              "ready: file can be used in chat now",
-              "processing: Kimi link exists, wait a moment",
-              "needs reupload: old local-only row, upload again",
-              "failed: extraction returned an error",
-            ]}
-          />
-        </aside>
       </div>
 
       <Dialog open={!!previewFile} onOpenChange={() => setPreviewFile(null)}>
@@ -446,6 +527,52 @@ export default function KimiVault() {
                   {previewFile.extractionError}
                 </div>
               )}
+
+              {previewError && (
+                <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-[12px] text-destructive/90">
+                  {previewError}
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-border/25 bg-background/40 p-4">
+                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Original file preview
+                </div>
+
+                <div className="mt-3 overflow-hidden rounded-2xl border border-border/20 bg-card/20">
+                  {isPreviewLoading ? (
+                    <div className="flex h-[420px] items-center justify-center text-[12px] text-muted-foreground/45">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Loading preview...
+                    </div>
+                  ) : previewMimeType === "application/pdf" && previewObjectUrl ? (
+                    <iframe
+                      title={previewFile.filename}
+                      src={previewObjectUrl}
+                      className="h-[420px] w-full"
+                    />
+                  ) : previewMimeType?.startsWith("image/") && previewObjectUrl ? (
+                    <div className="flex max-h-[420px] items-center justify-center bg-black/20 p-4">
+                      <img
+                        src={previewObjectUrl}
+                        alt={previewFile.filename}
+                        className="max-h-[388px] w-auto rounded-xl object-contain"
+                      />
+                    </div>
+                  ) : previewText ? (
+                    <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words p-4 text-[12px] leading-relaxed text-foreground/85">
+                      {previewText}
+                    </pre>
+                  ) : (
+                    <div className="flex h-[180px] items-center justify-center px-6 text-center text-[12px] text-muted-foreground/45">
+                      {previewFile.encryptedUrl
+                        ? "No pudimos renderizar un preview nativo, pero el archivo sigue guardado."
+                        : "Este archivo todavia no tiene original persistido para preview."}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <div className="rounded-2xl border border-border/25 bg-background/40 p-4">
                 <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
@@ -521,24 +648,6 @@ function StatusPill({
       <Loader2 className="h-3 w-3 animate-spin" />
       processing
     </span>
-  );
-}
-
-function SideStat({ title, lines }: { title: string; lines: string[] }) {
-  return (
-    <div className="rounded-3xl border border-border/35 bg-card/20 p-4">
-      <h3 className="text-[13px] font-medium text-foreground">{title}</h3>
-      <div className="mt-3 space-y-2">
-        {lines.map(line => (
-          <div
-            key={line}
-            className="rounded-2xl border border-border/20 bg-background/30 px-3 py-2 text-[11px] text-muted-foreground/50"
-          >
-            {line}
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 

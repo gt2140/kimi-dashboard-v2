@@ -1,12 +1,8 @@
-import { Routes, Route, Navigate } from "react-router";
+import { Routes, Route, Navigate, useParams } from "react-router";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
-import Agents from "./pages/Agents";
-import AgentSettingsPage from "./pages/AgentSettings";
-import Chat from "./pages/Chat";
-import Vault from "./pages/Vault";
 import KimiChat from "./pages/KimiChat";
 import KimiAgents from "./pages/KimiAgents";
 import KimiAgentSettings from "./pages/KimiAgentSettings";
@@ -23,10 +19,10 @@ export default function App() {
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route element={<DashboardLayout />}>
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/agents" element={<Agents />} />
-        <Route path="/agents/:agentId" element={<AgentSettingsPage />} />
-        <Route path="/chat" element={<Chat />} />
-        <Route path="/vault" element={<Vault />} />
+        <Route path="/agents" element={<Navigate to="/kimi/agents" replace />} />
+        <Route path="/agents/:agentId" element={<LegacyAgentRedirect />} />
+        <Route path="/chat" element={<Navigate to="/kimi/chat" replace />} />
+        <Route path="/vault" element={<Navigate to="/kimi/vault" replace />} />
         <Route path="/kimi/chat" element={<KimiChat />} />
         <Route path="/kimi/agents" element={<KimiAgents />} />
         <Route path="/kimi/agents/:agentId" element={<KimiAgentSettings />} />
@@ -37,4 +33,9 @@ export default function App() {
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
+}
+
+function LegacyAgentRedirect() {
+  const { agentId } = useParams();
+  return <Navigate to={`/kimi/agents/${agentId ?? "generalist"}`} replace />;
 }

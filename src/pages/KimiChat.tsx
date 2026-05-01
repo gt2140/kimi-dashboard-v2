@@ -63,7 +63,6 @@ export default function KimiChat() {
   const clearChat = useChatStore(state => state.clearChat);
   const {
     messages,
-    activeConversationId,
     isConversationLoading,
     isSending,
     error,
@@ -171,8 +170,7 @@ export default function KimiChat() {
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-[1500px] min-w-0 flex-col overflow-hidden p-3 sm:p-4 lg:p-5">
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-border/40 bg-card/20">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-border/40 bg-card/20">
           <div className="flex items-center justify-between border-b border-border/30 px-4 py-3">
             <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
@@ -342,37 +340,7 @@ export default function KimiChat() {
               <p className="mt-2 text-[12px] text-destructive/80">{error}</p>
             )}
           </div>
-        </section>
-
-        <aside className="hidden min-h-0 space-y-4 overflow-y-auto xl:block">
-          <InfoCard
-            title="Current run profile"
-            items={[
-              "Model: kimi-k2.6",
-              "Memory: Kimi official memory preferred",
-              "Vault: contextual chunk injection",
-              "Tools: web-search, rethink y memory segun settings",
-            ]}
-          />
-          <InfoCard
-            title="Quick prompts"
-            items={SHORTCUTS}
-            actionLabel="Use prompt"
-            onAction={value => setInput(value)}
-          />
-          <InfoCard
-            title="Conversation state"
-            items={[
-              activeConversationId
-                ? `Conversation #${activeConversationId}`
-                : "New unsaved conversation",
-              calledAgentIds.length > 0
-                ? `${calledAgentIds.length} helper agents attached`
-                : "Generalist-first mode",
-            ]}
-          />
-        </aside>
-      </div>
+      </section>
     </div>
   );
 }
@@ -503,41 +471,5 @@ function MetaPill({
       {icon}
       {children}
     </span>
-  );
-}
-
-function InfoCard({
-  title,
-  items,
-  actionLabel,
-  onAction,
-}: {
-  title: string;
-  items: string[];
-  actionLabel?: string;
-  onAction?: (value: string) => void;
-}) {
-  return (
-    <div className="rounded-3xl border border-border/35 bg-card/20 p-4">
-      <h3 className="text-[13px] font-medium text-foreground">{title}</h3>
-      <div className="mt-3 space-y-2">
-        {items.map(item => (
-          <div
-            key={item}
-            className="flex items-start justify-between gap-2 rounded-2xl border border-border/20 bg-background/30 px-3 py-2 text-[11px] text-muted-foreground/50"
-          >
-            <span>{item}</span>
-            {actionLabel && onAction ? (
-              <button
-                onClick={() => onAction(item)}
-                className="shrink-0 rounded-full border border-border/25 px-2 py-1 text-[10px] text-foreground/70"
-              >
-                {actionLabel}
-              </button>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }

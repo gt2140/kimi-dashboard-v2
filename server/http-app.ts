@@ -27,7 +27,7 @@ app.use("/api/trpc/*", async (c) => {
     createContext,
   });
 });
-app.post("/api/kimi/chat/respond", async (c) => {
+app.post("/api/kimi/chat", async (c) => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {

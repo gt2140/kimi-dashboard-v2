@@ -27,10 +27,18 @@ export class MvpChatTurnService {
 
     const agent =
       AGENTS.find(candidate => candidate.id === params.agentId) ?? AGENTS[0];
+    const recentMessages = await this.store.listRecentMessages(
+      params.conversationId,
+    );
 
     const reply = await this.kimiClient.respond({
-      systemPrompt: agent.systemPrompt,
-      userMessage: params.content,
+      messages: [
+        {
+          role: "system",
+          content: agent.systemPrompt,
+        },
+        ...recentMessages,
+      ],
       userId: params.userId,
     });
 

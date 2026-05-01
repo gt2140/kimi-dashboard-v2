@@ -12,6 +12,11 @@ type KimiReply = {
   };
 };
 
+type KimiChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
 type KimiResponsePayload = {
   model?: string;
   choices?: Array<{
@@ -42,8 +47,7 @@ function getApiKey() {
 
 export class KimiDirectClient {
   async respond(params: {
-    systemPrompt: string;
-    userMessage: string;
+    messages: KimiChatMessage[];
     userId: number;
   }): Promise<KimiReply> {
     const controller = new AbortController();
@@ -61,16 +65,7 @@ export class KimiDirectClient {
         },
         body: JSON.stringify({
           model: env.kimiModel || "kimi-k2.6",
-          messages: [
-            {
-              role: "system",
-              content: params.systemPrompt,
-            },
-            {
-              role: "user",
-              content: params.userMessage,
-            },
-          ],
+          messages: params.messages,
           safety_identifier: `user-${params.userId}`,
           thinking: {
             type: "disabled",

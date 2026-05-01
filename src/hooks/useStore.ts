@@ -12,26 +12,20 @@ import { AGENTS } from "@/lib/data";
 
 type ChatSnapshot = {
   activeAgentId: string;
-  calledAgentIds: string[];
   activeSessionId: string | null;
 };
 
 const defaultChatSnapshot: ChatSnapshot = {
   activeAgentId: "generalist",
-  calledAgentIds: [],
   activeSessionId: null,
 };
 
 interface ChatState extends ChatSnapshot {
   setActiveAgent: (agentId: string) => void;
-  callAgent: (agentId: string) => void;
-  removeCalledAgent: (agentId: string) => void;
-  clearCalledAgents: () => void;
   clearChat: () => void;
   hydrateConversation: (params: {
     sessionId: number;
     agentId: string;
-    calledAgentIds: string[];
   }) => void;
   reset: () => void;
 }
@@ -41,31 +35,17 @@ export const useChatStore = create<ChatState>(set => ({
   setActiveAgent: agentId =>
     set({
       activeAgentId: agentId,
-      calledAgentIds: [],
       activeSessionId: null,
     }),
-  callAgent: agentId =>
-    set(state => ({
-      calledAgentIds: state.calledAgentIds.includes(agentId)
-        ? state.calledAgentIds
-        : [...state.calledAgentIds, agentId],
-    })),
-  removeCalledAgent: agentId =>
-    set(state => ({
-      calledAgentIds: state.calledAgentIds.filter(id => id !== agentId),
-    })),
-  clearCalledAgents: () => set({ calledAgentIds: [] }),
   clearChat: () =>
     set(state => ({
       activeAgentId: state.activeAgentId,
-      calledAgentIds: [],
       activeSessionId: null,
     })),
-  hydrateConversation: ({ sessionId, agentId, calledAgentIds }) =>
+  hydrateConversation: ({ sessionId, agentId }) =>
     set({
       activeSessionId: String(sessionId),
       activeAgentId: agentId,
-      calledAgentIds,
     }),
   reset: () => set(defaultChatSnapshot),
 }));

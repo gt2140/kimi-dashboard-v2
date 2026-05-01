@@ -16,9 +16,23 @@ describe("Kimi HTTP routes", () => {
     expect(response.status).toBe(404);
   });
 
-  it("protects kimi chat respond with auth", async () => {
+  it("does not expose the legacy Kimi chat respond route anymore", async () => {
     const response = await app.fetch(
       new Request("http://localhost/api/kimi/chat/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("protects the minimal kimi chat route with auth", async () => {
+    const response = await app.fetch(
+      new Request("http://localhost/api/kimi/chat", {
         method: "POST",
         headers: {
           "content-type": "application/json",

@@ -21,10 +21,6 @@ const allIcons: Record<string, React.ReactNode> = {
   Sparkles: <Sparkles className="h-3.5 w-3.5" />,
 };
 
-type StreamingAssistant = {
-  content: string;
-};
-
 type KimiMetadata = Message["metadata"] & {
   thinkingMode?: "enabled" | "disabled";
   memoryApplied?: boolean;
@@ -41,9 +37,9 @@ type KimiMetadata = Message["metadata"] & {
 };
 
 const SHORTCUTS = [
-  "Resume esta conversacion y detecta hechos estables sobre mi",
-  "Usa mi vault y decime que documentos son relevantes para esta pregunta",
-  "Pensa paso a paso y decime si necesitas usar web-search o memory",
+  "Resumime esta conversacion en bullets",
+  "Ayudame a ordenar esta idea paso a paso",
+  "Dame una respuesta corta y clara para este problema",
 ];
 
 export default function KimiChat() {
@@ -55,33 +51,16 @@ export default function KimiChat() {
     isSending,
     error,
     startNewChat,
-    streamMessage,
+    sendMessage,
   } = useKimiChatData();
 
   const [input, setInput] = useState("");
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
-  const [streamingAssistant, setStreamingAssistant] =
-    useState<StreamingAssistant | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
 
-  const displayedMessages = useMemo(() => {
-    if (!streamingAssistant) {
-      return messages;
-    }
-
-    return [
-      ...messages,
-      {
-        id: "kimi-streaming",
-        role: "assistant" as const,
-        content: streamingAssistant.content,
-        agentId: activeAgentId,
-        timestamp: new Date(),
-      },
-    ];
-  }, [activeAgentId, messages, streamingAssistant]);
+  const displayedMessages = useMemo(() => messages, [messages]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -108,24 +87,14 @@ export default function KimiChat() {
 
     const content = input.trim();
     setPendingUserMessage(content);
-    setStreamingAssistant(null);
     setInput("");
 
     try {
-      await streamMessage(content, {
-        onTextDelta: delta => {
-          setStreamingAssistant(current => ({
-            content: `${current?.content ?? ""}${delta}`,
-          }));
-        },
-        onMessageComplete: () => {
-          setStreamingAssistant(null);
-        },
-      });
+      await sendMessage(content);
     } finally {
       setPendingUserMessage(null);
     }
-  }, [input, isSending, streamMessage]);
+  }, [input, isSending, sendMessage]);
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-[1500px] min-w-0 flex-col overflow-hidden p-3 sm:p-4 lg:p-5">
@@ -141,11 +110,11 @@ export default function KimiChat() {
                 </span>
                 <span className="truncate">{activeAgent.name}</span>
                 <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-emerald-100/70">
-                  MVP Direct
+                  Simple
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/45">
-                Chat directo con Kimi. Sin helpers, memory ni vault en el turno activo.
+                Chat directo con Kimi. Un endpoint, persistencia simple y nada de orquestacion extra.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -235,11 +204,11 @@ function EmptyState({ onShortcutClick }: { onShortcutClick: (value: string) => v
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
       <Sparkles className="h-6 w-6 text-amber-200/70" />
       <h2 className="mt-4 text-[18px] font-medium text-foreground">
-        Chat MVP listo
+        Kimi chat listo
       </h2>
       <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted-foreground/45">
-        Esta version usa un turno minimo: mensaje, llamada directa a Kimi,
-        persistencia y respuesta.
+        Esta version usa el loop mas simple posible: mensaje, llamada a Kimi,
+        guardado de mensajes y respuesta.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         {SHORTCUTS.map(shortcut => (

@@ -13,12 +13,10 @@ function mapConversationSummary(item: {
   title: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
-  calledAgentIds?: string[];
 }): ChatSession {
   return {
     id: String(item.id),
     agentId: item.agentId,
-    calledAgentIds: item.calledAgentIds ?? [],
     title: item.title || "New conversation",
     messages: [],
     createdAt: new Date(item.createdAt),
@@ -94,7 +92,6 @@ export function useKimiChatData() {
     hydrateConversation({
       sessionId: conversation.id,
       agentId: conversation.agentId,
-      calledAgentIds: conversation.calledAgentIds ?? [],
     });
   }, [conversationQuery.data?.conversation, hydrateConversation]);
 
@@ -135,20 +132,7 @@ export function useKimiChatData() {
     return nextId;
   }
 
-  async function streamMessage(
-    content: string,
-    handlers: {
-      onTextDelta?: (delta: string) => void;
-      onMessageComplete?: (message: {
-        id: string;
-        role: "assistant";
-        content: string;
-        agentId: string;
-        createdAt: string;
-        metadata?: Record<string, unknown>;
-      }) => void;
-    } = {},
-  ) {
+  async function sendMessage(content: string) {
     const conversationId = await ensureConversationId(content);
 
     setStreamError(null);
@@ -163,7 +147,7 @@ export function useKimiChatData() {
         const headers = await buildAuthenticatedHeaders(readAccessToken, {
           "Content-Type": "application/json",
         });
-        return fetch("/api/kimi/chat/respond", {
+        return fetch("/api/kimi/chat", {
           method: "POST",
           credentials: "include",
           headers,
@@ -201,9 +185,6 @@ export function useKimiChatData() {
         };
       };
 
-      handlers.onTextDelta?.(payload.message.content);
-      handlers.onMessageComplete?.(payload.message);
-
       await Promise.all([
         utils.chat.listConversations.invalidate(),
         utils.chat.getConversation.invalidate({ id: conversationId }),
@@ -214,7 +195,7 @@ export function useKimiChatData() {
       const message =
         error instanceof Error
           ? error.message
-          : "Kimi streaming failed unexpectedly.";
+          : "Kimi chat failed unexpectedly.";
       setStreamError(message);
       throw error;
     } finally {
@@ -258,7 +239,7 @@ export function useKimiChatData() {
           : null,
     selectConversation,
     startNewChat,
-    streamMessage,
+    sendMessage,
     removeConversation,
   };
 }

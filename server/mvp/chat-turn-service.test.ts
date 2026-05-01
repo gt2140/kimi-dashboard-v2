@@ -9,6 +9,20 @@ describe("MvpChatTurnService", () => {
         title: "New conversation",
       }),
       createUserMessage: vi.fn().mockResolvedValue({ id: 101 }),
+      listRecentMessages: vi.fn().mockResolvedValue([
+        {
+          role: "user",
+          content: "Primer mensaje",
+        },
+        {
+          role: "assistant",
+          content: "Primera respuesta",
+        },
+        {
+          role: "user",
+          content: "Hola",
+        },
+      ]),
       createAssistantMessage: vi.fn().mockResolvedValue({
         id: 202,
         createdAt: new Date("2026-05-01T18:00:00.000Z"),
@@ -47,10 +61,27 @@ describe("MvpChatTurnService", () => {
       content: "Hola",
     });
     expect(kimiClient.respond).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userMessage: "Hola",
+      {
+        messages: [
+          expect.objectContaining({
+            role: "system",
+            content: expect.any(String),
+          }),
+          {
+            role: "user",
+            content: "Primer mensaje",
+          },
+          {
+            role: "assistant",
+            content: "Primera respuesta",
+          },
+          {
+            role: "user",
+            content: "Hola",
+          },
+        ],
         userId: 3,
-      }),
+      },
     );
     expect(result.content).toBe("Respuesta simple de Kimi.");
     expect(store.createAssistantMessage).toHaveBeenCalledWith(

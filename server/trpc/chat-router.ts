@@ -14,11 +14,7 @@ const chatStore = new MvpChatStore();
 
 export const chatRouter = createRouter({
   listConversations: authedQuery.query(async ({ ctx }) => {
-    const rows = await chatStore.listConversations(ctx.user.id);
-    return rows.map(row => ({
-      ...row,
-      calledAgentIds: [],
-    }));
+    return chatStore.listConversations(ctx.user.id);
   }),
 
   getConversation: authedQuery
@@ -26,10 +22,7 @@ export const chatRouter = createRouter({
     .query(async ({ input, ctx }) => {
       const result = await chatStore.getConversation(ctx.user.id, input.id);
       return {
-        conversation: {
-          ...result.conversation,
-          calledAgentIds: [],
-        },
+        conversation: result.conversation,
         messages: result.messages,
       };
     }),

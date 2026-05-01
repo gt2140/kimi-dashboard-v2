@@ -21,6 +21,20 @@ function parseMetadata(metadata: string | null) {
 }
 
 export class MvpChatStore {
+  async listRecentMessages(conversationId: number, limit = 12) {
+    const rows = await getDb()
+      .select({
+        role: messages.role,
+        content: messages.content,
+      })
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(desc(messages.createdAt))
+      .limit(limit);
+
+    return rows.reverse();
+  }
+
   async requireConversation(userId: number, conversationId: number) {
     const rows = await getDb()
       .select()

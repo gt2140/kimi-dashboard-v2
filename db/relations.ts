@@ -3,6 +3,7 @@ import {
   agentDefinitions,
   agentRuns,
   conversationAgents,
+  conversationMemories,
   conversations,
   messageContextBlocks,
   messages,
@@ -11,6 +12,8 @@ import {
   promptTemplates,
   userAgentSettings,
   users,
+  userMemories,
+  vaultChunks,
   vaultFiles,
 } from "./schema.js";
 
@@ -18,6 +21,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   conversations: many(conversations),
   vaultFiles: many(vaultFiles),
   agentSettings: many(userAgentSettings),
+  memories: many(userMemories),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
@@ -29,6 +33,7 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
   conversationAgents: many(conversationAgents),
   agentRuns: many(agentRuns),
   contextBlocks: many(messageContextBlocks),
+  memories: many(conversationMemories),
 }));
 
 export const messagesRelations = relations(messages, ({ one, many }) => ({
@@ -40,10 +45,18 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
   contextBlocks: many(messageContextBlocks),
 }));
 
-export const vaultFilesRelations = relations(vaultFiles, ({ one }) => ({
+export const vaultFilesRelations = relations(vaultFiles, ({ one, many }) => ({
   user: one(users, {
     fields: [vaultFiles.userId],
     references: [users.id],
+  }),
+  chunks: many(vaultChunks),
+}));
+
+export const vaultChunksRelations = relations(vaultChunks, ({ one }) => ({
+  vaultFile: one(vaultFiles, {
+    fields: [vaultChunks.vaultFileId],
+    references: [vaultFiles.id],
   }),
 }));
 
@@ -152,6 +165,8 @@ export const agentRunsRelations = relations(agentRuns, ({ one, many }) => ({
     references: [modelEndpoints.id],
   }),
   contextBlocks: many(messageContextBlocks),
+  conversationMemories: many(conversationMemories),
+  userMemories: many(userMemories),
 }));
 
 export const messageContextBlocksRelations = relations(
@@ -171,3 +186,28 @@ export const messageContextBlocksRelations = relations(
     }),
   })
 );
+
+export const conversationMemoriesRelations = relations(
+  conversationMemories,
+  ({ one }) => ({
+    conversation: one(conversations, {
+      fields: [conversationMemories.conversationId],
+      references: [conversations.id],
+    }),
+    sourceRun: one(agentRuns, {
+      fields: [conversationMemories.sourceRunId],
+      references: [agentRuns.id],
+    }),
+  }),
+);
+
+export const userMemoriesRelations = relations(userMemories, ({ one }) => ({
+  user: one(users, {
+    fields: [userMemories.userId],
+    references: [users.id],
+  }),
+  sourceRun: one(agentRuns, {
+    fields: [userMemories.sourceRunId],
+    references: [agentRuns.id],
+  }),
+}));

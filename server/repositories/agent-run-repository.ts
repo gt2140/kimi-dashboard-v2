@@ -120,6 +120,11 @@ export class AgentRunRepository {
       inputTokens?: number;
       outputTokens?: number;
       errorMessage?: string | null;
+      providerRequestId?: string | null;
+      finishReason?: string | null;
+      thinkingMode?: "enabled" | "disabled" | null;
+      toolCallsJson?: unknown[];
+      usageJson?: Record<string, unknown> | null;
     }
   ) {
     const db = getDb();
@@ -136,6 +141,11 @@ export class AgentRunRepository {
         inputTokens: params.inputTokens,
         outputTokens: params.outputTokens,
         errorMessage: params.errorMessage ?? null,
+        providerRequestId: params.providerRequestId ?? null,
+        finishReason: params.finishReason ?? null,
+        thinkingMode: params.thinkingMode ?? null,
+        toolCallsJson: params.toolCallsJson ?? [],
+        usageJson: params.usageJson ?? null,
         completedAt: new Date(),
       })
       .where(eq(agentRuns.id, runId));
@@ -204,6 +214,16 @@ export class AgentRunRepository {
     messageId: number;
     agentRunId: number;
     relatedVaultFiles: string[];
+    vaultChunks?: Array<{
+      vaultFileId: number;
+      chunkIndex: number;
+      content: string;
+    }>;
+    toolResults?: Array<{
+      toolCallId: string;
+      toolName: string;
+      content: string;
+    }>;
   }) {
     const db = getDb();
 
@@ -221,5 +241,67 @@ export class AgentRunRepository {
         },
       });
     }
+
+    for (const chunk of params.vaultChunks ?? []) {
+      await db.insert(messageContextBlocks).values({
+        conversationId: params.conversationId,
+        messageId: params.messageId,
+        agentRunId: params.agentRunId,
+        sourceType: "vault_chunk",
+        sourceId: `${chunk.vaultFileId}:${chunk.chunkIndex}`,
+        title: `Vault chunk ${chunk.chunkIndex}`,
+        content: chunk.content,
+        metadata: {
+          relation: "selected_vault_chunk",
+          vaultFileId: chunk.vaultFileId,
+          chunkIndex: chunk.chunkIndex,
+        },
+      });
+    }
+
+    for (const toolResult of params.toolResults ?? []) {
+      await db.insert(messageContextBlocks).values({
+        conversationId: params.conversationId,
+        messageId: params.messageId,
+        agentRunId: params.agentRunId,
+        sourceType: "web_result",
+        sourceId: toolResult.toolCallId,
+        title: toolResult.toolName,
+        content: toolResult.content,
+        metadata: {
+          relation: "tool_result",
+          toolCallId: toolResult.toolCallId,
+          toolName: toolResult.toolName,
+        },
+      });
+    }
+  }
+
+  async saveToolCallBatch(params: {
+    agentRunId: number;
+    toolCalls: Array<{
+      id: string;
+      type: string;
+      function: {
+        name: string;
+        arguments: string;
+      };
+    }>;
+    toolResults: Array<{
+      toolCallId: string;
+      toolName: string;
+      content: string;
+    }>;
+  }) {
+    const db = getDb();
+    await db
+      .update(agentRuns)
+      .set({
+        toolCallsJson: params.toolCalls,
+        outputJson: {
+          toolResults: params.toolResults,
+        },
+      })
+      .where(eq(agentRuns.id, params.agentRunId));
   }
 }

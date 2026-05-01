@@ -13,6 +13,23 @@ import { logServerDebug } from "../lib/debug.js";
 
 const PROVIDER_SEEDS = [
   {
+    slug: "kimi",
+    name: "Kimi",
+    authStrategy: "api_key",
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsJsonMode: true,
+    supportsVision: true,
+    endpoint: {
+      modelName: "kimi-k2.6",
+      label: "Kimi K2.6",
+      supportsTools: true,
+      supportsReasoning: true,
+      supportsVision: true,
+      maxContextTokens: 256000,
+    },
+  },
+  {
     slug: "openai",
     name: "OpenAI",
     authStrategy: "api_key",
@@ -47,23 +64,6 @@ const PROVIDER_SEEDS = [
     },
   },
   {
-    slug: "kimi",
-    name: "Kimi",
-    authStrategy: "api_key",
-    supportsTools: false,
-    supportsStreaming: true,
-    supportsJsonMode: false,
-    supportsVision: true,
-    endpoint: {
-      modelName: "default",
-      label: "Default routing model",
-      supportsTools: false,
-      supportsReasoning: true,
-      supportsVision: true,
-      maxContextTokens: 128000,
-    },
-  },
-  {
     slug: "deepseek",
     name: "DeepSeek",
     authStrategy: "api_key",
@@ -87,8 +87,10 @@ function buildAgentCapabilities(agent: (typeof AGENTS)[number]) {
     vault_access: true,
     web_search: true,
     scientific_search: agent.tags?.includes("research") ?? false,
-    multi_agent_consult: true,
+    multi_agent_consult: agent.id === "generalist",
     citation_mode: agent.tags?.includes("evidence") ?? false,
+    kimi_v1: true,
+    kimi_memory: agent.id === "generalist",
   };
 }
 
@@ -167,6 +169,13 @@ function mapConversationalSchemaError(error: unknown) {
 
 async function seedConversationalCatalog() {
   const db = getDb();
+  const providerReferences = new Map<
+    string,
+    {
+      providerId: number;
+      modelEndpointId: number | null;
+    }
+  >();
 
   for (const provider of PROVIDER_SEEDS) {
     const providerResult = await db
@@ -224,14 +233,36 @@ async function seedConversationalCatalog() {
           maxContextTokens: provider.endpoint.maxContextTokens,
           updatedAt: new Date(),
         },
-      });
+      })
+      .returning({ id: modelEndpoints.id });
+
+    const endpointRows = await db
+      .select({ id: modelEndpoints.id })
+      .from(modelEndpoints)
+      .where(
+        and(
+          eq(modelEndpoints.providerId, providerId),
+          eq(modelEndpoints.modelName, provider.endpoint.modelName)
+        )
+      )
+      .limit(1);
+
+    providerReferences.set(provider.slug, {
+      providerId,
+      modelEndpointId: endpointRows[0]?.id ?? null,
+    });
   }
 
   for (const agent of AGENTS) {
     const seed = buildAgentSeed(agent);
+    const kimiReference = providerReferences.get("kimi");
     const result = await db
       .insert(agentDefinitions)
-      .values(seed)
+      .values({
+        ...seed,
+        defaultProviderId: kimiReference?.providerId ?? null,
+        defaultModelId: kimiReference?.modelEndpointId ?? null,
+      })
       .onConflictDoUpdate({
         target: agentDefinitions.slug,
         set: {
@@ -250,6 +281,8 @@ async function seedConversationalCatalog() {
           allowedVaultCategories: seed.allowedVaultCategories,
           tags: seed.tags,
           capabilities: seed.capabilities,
+          defaultProviderId: kimiReference?.providerId ?? null,
+          defaultModelId: kimiReference?.modelEndpointId ?? null,
           updatedAt: new Date(),
         },
       })
@@ -400,6 +433,9 @@ export async function listUserAgentSettings(userId: number) {
       allowedContextOverrides: userAgentSettings.allowedContextOverrides,
       createdAt: userAgentSettings.createdAt,
       updatedAt: userAgentSettings.updatedAt,
+      kimiThinkingMode: userAgentSettings.kimiThinkingMode,
+      preferKimiMemory: userAgentSettings.preferKimiMemory,
+      enabledFormulaTools: userAgentSettings.enabledFormulaTools,
       agent: {
         id: agentDefinitions.id,
         slug: agentDefinitions.slug,

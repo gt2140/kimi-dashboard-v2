@@ -25,6 +25,9 @@ const userAgentSettingsInput = z.object({
   allowVaultContext: z.boolean().optional(),
   allowWebResearch: z.boolean().optional(),
   allowScientificResearch: z.boolean().optional(),
+  kimiThinkingMode: z.enum(["enabled", "disabled"]).optional(),
+  preferKimiMemory: z.boolean().optional(),
+  enabledFormulaTools: z.array(z.string()).optional(),
   allowedContextOverrides: z.array(z.string()).optional(),
 });
 
@@ -86,6 +89,9 @@ export const agentsRouter = createRouter({
             allowVaultContext: true,
             allowWebResearch: true,
             allowScientificResearch: false,
+            kimiThinkingMode: "enabled",
+            preferKimiMemory: true,
+            enabledFormulaTools: [],
             allowedContextOverrides: [],
           } as const),
       };
@@ -145,6 +151,12 @@ export const agentsRouter = createRouter({
         allowScientificResearch:
           input.allowScientificResearch ??
           (existing[0]?.allowScientificResearch ?? false),
+        kimiThinkingMode:
+          input.kimiThinkingMode ?? existing[0]?.kimiThinkingMode ?? "enabled",
+        preferKimiMemory:
+          input.preferKimiMemory ?? (existing[0]?.preferKimiMemory ?? true),
+        enabledFormulaTools:
+          input.enabledFormulaTools ?? existing[0]?.enabledFormulaTools ?? [],
         allowedContextOverrides:
           input.allowedContextOverrides ??
           existing[0]?.allowedContextOverrides ??
@@ -168,6 +180,9 @@ export const agentsRouter = createRouter({
             allowVaultContext: nextValues.allowVaultContext,
             allowWebResearch: nextValues.allowWebResearch,
             allowScientificResearch: nextValues.allowScientificResearch,
+            kimiThinkingMode: nextValues.kimiThinkingMode,
+            preferKimiMemory: nextValues.preferKimiMemory,
+            enabledFormulaTools: nextValues.enabledFormulaTools,
             allowedContextOverrides: nextValues.allowedContextOverrides,
             updatedAt: nextValues.updatedAt,
           },

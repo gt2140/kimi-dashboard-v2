@@ -108,6 +108,9 @@ export function useAgentCatalog() {
     allowVaultContext?: boolean;
     allowWebResearch?: boolean;
     allowScientificResearch?: boolean;
+    kimiThinkingMode?: "enabled" | "disabled";
+    preferKimiMemory?: boolean;
+    enabledFormulaTools?: string[];
     allowedContextOverrides?: string[];
   }) {
     const synced = await ensureBackendSession();

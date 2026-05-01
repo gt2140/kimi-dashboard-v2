@@ -142,6 +142,12 @@ exception
   when duplicate_object then null;
 end $$;
 
+do $$ begin
+  create type kimi_thinking_mode as enum ('enabled', 'disabled');
+exception
+  when duplicate_object then null;
+end $$;
+
 create table if not exists public.users (
   id serial primary key,
   union_id varchar(255) not null unique,
@@ -280,8 +286,14 @@ create table if not exists public.vault_files (
   category vault_category not null default 'other',
   size integer not null,
   status vault_status not null default 'ready',
+  extraction_status varchar(32) not null default 'pending',
   encrypted_url text,
   iv varchar(255),
+  remote_file_id varchar(255),
+  extracted_text text,
+  content_hash varchar(128),
+  extraction_error text,
+  extracted_at timestamptz,
   uploaded_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -289,7 +301,21 @@ create table if not exists public.vault_files (
 alter table public.vault_files
   add column if not exists file_type varchar(64) not null default 'FILE',
   add column if not exists status vault_status not null default 'ready',
+  add column if not exists extraction_status varchar(32) not null default 'pending',
+  add column if not exists remote_file_id varchar(255),
+  add column if not exists extracted_text text,
+  add column if not exists content_hash varchar(128),
+  add column if not exists extraction_error text,
+  add column if not exists extracted_at timestamptz,
   add column if not exists updated_at timestamptz not null default now();
+
+create table if not exists public.vault_chunks (
+  id serial primary key,
+  vault_file_id integer not null references public.vault_files(id) on delete cascade,
+  chunk_index integer not null,
+  content text not null,
+  created_at timestamptz not null default now()
+);
 
 create table if not exists public.user_agent_settings (
   id serial primary key,
@@ -305,11 +331,19 @@ create table if not exists public.user_agent_settings (
   allow_vault_context boolean not null default true,
   allow_web_research boolean not null default true,
   allow_scientific_research boolean not null default false,
+  kimi_thinking_mode kimi_thinking_mode not null default 'enabled',
+  prefer_kimi_memory boolean not null default true,
+  enabled_formula_tools jsonb not null default '[]'::jsonb,
   allowed_context_overrides jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(user_id, agent_definition_id)
 );
+
+alter table public.user_agent_settings
+  add column if not exists kimi_thinking_mode kimi_thinking_mode not null default 'enabled',
+  add column if not exists prefer_kimi_memory boolean not null default true,
+  add column if not exists enabled_formula_tools jsonb not null default '[]'::jsonb;
 
 create table if not exists public.agent_runs (
   id serial primary key,
@@ -332,10 +366,22 @@ create table if not exists public.agent_runs (
   output_tokens integer,
   cost_usd numeric(12,6),
   error_message text,
+  provider_request_id varchar(255),
+  finish_reason varchar(64),
+  thinking_mode kimi_thinking_mode,
+  tool_calls_json jsonb not null default '[]'::jsonb,
+  usage_json jsonb,
   started_at timestamptz,
   completed_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+alter table public.agent_runs
+  add column if not exists provider_request_id varchar(255),
+  add column if not exists finish_reason varchar(64),
+  add column if not exists thinking_mode kimi_thinking_mode,
+  add column if not exists tool_calls_json jsonb not null default '[]'::jsonb,
+  add column if not exists usage_json jsonb;
 
 create table if not exists public.message_context_blocks (
   id serial primary key,
@@ -351,12 +397,34 @@ create table if not exists public.message_context_blocks (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.conversation_memories (
+  id serial primary key,
+  conversation_id integer not null references public.conversations(id) on delete cascade,
+  summary text not null,
+  source_run_id integer references public.agent_runs(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.user_memories (
+  id serial primary key,
+  user_id integer not null references public.users(id) on delete cascade,
+  memory_key varchar(120) not null,
+  value text not null,
+  confidence numeric(4,2),
+  source_run_id integer references public.agent_runs(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists conversations_user_id_idx
   on public.conversations(user_id);
 create index if not exists messages_conversation_id_idx
   on public.messages(conversation_id);
 create index if not exists vault_files_user_id_idx
   on public.vault_files(user_id);
+create index if not exists vault_chunks_vault_file_id_idx
+  on public.vault_chunks(vault_file_id);
 create index if not exists conversation_agents_conversation_id_idx
   on public.conversation_agents(conversation_id);
 create index if not exists prompt_templates_agent_definition_id_idx

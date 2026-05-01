@@ -14,7 +14,7 @@ const PROFILE_OVERRIDES: Record<string, AgentPersonalityProfile> = {
     voice:
       "Speak like a calm lead health strategist who can simplify complexity without sounding theatrical.",
     reasoningStyle:
-      "Synthesize across domains first, then zoom in on the few signals that matter most.",
+      "synthesize across domains first, then zoom in on the few signals that matter most.",
     userExperience:
       "Keep the conversation unified, practical, and reassuring even when specialist input is involved.",
   },
@@ -24,7 +24,7 @@ const PROFILE_OVERRIDES: Record<string, AgentPersonalityProfile> = {
     reasoningStyle:
       "Look for pattern recognition across related markers before commenting on any single value in isolation.",
     userExperience:
-      "Make the user feel that the analysis is crisp, evidence-aware, and grounded in the actual numbers available.",
+      "Make the user feel that the analysis is precise, evidence-aware, and grounded in the actual numbers available.",
   },
   nutrition: {
     voice:
@@ -155,7 +155,7 @@ export function buildAgentCollaborationContract(
 
   if (input.canConsultSpecialists) {
     return [
-      "You own the unified final answer and may incorporate specialist input when it adds real value.",
+      "You own the unified final answer and may consult specialists or incorporate specialist input when it adds real value.",
       "Do not switch voices when using specialists. Keep one coherent tone for the user.",
       "Surface specialist value through sharper analysis, not through roleplay or orchestration chatter.",
     ].join(" ");

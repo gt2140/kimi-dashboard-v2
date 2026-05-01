@@ -103,6 +103,10 @@ export const responseStyleEnum = pgEnum("response_style", [
   "detailed",
   "academic",
 ]);
+export const kimiThinkingModeEnum = pgEnum("kimi_thinking_mode", [
+  "enabled",
+  "disabled",
+]);
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -334,12 +338,32 @@ export const vaultFiles = pgTable("vault_files", {
   category: vaultCategoryEnum("category").default("other").notNull(),
   size: integer("size").notNull(),
   status: vaultStatusEnum("status").default("ready").notNull(),
+  extractionStatus: varchar("extraction_status", { length: 32 })
+    .default("pending")
+    .notNull(),
   encryptedUrl: text("encrypted_url"),
   iv: varchar("iv", { length: 255 }),
+  remoteFileId: varchar("remote_file_id", { length: 255 }),
+  extractedText: text("extracted_text"),
+  contentHash: varchar("content_hash", { length: 128 }),
+  extractionError: text("extraction_error"),
+  extractedAt: timestamp("extracted_at", { withTimezone: true }),
   uploadedAt: timestamp("uploaded_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const vaultChunks = pgTable("vault_chunks", {
+  id: serial("id").primaryKey(),
+  vaultFileId: integer("vault_file_id")
+    .notNull()
+    .references(() => vaultFiles.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
 });
@@ -373,6 +397,14 @@ export const userAgentSettings = pgTable(
     allowWebResearch: boolean("allow_web_research").default(true).notNull(),
     allowScientificResearch: boolean("allow_scientific_research")
       .default(false)
+      .notNull(),
+    kimiThinkingMode: kimiThinkingModeEnum("kimi_thinking_mode")
+      .default("enabled")
+      .notNull(),
+    preferKimiMemory: boolean("prefer_kimi_memory").default(true).notNull(),
+    enabledFormulaTools: jsonb("enabled_formula_tools")
+      .$type<string[]>()
+      .default([])
       .notNull(),
     allowedContextOverrides: jsonb("allowed_context_overrides")
       .$type<string[]>()
@@ -431,6 +463,12 @@ export const agentRuns = pgTable("agent_runs", {
   outputTokens: integer("output_tokens"),
   costUsd: numeric("cost_usd", { precision: 12, scale: 6 }),
   errorMessage: text("error_message"),
+  providerRequestId: varchar("provider_request_id", { length: 255 }),
+  finishReason: varchar("finish_reason", { length: 64 }),
+  thinkingMode: kimiThinkingModeEnum("thinking_mode"),
+  toolCallsJson: jsonb("tool_calls_json").$type<unknown[]>().default([]).notNull(),
+  usageJson: jsonb("usage_json")
+    .$type<Record<string, unknown> | null>(),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -460,14 +498,53 @@ export const messageContextBlocks = pgTable("message_context_blocks", {
     .notNull(),
 });
 
+export const conversationMemories = pgTable("conversation_memories", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  summary: text("summary").notNull(),
+  sourceRunId: integer("source_run_id").references(() => agentRuns.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const userMemories = pgTable("user_memories", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  memoryKey: varchar("memory_key", { length: 120 }).notNull(),
+  value: text("value").notNull(),
+  confidence: numeric("confidence", { precision: 4, scale: 2 }),
+  sourceRunId: integer("source_run_id").references(() => agentRuns.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type VaultFile = typeof vaultFiles.$inferSelect;
+export type VaultChunk = typeof vaultChunks.$inferSelect;
 export type AgentDefinition = typeof agentDefinitions.$inferSelect;
 export type InsertAgentDefinition = typeof agentDefinitions.$inferInsert;
 export type UserAgentSetting = typeof userAgentSettings.$inferSelect;
 export type InsertUserAgentSetting = typeof userAgentSettings.$inferInsert;
 export type ModelProvider = typeof modelProviders.$inferSelect;
 export type ModelEndpoint = typeof modelEndpoints.$inferSelect;
+export type ConversationMemory = typeof conversationMemories.$inferSelect;
+export type UserMemory = typeof userMemories.$inferSelect;

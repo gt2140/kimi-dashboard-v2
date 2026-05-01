@@ -1,12 +1,21 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGINAL_ENV = { ...process.env };
 
 async function loadEnvModule() {
-  return import(`../server/lib/env.ts?case=${Math.random()}`);
+  vi.resetModules();
+  vi.doMock("dotenv", () => ({
+    config: () => ({}),
+  }));
+  return import("../server/lib/env.ts");
 }
 
+beforeEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
+
 afterEach(() => {
+  vi.doUnmock("dotenv");
   process.env = { ...ORIGINAL_ENV };
 });
 

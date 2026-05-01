@@ -74,6 +74,9 @@ const navItems = [
   { id: "agents", label: "Agents", icon: Users, path: "/agents" },
   { id: "chat", label: "Chat", icon: MessageSquare, path: "/chat" },
   { id: "vault", label: "Vault", icon: Shield, path: "/vault" },
+  { id: "kimi-chat", label: "Kimi Chat", icon: Sparkles, path: "/kimi/chat" },
+  { id: "kimi-agents", label: "Kimi Agents", icon: Brain, path: "/kimi/agents" },
+  { id: "kimi-vault", label: "Kimi Vault", icon: Zap, path: "/kimi/vault" },
 ];
 
 function getIdentity(
@@ -112,6 +115,7 @@ function ConversationList({
 }) {
   const location = useLocation();
   const [showHistory, setShowHistory] = useState(true);
+  const isKimiRoute = location.pathname.startsWith("/kimi");
 
   if (collapsed) {
     return (
@@ -148,12 +152,13 @@ function ConversationList({
           <ChevronRight className="h-3 w-3" />
         )}
       </button>
-      {showHistory && (
+      {showHistory && !isKimiRoute && (
         <div className="mt-1 flex-1 space-y-0.5 overflow-y-auto scrollbar-thin">
           {sessions.map(session => {
             const isActive =
               Number(session.id) === activeConversationId &&
-              location.pathname === "/chat";
+              (location.pathname === "/chat" ||
+                location.pathname === "/kimi/chat");
 
             return (
               <div
@@ -193,6 +198,11 @@ function ConversationList({
           })}
         </div>
       )}
+      {showHistory && isKimiRoute && (
+        <div className="mt-2 rounded-md border border-border/30 bg-card/20 px-2.5 py-2 text-[10px] text-sidebar-foreground/35">
+          Kimi V1 usa su propia vista de conversaciones dentro de la nueva capa.
+        </div>
+      )}
     </div>
   );
 }
@@ -217,6 +227,7 @@ export function Sidebar({
     selectConversation,
     removeConversation,
   } = useChatData();
+  const isKimiRoute = location.pathname.startsWith("/kimi");
 
   return (
     <aside
@@ -258,7 +269,9 @@ export function Sidebar({
       <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
         {navItems.map(item => {
           const Icon = item.icon;
-          const isActive = location.pathname === item.path;
+          const isActive =
+            location.pathname === item.path ||
+            location.pathname.startsWith(`${item.path}/`);
 
           return (
             <button
@@ -293,7 +306,8 @@ export function Sidebar({
         {favoriteAgents.map(agent => {
           const isActive =
             activeAgentId === agent.slug &&
-            location.pathname === "/chat" &&
+            (location.pathname === "/chat" ||
+              location.pathname === "/kimi/chat") &&
             !activeConversationId;
 
           return (
@@ -301,7 +315,7 @@ export function Sidebar({
               key={agent.slug}
               onClick={() => {
                 setActiveAgent(agent.slug);
-                navigate("/chat");
+                navigate(isKimiRoute ? "/kimi/chat" : "/chat");
               }}
               className={cn(
                 "relative flex items-center rounded-md py-1.5 text-[13px] transition-all",
@@ -399,6 +413,7 @@ export function MobileSidebar() {
   const { favoriteAgents } = useAgentCatalog();
   const { sessions, selectConversation, removeConversation } = useChatData();
   const [showHistory, setShowHistory] = useState(true);
+  const isKimiRoute = location.pathname.startsWith("/kimi");
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -420,7 +435,9 @@ export function MobileSidebar() {
           <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
             {navItems.map(item => {
               const Icon = item.icon;
-              const isActive = location.pathname === item.path;
+              const isActive =
+                location.pathname === item.path ||
+                location.pathname.startsWith(`${item.path}/`);
 
               return (
                 <button
@@ -457,7 +474,7 @@ export function MobileSidebar() {
                   key={agent.slug}
                   onClick={() => {
                     setActiveAgent(agent.slug);
-                    navigate("/chat");
+                    navigate(isKimiRoute ? "/kimi/chat" : "/chat");
                     setOpen(false);
                   }}
                   className={cn(
@@ -501,7 +518,7 @@ export function MobileSidebar() {
                 <ChevronRight className="h-3 w-3" />
               )}
             </button>
-            {showHistory && (
+            {showHistory && !isKimiRoute && (
               <div className="mt-1 flex-1 space-y-0.5 overflow-y-auto scrollbar-thin">
                 {sessions.map(session => (
                   <div
@@ -537,6 +554,11 @@ export function MobileSidebar() {
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+            {showHistory && isKimiRoute && (
+              <div className="mt-2 rounded-md border border-border/30 bg-card/20 px-2.5 py-2 text-[10px] text-sidebar-foreground/35">
+                Kimi V1 usa su propia vista de conversaciones.
               </div>
             )}
           </div>

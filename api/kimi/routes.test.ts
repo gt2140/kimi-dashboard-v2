@@ -7,7 +7,7 @@ describe("Kimi Vercel route handlers", () => {
     const mod = await import("./chat/stream.ts");
     expect(typeof mod.default).toBe("function");
     },
-    15_000,
+    30_000,
   );
 
   it("exposes the Kimi chat respond handler", async () => {

@@ -8,12 +8,18 @@ import { chatSendMessageInputSchema } from "./trpc/chat-router.js";
 import { and, eq } from "drizzle-orm";
 import { vaultFiles } from "../db/schema.js";
 import { TurnStreamController } from "./services/turn-stream-controller.js";
-import { kimiConversationTurnService } from "./services/kimi-runtime.js";
+import { ConversationRepository } from "./repositories/conversation-repository.js";
+import { KimiApiClient } from "./kimi/api-client.js";
+import { MinimalKimiChatService } from "./services/minimal-kimi-chat-service.js";
 import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
 import { getDb } from "./queries/connection.js";
 import { readOriginalVaultFile } from "./services/vault-original-file.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
+const minimalKimiChatService = new MinimalKimiChatService({
+  conversationRepository: new ConversationRepository(),
+  kimiClient: new KimiApiClient(),
+});
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
     endpoint: "/api/trpc",
@@ -58,21 +64,18 @@ app.post("/api/kimi/chat/stream", async (c) => {
 
       void (async () => {
         try {
-          const result = await kimiConversationTurnService.executeTurn({
+          const result = await minimalKimiChatService.executeTurn({
             input: parsed.data,
             userId: user.id,
             streamPrimary: true,
-            onStage: async stage => {
-              streamController.emitStage(stage);
-            },
             onTextDelta: async delta => {
               streamController.emitDelta(delta);
             },
           });
-
+          
           if (!result.assistantMessage) {
             streamController.fail(
-              "Kimi V1 finished without a persisted assistant message.",
+              "Kimi V0 finished without a persisted assistant message.",
             );
             return;
           }
@@ -89,7 +92,7 @@ app.post("/api/kimi/chat/stream", async (c) => {
           streamController.fail(
             error instanceof Error
               ? error.message
-              : "Kimi V1 streaming failed unexpectedly.",
+              : "Kimi V0 streaming failed unexpectedly.",
           );
         }
       })();
@@ -128,7 +131,7 @@ app.post("/api/kimi/chat/respond", async (c) => {
   }
 
   try {
-    const result = await kimiConversationTurnService.executeTurn({
+    const result = await minimalKimiChatService.executeTurn({
       input: parsed.data,
       userId: user.id,
       streamPrimary: false,
@@ -137,7 +140,7 @@ app.post("/api/kimi/chat/respond", async (c) => {
     if (!result.assistantMessage) {
       return c.json(
         {
-          error: "Kimi V1 finished without a persisted assistant message.",
+          error: "Kimi V0 finished without a persisted assistant message.",
         },
         500,
       );
@@ -159,7 +162,7 @@ app.post("/api/kimi/chat/respond", async (c) => {
         error:
           error instanceof Error
             ? error.message
-            : "Kimi V1 response failed unexpectedly.",
+            : "Kimi V0 response failed unexpectedly.",
       },
       500,
     );

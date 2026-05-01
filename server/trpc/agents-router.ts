@@ -1,17 +1,6 @@
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { createRouter, authedQuery, publicQuery } from "./middleware.js";
-import {
-  ensureConversationalCatalogSeeded,
-  getActiveSystemPrompt,
-  getAgentDefinitionBySlug,
-  getUserAgentSetting,
-  listAgentDefinitions,
-  listModelProvidersWithEndpoints,
-  listUserAgentSettings,
-} from "../queries/agents.js";
-import { getDb } from "../queries/connection.js";
-import { agentDefinitions, userAgentSettings } from "../../db/schema.js";
+import { AGENTS } from "../../src/lib/data.js";
 
 const userAgentSettingsInput = z.object({
   slug: z.string().min(1),
@@ -31,173 +20,171 @@ const userAgentSettingsInput = z.object({
   allowedContextOverrides: z.array(z.string()).optional(),
 });
 
+type AgentView = {
+  slug: string;
+  name: string;
+  description: string;
+  longDescription: string;
+  icon: string;
+  color: string;
+  author: string;
+  installs: number;
+  rating: string | null;
+  tags: string[];
+  allowedVaultCategories: string[];
+  source: string;
+  systemPrompt?: string | null;
+};
+
+type AgentSettingView = {
+  userId: number;
+  agentDefinitionId: number;
+  isFavorite: boolean;
+  isEnabled: boolean;
+  customContext: string | null;
+  trainingNotes: string | null;
+  responseStyle: "concise" | "detailed" | "academic";
+  preferredProviderId: number | null;
+  preferredModelId: number | null;
+  allowVaultContext: boolean;
+  allowWebResearch: boolean;
+  allowScientificResearch: boolean;
+  kimiThinkingMode: "enabled" | "disabled";
+  preferKimiMemory: boolean;
+  enabledFormulaTools: string[];
+  allowedContextOverrides: string[];
+};
+
+type AgentSettingsRecord = AgentSettingView & {
+  agent: AgentView;
+};
+
+type ProviderView = {
+  id: number;
+  slug: string;
+  name: string;
+  endpoints: Array<{
+    id: number;
+    label: string;
+  }>;
+};
+
+function mapAgent(agent: (typeof AGENTS)[number]): AgentView {
+  return {
+    slug: agent.id,
+    name: agent.name,
+    description: agent.description,
+    longDescription: agent.longDescription,
+    icon: agent.icon,
+    color: agent.color,
+    author: agent.author ?? "Aura Marketplace",
+    installs: agent.installs ?? 0,
+    rating:
+      typeof agent.rating === "number" ? agent.rating.toFixed(2) : null,
+    tags: agent.tags ?? [],
+    allowedVaultCategories: agent.allowedVaultCategories,
+    source: agent.source ?? "built-in",
+    systemPrompt: agent.systemPrompt,
+  };
+}
+
+function buildDefaultSetting(
+  userId: number,
+  agent: (typeof AGENTS)[number],
+): AgentSettingView {
+  return {
+    userId,
+    agentDefinitionId: 0,
+    isFavorite: agent.id === "generalist",
+    isEnabled: true,
+    customContext: null,
+    trainingNotes: null,
+    responseStyle: "detailed",
+    preferredProviderId: null,
+    preferredModelId: null,
+    allowVaultContext: true,
+    allowWebResearch: true,
+    allowScientificResearch: false,
+    kimiThinkingMode: "disabled",
+    preferKimiMemory: false,
+    enabledFormulaTools: [],
+    allowedContextOverrides: agent.allowedVaultCategories,
+  };
+}
+
 export const agentsRouter = createRouter({
   list: publicQuery.query(async () => {
-    return listAgentDefinitions();
+    return AGENTS.map(mapAgent) as AgentView[];
   }),
 
   getById: publicQuery
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
-      const agent = await getAgentDefinitionBySlug(input.id);
+      const agent = AGENTS.find(candidate => candidate.id === input.id);
       if (!agent) {
         throw new Error("Agent not found");
       }
-      const systemPrompt = await getActiveSystemPrompt(agent.id);
-      return {
-        ...agent,
-        systemPrompt: systemPrompt?.templateText ?? null,
-      };
+
+      return mapAgent(agent);
     }),
 
   listProviders: publicQuery.query(async () => {
-    return listModelProvidersWithEndpoints();
+    return [] as ProviderView[];
   }),
 
   listUserSettings: authedQuery.query(async ({ ctx }) => {
-    return listUserAgentSettings(ctx.user.id);
+    return AGENTS.map(agent => ({
+      agent: mapAgent(agent),
+      ...buildDefaultSetting(ctx.user.id, agent),
+    })) as AgentSettingsRecord[];
   }),
 
   getUserSettings: authedQuery
     .input(z.object({ slug: z.string().min(1) }))
     .query(async ({ input, ctx }) => {
-      await ensureConversationalCatalogSeeded();
-      const agent = await getAgentDefinitionBySlug(input.slug);
+      const agent = AGENTS.find(candidate => candidate.id === input.slug);
       if (!agent) {
         throw new Error("Agent not found");
       }
 
-      const existing = await getUserAgentSetting(ctx.user.id, agent.id);
-      const systemPrompt = await getActiveSystemPrompt(agent.id);
       return {
-        agent: {
-          ...agent,
-          systemPrompt: systemPrompt?.templateText ?? null,
-        },
-        setting:
-          existing ??
-          ({
-            userId: ctx.user.id,
-            agentDefinitionId: agent.id,
-            isFavorite: agent.slug === "generalist",
-            isEnabled: true,
-            customContext: null,
-            trainingNotes: null,
-            responseStyle: "detailed",
-            preferredProviderId: null,
-            preferredModelId: null,
-            allowVaultContext: true,
-            allowWebResearch: true,
-            allowScientificResearch: false,
-            kimiThinkingMode: "enabled",
-            preferKimiMemory: true,
-            enabledFormulaTools: [],
-            allowedContextOverrides: [],
-          } as const),
+        agent: mapAgent(agent),
+        setting: buildDefaultSetting(ctx.user.id, agent),
       };
     }),
 
   saveUserSettings: authedQuery
     .input(userAgentSettingsInput)
     .mutation(async ({ input, ctx }) => {
-      await ensureConversationalCatalogSeeded();
-      const agent = await getAgentDefinitionBySlug(input.slug);
+      const agent = AGENTS.find(candidate => candidate.id === input.slug);
       if (!agent) {
         throw new Error("Agent not found");
       }
 
-      const db = getDb();
-      const existing = await db
-        .select()
-        .from(userAgentSettings)
-        .where(
-          and(
-            eq(userAgentSettings.userId, ctx.user.id),
-            eq(userAgentSettings.agentDefinitionId, agent.id)
-          )
-        )
-        .limit(1);
-
-      const nextValues = {
-        userId: ctx.user.id,
-        agentDefinitionId: agent.id,
-        isFavorite:
-          agent.slug === "generalist"
-            ? true
-            : (input.isFavorite ?? (existing[0]?.isFavorite ?? false)),
-        isEnabled: input.isEnabled ?? (existing[0]?.isEnabled ?? true),
-        customContext:
-          input.customContext !== undefined
-            ? input.customContext
-            : (existing[0]?.customContext ?? null),
-        trainingNotes:
-          input.trainingNotes !== undefined
-            ? input.trainingNotes
-            : (existing[0]?.trainingNotes ?? null),
-        responseStyle:
-          input.responseStyle ?? existing[0]?.responseStyle ?? "detailed",
-        preferredProviderId:
-          input.preferredProviderId !== undefined
-            ? input.preferredProviderId
-            : (existing[0]?.preferredProviderId ?? null),
-        preferredModelId:
-          input.preferredModelId !== undefined
-            ? input.preferredModelId
-            : (existing[0]?.preferredModelId ?? null),
-        allowVaultContext:
-          input.allowVaultContext ?? (existing[0]?.allowVaultContext ?? true),
-        allowWebResearch:
-          input.allowWebResearch ?? (existing[0]?.allowWebResearch ?? true),
-        allowScientificResearch:
-          input.allowScientificResearch ??
-          (existing[0]?.allowScientificResearch ?? false),
-        kimiThinkingMode:
-          input.kimiThinkingMode ?? existing[0]?.kimiThinkingMode ?? "enabled",
-        preferKimiMemory:
-          input.preferKimiMemory ?? (existing[0]?.preferKimiMemory ?? true),
-        enabledFormulaTools:
-          input.enabledFormulaTools ?? existing[0]?.enabledFormulaTools ?? [],
-        allowedContextOverrides:
-          input.allowedContextOverrides ??
-          existing[0]?.allowedContextOverrides ??
-          [],
-        updatedAt: new Date(),
-      };
-
-      await db
-        .insert(userAgentSettings)
-        .values(nextValues)
-        .onConflictDoUpdate({
-          target: [userAgentSettings.userId, userAgentSettings.agentDefinitionId],
-          set: {
-            isFavorite: nextValues.isFavorite,
-            isEnabled: nextValues.isEnabled,
-            customContext: nextValues.customContext,
-            trainingNotes: nextValues.trainingNotes,
-            responseStyle: nextValues.responseStyle,
-            preferredProviderId: nextValues.preferredProviderId,
-            preferredModelId: nextValues.preferredModelId,
-            allowVaultContext: nextValues.allowVaultContext,
-            allowWebResearch: nextValues.allowWebResearch,
-            allowScientificResearch: nextValues.allowScientificResearch,
-            kimiThinkingMode: nextValues.kimiThinkingMode,
-            preferKimiMemory: nextValues.preferKimiMemory,
-            enabledFormulaTools: nextValues.enabledFormulaTools,
-            allowedContextOverrides: nextValues.allowedContextOverrides,
-            updatedAt: nextValues.updatedAt,
-          },
-        });
-
-      const setting = await getUserAgentSetting(ctx.user.id, agent.id);
       return {
-        agent,
-        setting,
+        agent: mapAgent(agent),
+        setting: {
+          ...buildDefaultSetting(ctx.user.id, agent),
+          isFavorite: input.isFavorite ?? agent.id === "generalist",
+          isEnabled: input.isEnabled ?? true,
+          customContext: input.customContext ?? null,
+          trainingNotes: input.trainingNotes ?? null,
+          responseStyle: input.responseStyle ?? "detailed",
+          preferredProviderId: input.preferredProviderId ?? null,
+          preferredModelId: input.preferredModelId ?? null,
+          allowVaultContext: input.allowVaultContext ?? true,
+          allowWebResearch: input.allowWebResearch ?? true,
+          allowScientificResearch: input.allowScientificResearch ?? false,
+          kimiThinkingMode: input.kimiThinkingMode ?? "disabled",
+          preferKimiMemory: input.preferKimiMemory ?? false,
+          enabledFormulaTools: input.enabledFormulaTools ?? [],
+          allowedContextOverrides:
+            input.allowedContextOverrides ?? agent.allowedVaultCategories,
+        },
       };
     }),
 
   bootstrapCatalog: publicQuery.mutation(async () => {
-    await ensureConversationalCatalogSeeded();
-    const count = (await getDb().select().from(agentDefinitions)).length;
-    return { ok: true, count };
+    return { ok: true, count: AGENTS.length };
   }),
 });

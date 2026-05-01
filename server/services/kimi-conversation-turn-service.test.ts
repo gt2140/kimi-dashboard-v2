@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KimiConversationTurnService } from "./kimi-conversation-turn-service.js";
+import { MinimalKimiChatService } from "./minimal-kimi-chat-service.js";
 
-describe("KimiConversationTurnService", () => {
+describe("MinimalKimiChatService", () => {
   let callOrder: string[];
 
   beforeEach(() => {
@@ -57,30 +57,12 @@ describe("KimiConversationTurnService", () => {
       }),
     };
 
-    const contextLoader = vi.fn().mockImplementation(async () => {
-      callOrder.push("context");
-      return {
-        systemPrompt: "You are Cardio Deep.",
-        responseStyle: "detailed" as const,
-        recentMessages: [
-          {
-            role: "user" as const,
-            content: "How are my lipids trending?",
-          },
-        ],
-        thinkingMode: "disabled" as const,
-        promptCacheKey: "kimi:v1:conversation:12",
-        safetyIdentifier: "user-7",
-      };
-    });
-
     const onTextDelta = vi.fn();
     const onStage = vi.fn();
 
-    const service = new KimiConversationTurnService({
+    const service = new MinimalKimiChatService({
       conversationRepository,
       kimiClient,
-      contextLoader,
     });
 
     const result = await service.executeTurn({
@@ -97,7 +79,6 @@ describe("KimiConversationTurnService", () => {
     });
 
     expect(callOrder).toEqual([
-      "context",
       "user-message",
       "kimi-stream",
       "assistant-message",
@@ -150,19 +131,9 @@ describe("KimiConversationTurnService", () => {
       streamChatCompletion: vi.fn(),
     };
 
-    const contextLoader = vi.fn().mockResolvedValue({
-      systemPrompt: "You are Generalist.",
-      responseStyle: "detailed" as const,
-      recentMessages: [],
-      thinkingMode: "disabled" as const,
-      promptCacheKey: "kimi:v1:conversation:18",
-      safetyIdentifier: "user-9",
-    });
-
-    const service = new KimiConversationTurnService({
+    const service = new MinimalKimiChatService({
       conversationRepository,
       kimiClient,
-      contextLoader,
     });
 
     const result = await service.executeTurn({

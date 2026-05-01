@@ -4,47 +4,13 @@ import {
   extractKimiUsage,
   type KimiChatRequest,
 } from "../kimi/chat-client.js";
-import { buildKimiPromptCacheKey, buildShortTermMemoryWindow } from "./kimi-memory.js";
+import { AGENTS } from "../../src/lib/data.js";
 
 type ConversationTurnInput = {
   conversationId: number;
   content: string;
   agentId: string;
   calledAgentIds: string[];
-};
-
-type ChatStage = {
-  id: string;
-  label: string;
-};
-
-type KimiCompletionResponse = {
-  id?: string;
-  choices?: Array<{
-    finish_reason?: string | null;
-    message?: {
-      role?: string;
-      content?: string | null;
-    };
-  }>;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-    cached_tokens?: number;
-  };
-};
-
-type ContextLoaderResult = {
-  systemPrompt: string;
-  responseStyle: "concise" | "detailed" | "academic";
-  recentMessages: Array<{
-    role: "user" | "assistant";
-    content: string;
-  }>;
-  thinkingMode: "enabled" | "disabled";
-  promptCacheKey?: string | null;
-  safetyIdentifier?: string | null;
 };
 
 type ConversationRepositoryLike = {
@@ -72,6 +38,23 @@ type ConversationRepositoryLike = {
   }) => Promise<void>;
 };
 
+type KimiCompletionResponse = {
+  id?: string;
+  choices?: Array<{
+    finish_reason?: string | null;
+    message?: {
+      role?: string;
+      content?: string | null;
+    };
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    cached_tokens?: number;
+  };
+};
+
 type KimiClientLike = {
   createChatCompletion: (request: KimiChatRequest) => Promise<KimiCompletionResponse>;
   streamChatCompletion: (
@@ -80,17 +63,11 @@ type KimiClientLike = {
   ) => Promise<KimiCompletionResponse>;
 };
 
-export class KimiConversationTurnService {
+export class MinimalKimiChatService {
   constructor(
     private readonly dependencies: {
       conversationRepository: ConversationRepositoryLike;
       kimiClient: KimiClientLike;
-      contextLoader: (params: {
-        userId: number;
-        conversationId: number;
-        agentSlug: string;
-        latestUserMessage: string;
-      }) => Promise<ContextLoaderResult>;
     },
   ) {}
 
@@ -98,55 +75,33 @@ export class KimiConversationTurnService {
     input: ConversationTurnInput;
     userId: number;
     streamPrimary?: boolean;
-    onStage?: (stage: ChatStage) => void | Promise<void>;
     onTextDelta?: (delta: string) => void | Promise<void>;
   }) {
-    const { conversationRepository, contextLoader, kimiClient } = this.dependencies;
-
+    const { conversationRepository, kimiClient } = this.dependencies;
     const conversation = await conversationRepository.requireConversationOwner(
       params.input.conversationId,
       params.userId,
     );
 
-    const context = await contextLoader({
-      userId: params.userId,
-      conversationId: params.input.conversationId,
-      agentSlug: params.input.agentId,
-      latestUserMessage: params.input.content,
-    });
+    const agent =
+      AGENTS.find(candidate => candidate.id === params.input.agentId) ?? AGENTS[0];
 
     const userMessage = await conversationRepository.createUserMessage({
       conversationId: params.input.conversationId,
       content: params.input.content,
       agentId: params.input.agentId,
       metadata: {
-        engine: "kimi-v1-minimal",
+        engine: "kimi-v0-direct",
         ignoredHelperAgentIds: params.input.calledAgentIds,
       },
     });
 
-    const contextPayload = buildContextPayload({
-      userMessage: params.input.content,
-      recentMessages: context.recentMessages,
-    });
-
-    const resolvedSystemPrompt = [
-      context.systemPrompt,
-      buildResponseStyleInstruction(context.responseStyle),
-      contextPayload.systemContext,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-
     const request = buildKimiChatRequest({
       model: "kimi-k2.6",
-      systemPrompt: resolvedSystemPrompt,
+      systemPrompt: agent.systemPrompt,
       messages: [{ role: "user", content: params.input.content }],
-      promptCacheKey:
-        context.promptCacheKey ??
-        buildKimiPromptCacheKey(params.input.conversationId),
-      safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
-      thinking: context.thinkingMode,
+      safetyIdentifier: `user-${params.userId}`,
+      thinking: "disabled",
     });
 
     const completion = params.streamPrimary
@@ -157,13 +112,9 @@ export class KimiConversationTurnService {
 
     const outputText = extractKimiAssistantText(completion);
     const assistantMetadata = {
-      engine: "kimi-v1-minimal",
+      engine: "kimi-v0-direct",
       providerSlug: "kimi",
       modelName: "kimi-k2.6",
-      promptCacheKey:
-        context.promptCacheKey ??
-        buildKimiPromptCacheKey(params.input.conversationId),
-      requestedThinkingMode: context.thinkingMode,
       finishReason: completion.choices?.[0]?.finish_reason ?? null,
       usage: extractKimiUsage(completion),
       ignoredHelperAgentIds: params.input.calledAgentIds,
@@ -195,32 +146,5 @@ export class KimiConversationTurnService {
         metadata: assistantMetadata,
       },
     };
-  }
-}
-
-function buildContextPayload(input: {
-  userMessage: string;
-  recentMessages: Array<{
-    role: "user" | "assistant";
-    content: string;
-  }>;
-}) {
-  return {
-    systemContext: "",
-    messages: [{ role: "user" as const, content: input.userMessage }],
-  };
-}
-
-function buildResponseStyleInstruction(
-  responseStyle: "concise" | "detailed" | "academic",
-) {
-  switch (responseStyle) {
-    case "concise":
-      return "Response style: keep answers compact, direct, and easy to scan.";
-    case "academic":
-      return "Response style: use a technical tone, distinguish evidence from inference, and surface uncertainty clearly.";
-    case "detailed":
-    default:
-      return "Response style: be structured, practical, and sufficiently detailed without drifting into filler.";
   }
 }

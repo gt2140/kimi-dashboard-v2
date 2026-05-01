@@ -1,15 +1,9 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import {
-  agentDefinitions,
-  conversationAgents,
-  conversations,
-  messages,
-} from "../../db/schema.js";
+import { conversations, messages } from "../../db/schema.js";
 import { logServerDebug, logServerError } from "../lib/debug.js";
 import { getDb } from "../queries/connection.js";
 import { ConversationRepository } from "../repositories/conversation-repository.js";
-import { syncConversationParticipants } from "../services/conversation-participants.js";
 import { createRouter, authedQuery } from "./middleware.js";
 
 export const chatSendMessageInputSchema = z.object({
@@ -21,28 +15,6 @@ export const chatSendMessageInputSchema = z.object({
 
 export type ChatSendMessageInput = z.infer<typeof chatSendMessageInputSchema>;
 
-const chatMetadataSchema = z
-  .object({
-    calledAgents: z.array(z.string()).optional(),
-    relatedVaultFiles: z.array(z.string()).optional(),
-    orchestrationMode: z.string().optional(),
-    note: z.string().optional(),
-    responseMode: z.enum(["model", "limited"]).optional(),
-    consultedAgentNames: z.array(z.string()).optional(),
-    consultationMode: z.enum(["none", "explicit", "auto"]).optional(),
-    consultationReason: z.string().optional(),
-    contextSummary: z.string().optional(),
-    missingContext: z.array(z.string()).optional(),
-    executionNotes: z.array(z.string()).optional(),
-    providerSlug: z.string().optional(),
-    modelName: z.string().optional(),
-    requestedProviderSlug: z.string().optional(),
-    requestedModelName: z.string().optional(),
-    inputTokens: z.number().optional(),
-    outputTokens: z.number().optional(),
-  })
-  .optional();
-
 const conversationRepository = new ConversationRepository();
 
 function parseMetadata(metadata: string | null) {
@@ -51,7 +23,7 @@ function parseMetadata(metadata: string | null) {
   }
 
   try {
-    return JSON.parse(metadata) as z.infer<typeof chatMetadataSchema>;
+    return JSON.parse(metadata) as Record<string, unknown>;
   } catch {
     return undefined;
   }
@@ -67,28 +39,6 @@ export const chatRouter = createRouter({
         .where(eq(conversations.userId, ctx.user.id))
         .orderBy(desc(conversations.updatedAt));
 
-      const participants =
-        rows.length > 0
-          ? await db
-              .select({
-                conversationId: conversationAgents.conversationId,
-                role: conversationAgents.role,
-                isActive: conversationAgents.isActive,
-                agentSlug: agentDefinitions.slug,
-              })
-              .from(conversationAgents)
-              .innerJoin(
-                agentDefinitions,
-                eq(conversationAgents.agentDefinitionId, agentDefinitions.id)
-              )
-              .where(
-                inArray(
-                  conversationAgents.conversationId,
-                  rows.map(row => row.id)
-                )
-              )
-          : [];
-
       logServerDebug("chat.listConversations", {
         userId: ctx.user.id,
         count: rows.length,
@@ -96,14 +46,7 @@ export const chatRouter = createRouter({
 
       return rows.map(row => ({
         ...row,
-        calledAgentIds: participants
-          .filter(
-            participant =>
-              participant.conversationId === row.id &&
-              participant.role === "supporting" &&
-              participant.isActive
-          )
-          .map(participant => participant.agentSlug),
+        calledAgentIds: [],
       }));
     } catch (error) {
       logServerError("chat.listConversations.failed", error, {
@@ -128,19 +71,6 @@ export const chatRouter = createRouter({
         .where(eq(messages.conversationId, input.id))
         .orderBy(messages.createdAt);
 
-      const participants = await db
-        .select({
-          role: conversationAgents.role,
-          isActive: conversationAgents.isActive,
-          agentSlug: agentDefinitions.slug,
-        })
-        .from(conversationAgents)
-        .innerJoin(
-          agentDefinitions,
-          eq(conversationAgents.agentDefinitionId, agentDefinitions.id)
-        )
-        .where(eq(conversationAgents.conversationId, input.id));
-
       const parsedMessages = rows.map(message => ({
         ...message,
         metadata: parseMetadata(message.metadata),
@@ -155,12 +85,7 @@ export const chatRouter = createRouter({
       return {
         conversation: {
           ...conversation,
-          calledAgentIds: participants
-            .filter(
-              participant =>
-                participant.role === "supporting" && participant.isActive
-            )
-            .map(participant => participant.agentSlug),
+          calledAgentIds: [],
         },
         messages: parsedMessages,
       };
@@ -180,12 +105,6 @@ export const chatRouter = createRouter({
             orchestrationMode: "single_agent",
           })
           .returning({ id: conversations.id });
-
-        await syncConversationParticipants({
-          conversationId: result[0].id,
-          primaryAgentSlug: input.agentId,
-          supportingAgentSlugs: [],
-        });
 
         logServerDebug("chat.createConversation", {
           userId: ctx.user.id,
@@ -211,9 +130,6 @@ export const chatRouter = createRouter({
 
       await db.transaction(async tx => {
         await tx.delete(messages).where(eq(messages.conversationId, input.id));
-        await tx
-          .delete(conversationAgents)
-          .where(eq(conversationAgents.conversationId, input.id));
         await tx.delete(conversations).where(eq(conversations.id, input.id));
       });
       logServerDebug("chat.deleteConversation", {

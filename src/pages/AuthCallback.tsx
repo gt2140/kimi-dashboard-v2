@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AUTH_CALLBACK_PATH, LOGIN_PATH } from "@/const";
+import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug, logClientError } from "@/lib/debug";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import { ensureBackendSession } from "@/providers/trpc";
@@ -58,9 +59,10 @@ export default function AuthCallback() {
           logClientError("auth.callback.sync-session.failed", error);
           if (active) {
             setErrorMessage(
-              error instanceof Error
-                ? error.message
-                : "Unable to finish sign-in."
+              formatRuntimeError(
+                error instanceof Error ? error : new Error("Unable to finish sign-in."),
+                "Auth"
+              )
             );
             return;
           }
@@ -189,7 +191,10 @@ export default function AuthCallback() {
         });
         if (active) {
           setErrorMessage(
-            error instanceof Error ? error.message : "Authentication failed."
+            formatRuntimeError(
+              error instanceof Error ? error : new Error("Authentication failed."),
+              "Auth"
+            )
           );
         }
       }

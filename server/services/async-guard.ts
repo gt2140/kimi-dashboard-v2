@@ -49,7 +49,6 @@ export async function withAbortableTimeout<T>(
       }),
     ]);
   } finally {
-    controller.abort();
     if (timeoutId) {
       clearTimeout(timeoutId);
     }

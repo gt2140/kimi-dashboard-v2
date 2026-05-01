@@ -23,10 +23,27 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     return "Auth error: sign in again to continue.";
   }
 
+  if (normalized.includes("authentication provider took too long")) {
+    return "Auth error: Google sign-in took too long to finish. Try again.";
+  }
+
+  if (normalized.includes("backend session is not ready yet")) {
+    return "Auth error: sign-in is still finishing in the background. Try again in a moment.";
+  }
+
+  if (
+    normalized.includes("this operation was aborted") ||
+    normalized.includes("aborterror") ||
+    normalized.includes("request was interrupted")
+  ) {
+    return "Network error: the request was interrupted. Try again.";
+  }
+
   if (
     normalized.includes("fetch") ||
     normalized.includes("network") ||
-    normalized.includes("failed to fetch")
+    normalized.includes("failed to fetch") ||
+    normalized.includes("timed out")
   ) {
     return "Network error: check the local API connection and try again.";
   }

@@ -36,6 +36,29 @@ describe("withAbortableTimeout", () => {
     ).resolves.toBe("ok");
   });
 
+  it("does not abort the underlying task after a successful completion", async () => {
+    let aborted = false;
+
+    const result = await withAbortableTimeout(
+      signal =>
+        new Promise<string>((resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(signal.reason ?? new Error("aborted"));
+          });
+
+          setTimeout(() => resolve("ok"), 0);
+        }),
+      {
+        label: "successful abortable task",
+        timeoutMs: 50,
+      }
+    );
+
+    expect(result).toBe("ok");
+    expect(aborted).toBe(false);
+  });
+
   it("aborts the underlying task when the timeout elapses", async () => {
     let aborted = false;
 

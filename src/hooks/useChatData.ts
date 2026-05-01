@@ -7,6 +7,7 @@ import { logClientDebug, logClientError } from "@/lib/debug";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
+  isRecoverableChatStreamError,
   isRecoverableChatStreamStatus,
   parseChatStreamChunk,
   type ChatStreamEvent,
@@ -231,6 +232,46 @@ export function useChatData() {
 
     setStreamError(null);
     setIsStreaming(true);
+    let streamStarted = false;
+
+    const emitFallbackCompletion = async () => {
+      const fallbackResult = await sendMessageToConversation(
+        conversationId,
+        content
+      );
+      const completedMessage = fallbackResult.assistantMessage;
+
+      if (completedMessage) {
+        handlers.onMessageComplete?.({
+          type: "message-complete",
+          message: {
+            id: String(completedMessage.id),
+            role: "assistant",
+            content: completedMessage.content,
+            agentId: completedMessage.agentId ?? activeAgentId,
+            createdAt:
+              completedMessage.createdAt instanceof Date
+                ? completedMessage.createdAt.toISOString()
+                : new Date(completedMessage.createdAt).toISOString(),
+            metadata: completedMessage.metadata,
+          },
+        });
+      }
+
+      return completedMessage
+        ? {
+            id: String(completedMessage.id),
+            role: "assistant" as const,
+            content: completedMessage.content,
+            agentId: completedMessage.agentId ?? activeAgentId,
+            createdAt:
+              completedMessage.createdAt instanceof Date
+                ? completedMessage.createdAt.toISOString()
+                : new Date(completedMessage.createdAt).toISOString(),
+            metadata: completedMessage.metadata,
+          }
+        : null;
+    };
 
     try {
       const makeStreamRequest = () =>
@@ -261,42 +302,7 @@ export function useChatData() {
 
       if (!response.ok) {
         if (isRecoverableChatStreamStatus(response.status)) {
-          const fallbackResult = await sendMessageToConversation(
-            conversationId,
-            content
-          );
-          const completedMessage = fallbackResult.assistantMessage;
-
-          if (completedMessage) {
-            handlers.onMessageComplete?.({
-              type: "message-complete",
-              message: {
-                id: String(completedMessage.id),
-                role: "assistant",
-                content: completedMessage.content,
-                agentId: completedMessage.agentId ?? activeAgentId,
-                createdAt:
-                  completedMessage.createdAt instanceof Date
-                    ? completedMessage.createdAt.toISOString()
-                    : new Date(completedMessage.createdAt).toISOString(),
-                metadata: completedMessage.metadata,
-              },
-            });
-          }
-
-          return completedMessage
-            ? {
-                id: String(completedMessage.id),
-                role: "assistant" as const,
-                content: completedMessage.content,
-                agentId: completedMessage.agentId ?? activeAgentId,
-                createdAt:
-                  completedMessage.createdAt instanceof Date
-                    ? completedMessage.createdAt.toISOString()
-                    : new Date(completedMessage.createdAt).toISOString(),
-                metadata: completedMessage.metadata,
-              }
-            : null;
+          return emitFallbackCompletion();
         }
 
         throw new Error(`Streaming request failed with HTTP ${response.status}.`);
@@ -321,6 +327,7 @@ export function useChatData() {
         buffer = parsed.remainder;
 
         for (const event of parsed.events) {
+          streamStarted = true;
           handlers.onEvent?.(event);
 
           if (event.type === "stage") {
@@ -356,6 +363,19 @@ export function useChatData() {
 
       return completedMessage;
     } catch (error) {
+      if (isRecoverableChatStreamError(error)) {
+        logClientDebug("chat.stream.recoverable-fallback", {
+          conversationId,
+          streamStarted,
+          error:
+            error instanceof Error ? error.message : "recoverable-stream-error",
+        });
+
+        if (!streamStarted) {
+          return emitFallbackCompletion();
+        }
+      }
+
       const message =
         error instanceof Error
           ? error.message

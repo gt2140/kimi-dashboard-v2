@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { getAuthCallbackUrl } from "@/const";
 import { useAuth } from "@/hooks/useAuth";
+import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug, logClientError } from "@/lib/debug";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import { clearSupabaseBrowserState } from "@/lib/supabase-session";
@@ -53,11 +54,7 @@ export default function Login() {
       logClientError("login.failed", error, {
         redirectTo: getAuthCallbackUrl(),
       });
-      setAuthError(
-        error instanceof Error
-          ? error.message
-          : "Unable to start Google sign-in."
-      );
+      setAuthError(formatRuntimeError(error, "Auth"));
     }
   }
 

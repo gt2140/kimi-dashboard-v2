@@ -175,10 +175,12 @@ export function useAuth(options?: UseAuthOptions) {
 
   const setupError = readSetupError(authStatus.data);
   const syncError =
-    hasSupabaseSession && !backendSession.backendReady ? backendSession.error : null;
+    hasSupabaseSession && !backendSession.backendReady
+      ? backendSession.error
+      : null;
   const resolvedError =
     setupError ??
-    syncError ??
+    (syncError ? formatRuntimeError(new Error(syncError), "Auth") : null) ??
     (!backendUser && error ? formatRuntimeError(error, "Auth") : null);
 
   const isAuthenticated = Boolean(backendUser);

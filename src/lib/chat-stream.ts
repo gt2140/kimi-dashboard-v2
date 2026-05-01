@@ -51,7 +51,44 @@ export function encodeChatStreamEvent(event: ChatStreamEvent) {
 }
 
 export function isRecoverableChatStreamStatus(status: number) {
-  return status === 404 || status === 405;
+  return (
+    status === 404 ||
+    status === 405 ||
+    status === 408 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
+export function isRecoverableChatStreamError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  if (error.name === "AbortError" || error.name === "TimeoutError") {
+    return true;
+  }
+
+  const normalized = error.message.trim().toLowerCase();
+
+  if (
+    normalized.includes("this operation was aborted") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("network") ||
+    normalized.includes("timed out")
+  ) {
+    return true;
+  }
+
+  const statusMatch = normalized.match(/http\s+(\d{3})/);
+  if (!statusMatch) {
+    return false;
+  }
+
+  return isRecoverableChatStreamStatus(Number(statusMatch[1]));
 }
 
 export function parseChatStreamChunk(buffer: string) {

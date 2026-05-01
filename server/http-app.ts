@@ -7,18 +7,18 @@ import { authenticateRequest } from "./trpc/auth.js";
 import { chatSendMessageInputSchema } from "./trpc/chat-router.js";
 import { and, eq } from "drizzle-orm";
 import { vaultFiles } from "../db/schema.js";
-import { ConversationRepository } from "./repositories/conversation-repository.js";
-import { KimiApiClient } from "./kimi/api-client.js";
-import { MinimalKimiChatService } from "./services/minimal-kimi-chat-service.js";
 import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
 import { getDb } from "./queries/connection.js";
 import { readOriginalVaultFile } from "./services/vault-original-file.js";
+import { MvpChatStore } from "./mvp/chat-store.js";
+import { KimiDirectClient } from "./mvp/kimi-direct-client.js";
+import { MvpChatTurnService } from "./mvp/chat-turn-service.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
-const minimalKimiChatService = new MinimalKimiChatService({
-  conversationRepository: new ConversationRepository(),
-  kimiClient: new KimiApiClient(),
-});
+const mvpChatTurnService = new MvpChatTurnService(
+  new MvpChatStore(),
+  new KimiDirectClient(),
+);
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
     endpoint: "/api/trpc",
@@ -50,29 +50,15 @@ app.post("/api/kimi/chat/respond", async (c) => {
   }
 
   try {
-    const result = await minimalKimiChatService.executeTurn({
-      input: parsed.data,
+    const message = await mvpChatTurnService.execute({
+      conversationId: parsed.data.conversationId,
+      content: parsed.data.content,
+      agentId: parsed.data.agentId,
       userId: user.id,
     });
 
-    if (!result.assistantMessage) {
-      return c.json(
-        {
-          error: "Kimi V0 finished without a persisted assistant message.",
-        },
-        500,
-      );
-    }
-
     return c.json({
-      message: {
-        id: String(result.assistantMessage.id),
-        role: "assistant",
-        content: result.assistantMessage.content,
-        agentId: result.assistantMessage.agentId,
-        createdAt: result.assistantMessage.createdAt.toISOString(),
-        metadata: result.assistantMessage.metadata,
-      },
+      message,
     });
   } catch (error) {
     return c.json(

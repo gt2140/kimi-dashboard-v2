@@ -1,88 +1,137 @@
-import { useEffect, useMemo } from "react";
-import { trpc, ensureBackendSession } from "@/providers/trpc";
-import { useFavoriteAgentsStore } from "@/hooks/useStore";
-import { formatRuntimeError } from "@/lib/app-errors";
+import { useMemo, useState } from "react";
+import { useAgentSettingsStore, useFavoriteAgentsStore } from "@/hooks/useStore";
 import { AGENTS } from "@/lib/data";
 
-function isUnauthorizedError(error: unknown) {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
+type AgentView = {
+  slug: string;
+  name: string;
+  description: string;
+  longDescription: string;
+  icon: string;
+  color: string;
+  author: string;
+  installs: number;
+  rating: string | null;
+  tags: string[];
+  allowedVaultCategories: string[];
+  source: string;
+  systemPrompt: string;
+};
 
-  const candidate = error as { data?: { code?: string }; message?: string };
-  return (
-    candidate.data?.code === "UNAUTHORIZED" ||
-    candidate.message?.toLowerCase().includes("unauth") === true
-  );
+type AgentSettingView = {
+  userId: number;
+  agentDefinitionId: number;
+  isFavorite: boolean;
+  isEnabled: boolean;
+  customContext: string | null;
+  trainingNotes: string | null;
+  responseStyle: "concise" | "detailed" | "academic";
+  preferredProviderId: number | null;
+  preferredModelId: number | null;
+  allowVaultContext: boolean;
+  allowWebResearch: boolean;
+  allowScientificResearch: boolean;
+  kimiThinkingMode: "enabled" | "disabled";
+  preferKimiMemory: boolean;
+  enabledFormulaTools: string[];
+  allowedContextOverrides: string[];
+};
+
+type ProviderView = {
+  id: number;
+  slug: string;
+  name: string;
+  endpoints: Array<{
+    id: number;
+    label: string;
+  }>;
+};
+
+const LOCAL_PROVIDERS: ProviderView[] = [
+  {
+    id: 1,
+    slug: "kimi",
+    name: "Kimi",
+    endpoints: [
+      {
+        id: 1,
+        label: "kimi-k2.6",
+      },
+    ],
+  },
+];
+
+function mapAgent(agent: (typeof AGENTS)[number]): AgentView {
+  return {
+    slug: agent.id,
+    name: agent.name,
+    description: agent.description,
+    longDescription: agent.longDescription,
+    icon: agent.icon,
+    color: agent.color,
+    author: agent.author ?? "Aura Marketplace",
+    installs: agent.installs ?? 0,
+    rating:
+      typeof agent.rating === "number" ? agent.rating.toFixed(2) : null,
+    tags: agent.tags ?? [],
+    allowedVaultCategories: agent.allowedVaultCategories,
+    source: agent.source ?? "built-in",
+    systemPrompt: agent.systemPrompt,
+  };
+}
+
+function normalizeSetting(
+  agent: (typeof AGENTS)[number],
+  setting: ReturnType<typeof useAgentSettingsStore.getState>["settings"][string] | undefined,
+  isFavorite: boolean,
+): AgentSettingView {
+  return {
+    userId: 0,
+    agentDefinitionId: 0,
+    isFavorite,
+    isEnabled: setting?.enabled ?? true,
+    customContext: setting?.customContext?.trim() || null,
+    trainingNotes: setting?.trainingNotes?.trim() || null,
+    responseStyle: setting?.responseStyle ?? "detailed",
+    preferredProviderId: setting?.preferredProviderId ?? 1,
+    preferredModelId: setting?.preferredModelId ?? 1,
+    allowVaultContext: setting?.allowVaultContext ?? true,
+    allowWebResearch: setting?.allowWebResearch ?? true,
+    allowScientificResearch: setting?.allowScientificResearch ?? false,
+    kimiThinkingMode: setting?.kimiThinkingMode ?? "disabled",
+    preferKimiMemory: setting?.preferKimiMemory ?? false,
+    enabledFormulaTools: setting?.enabledFormulaTools ?? [],
+    allowedContextOverrides:
+      setting?.allowedContextOverrides ?? agent.allowedVaultCategories,
+  };
 }
 
 export function useAgentCatalog() {
-  const utils = trpc.useUtils();
-  const localFavoriteAgentIds = useFavoriteAgentsStore(
-    state => state.favoriteAgentIds
-  );
+  const [isSaving, setIsSaving] = useState(false);
+  const settings = useAgentSettingsStore(state => state.settings);
+  const updateSettings = useAgentSettingsStore(state => state.updateSettings);
+  const favoriteAgentIds = useFavoriteAgentsStore(state => state.favoriteAgentIds);
   const setFavoriteAgentIds = useFavoriteAgentsStore(
-    state => state.setFavoriteAgentIds
+    state => state.setFavoriteAgentIds,
   );
 
-  const agentsQuery = trpc.agents.list.useQuery();
-  const userSettingsQuery = trpc.agents.listUserSettings.useQuery(undefined, {
-    enabled: true,
-    retry: false,
-  });
-  const saveUserSettingsMutation = trpc.agents.saveUserSettings.useMutation();
+  const agents = useMemo(
+    () => AGENTS.map(mapAgent),
+    [],
+  );
 
-  useEffect(() => {
-    if (!userSettingsQuery.data) {
-      return;
-    }
-
-    const backendFavorites = [
-      "generalist",
-      ...userSettingsQuery.data
-        .filter(item => item.isFavorite)
-        .map(item => item.agent.slug),
-    ];
-
-    setFavoriteAgentIds(backendFavorites);
-  }, [setFavoriteAgentIds, userSettingsQuery.data]);
-
-  const favoriteAgentIds = useMemo(() => {
-    if (!userSettingsQuery.data) {
-      return localFavoriteAgentIds;
-    }
-
-    return Array.from(
-      new Set([
-        "generalist",
-        ...userSettingsQuery.data
-          .filter(item => item.isFavorite)
-          .map(item => item.agent.slug),
-      ])
-    );
-  }, [localFavoriteAgentIds, userSettingsQuery.data]);
-
-  const agents = useMemo(() => {
-    if (agentsQuery.data?.length) {
-      return agentsQuery.data;
-    }
-
-    return AGENTS.map(agent => ({
-      slug: agent.id,
-      name: agent.name,
-      description: agent.description,
-      longDescription: agent.longDescription,
-      icon: agent.icon,
-      color: agent.color,
-      author: agent.author ?? "Aura Marketplace",
-      installs: agent.installs ?? 0,
-      rating:
-        typeof agent.rating === "number" ? agent.rating.toFixed(2) : null,
-      tags: agent.tags ?? [],
-      allowedVaultCategories: agent.allowedVaultCategories,
-      source: "marketplace",
-    }));
-  }, [agentsQuery.data]);
+  const userSettings = useMemo(
+    () =>
+      AGENTS.map(agent => {
+        const agentView = mapAgent(agent);
+        const isFavorite = favoriteAgentIds.includes(agent.id);
+        return {
+          agent: agentView,
+          ...normalizeSetting(agent, settings[agent.id], isFavorite),
+        };
+      }),
+    [favoriteAgentIds, settings],
+  );
 
   const favoriteAgents = useMemo(
     () =>
@@ -90,11 +139,18 @@ export function useAgentCatalog() {
         .map(agentId => agents.find(agent => agent.slug === agentId))
         .filter(
           (
-            agent
-          ): agent is (typeof agents)[number] =>
-            Boolean(agent)
+            agent,
+          ): agent is AgentView => Boolean(agent),
         ),
-    [agents, favoriteAgentIds]
+    [agents, favoriteAgentIds],
+  );
+
+  const settingsBySlug = useMemo(
+    () =>
+      new Map(
+        userSettings.map(setting => [setting.agent.slug, setting]),
+      ),
+    [userSettings],
   );
 
   async function saveUserSettings(input: {
@@ -114,47 +170,85 @@ export function useAgentCatalog() {
     enabledFormulaTools?: string[];
     allowedContextOverrides?: string[];
   }) {
+    const agent = AGENTS.find(candidate => candidate.id === input.slug);
+    if (!agent) {
+      throw new Error("Agent not found.");
+    }
+
+    setIsSaving(true);
+
     try {
-      const result = await saveUserSettingsMutation.mutateAsync(input);
-      await Promise.all([
-        utils.agents.list.invalidate(),
-        utils.agents.listUserSettings.invalidate(),
-        utils.agents.getUserSettings.invalidate({ slug: input.slug }),
-        utils.chat.invalidate(),
-      ]);
-      return result;
-    } catch (error) {
-      if (!isUnauthorizedError(error)) {
-        throw error;
+      const resolvedIsFavorite =
+        input.isFavorite ?? favoriteAgentIds.includes(input.slug);
+
+      if (typeof input.isFavorite === "boolean") {
+        const nextFavorites = input.isFavorite
+          ? Array.from(new Set([...favoriteAgentIds, input.slug]))
+          : favoriteAgentIds.filter(id => id !== input.slug);
+        setFavoriteAgentIds(nextFavorites);
       }
 
-      await ensureBackendSession({ force: true });
+      updateSettings(input.slug, {
+        enabled: input.isEnabled ?? settings[input.slug]?.enabled ?? true,
+        customContext: input.customContext ?? settings[input.slug]?.customContext ?? "",
+        trainingNotes: input.trainingNotes ?? settings[input.slug]?.trainingNotes ?? "",
+        responseStyle:
+          input.responseStyle ?? settings[input.slug]?.responseStyle ?? "detailed",
+        preferredProviderId:
+          input.preferredProviderId ?? settings[input.slug]?.preferredProviderId ?? 1,
+        preferredModelId:
+          input.preferredModelId ?? settings[input.slug]?.preferredModelId ?? 1,
+        allowVaultContext:
+          input.allowVaultContext ?? settings[input.slug]?.allowVaultContext ?? true,
+        allowWebResearch:
+          input.allowWebResearch ?? settings[input.slug]?.allowWebResearch ?? true,
+        allowScientificResearch:
+          input.allowScientificResearch ??
+          settings[input.slug]?.allowScientificResearch ??
+          false,
+        kimiThinkingMode:
+          input.kimiThinkingMode ?? settings[input.slug]?.kimiThinkingMode ?? "disabled",
+        preferKimiMemory:
+          input.preferKimiMemory ?? settings[input.slug]?.preferKimiMemory ?? false,
+        enabledFormulaTools:
+          input.enabledFormulaTools ?? settings[input.slug]?.enabledFormulaTools ?? [],
+        allowedContextOverrides:
+          input.allowedContextOverrides ??
+          settings[input.slug]?.allowedContextOverrides ??
+          agent.allowedVaultCategories,
+        isFavorite: resolvedIsFavorite,
+      });
 
-      const result = await saveUserSettingsMutation.mutateAsync(input);
-      await Promise.all([
-        utils.agents.list.invalidate(),
-        utils.agents.listUserSettings.invalidate(),
-        utils.agents.getUserSettings.invalidate({ slug: input.slug }),
-        utils.chat.invalidate(),
-      ]);
-      return result;
+      return {
+        agent: mapAgent(agent),
+        setting: normalizeSetting(
+          agent,
+          {
+            ...settings[input.slug],
+            ...useAgentSettingsStore.getState().settings[input.slug],
+          },
+          resolvedIsFavorite,
+        ),
+      };
+    } finally {
+      setIsSaving(false);
     }
   }
 
-  const error =
-    agentsQuery.error ??
-    userSettingsQuery.error ??
-    saveUserSettingsMutation.error ??
-    null;
+  function getUserSettings(slug: string) {
+    return settingsBySlug.get(slug) ?? null;
+  }
 
   return {
     agents,
     favoriteAgents,
     favoriteAgentIds,
-    userSettings: userSettingsQuery.data ?? [],
-    isLoading: agentsQuery.isLoading || userSettingsQuery.isLoading,
-    isSaving: saveUserSettingsMutation.isPending,
-    error: error ? formatRuntimeError(error, "Agents") : null,
+    userSettings,
+    providers: LOCAL_PROVIDERS,
+    getUserSettings,
+    isLoading: false,
+    isSaving,
+    error: null,
     saveUserSettings,
   };
 }

@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { KimiHeader } from "@/components/kimi/KimiHeader";
 import { useAgentCatalog } from "@/hooks/useAgentCatalog";
-import { trpc } from "@/providers/trpc";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { cn } from "@/lib/utils";
 
@@ -25,12 +24,8 @@ export default function KimiAgentSettings() {
   const navigate = useNavigate();
   const { agentId } = useParams();
   const slug = agentId ?? "generalist";
-  const { saveUserSettings, isSaving } = useAgentCatalog();
-  const providersQuery = trpc.agents.listProviders.useQuery();
-  const settingsQuery = trpc.agents.getUserSettings.useQuery(
-    { slug },
-    { retry: false },
-  );
+  const { agents, providers, getUserSettings, saveUserSettings, isSaving } =
+    useAgentCatalog();
 
   const [customContext, setCustomContext] = useState("");
   const [trainingNotes, setTrainingNotes] = useState("");
@@ -50,9 +45,9 @@ export default function KimiAgentSettings() {
   );
   const [preferredModelId, setPreferredModelId] = useState<number | null>(null);
 
-  const agent = settingsQuery.data?.agent;
-  const setting = settingsQuery.data?.setting;
-  const providers = providersQuery.data ?? [];
+  const agent = agents.find(candidate => candidate.slug === slug);
+  const record = getUserSettings(slug);
+  const setting = record;
   const selectedProvider = providers.find(
     provider => provider.id === preferredProviderId,
   );
@@ -117,7 +112,7 @@ export default function KimiAgentSettings() {
     });
   }
 
-  const error = settingsQuery.error ?? providersQuery.error ?? null;
+  const error = !agent ? new Error("Agent not found.") : null;
 
   return (
     <div className="mx-auto w-full max-w-[1200px] p-4 sm:p-6 lg:p-8">

@@ -17,11 +17,20 @@ export interface Agent {
 export interface AgentSettings {
   agentId: string;
   vaultAccess: string[];
-  canSearchWeb: boolean;
+  allowVaultContext: boolean;
+  allowWebResearch: boolean;
+  allowScientificResearch: boolean;
+  kimiThinkingMode: "enabled" | "disabled";
+  preferKimiMemory: boolean;
   customContext: string;
+  trainingNotes: string;
   responseStyle: "concise" | "detailed" | "academic";
-  autoSuggest: boolean;
   enabled: boolean;
+  isFavorite?: boolean;
+  preferredProviderId?: number | null;
+  preferredModelId?: number | null;
+  enabledFormulaTools?: string[];
+  allowedContextOverrides?: string[];
 }
 
 export interface Message {

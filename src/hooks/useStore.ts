@@ -84,11 +84,20 @@ for (const agent of AGENTS) {
   DEFAULT_SETTINGS[agent.id] = {
     agentId: agent.id,
     vaultAccess: [...agent.allowedVaultCategories],
-    canSearchWeb: true,
+    allowVaultContext: true,
+    allowWebResearch: true,
+    allowScientificResearch: false,
+    kimiThinkingMode: "disabled",
+    preferKimiMemory: false,
     customContext: "",
+    trainingNotes: "",
     responseStyle: "detailed",
-    autoSuggest: true,
     enabled: true,
+    isFavorite: agent.id === "generalist",
+    preferredProviderId: 1,
+    preferredModelId: 1,
+    enabledFormulaTools: [],
+    allowedContextOverrides: [...agent.allowedVaultCategories],
   };
 }
 
@@ -97,16 +106,23 @@ interface AgentSettingsState {
   updateSettings: (agentId: string, partial: Partial<AgentSettings>) => void;
 }
 
-export const useAgentSettingsStore = create<AgentSettingsState>(set => ({
-  settings: DEFAULT_SETTINGS,
-  updateSettings: (agentId, partial) =>
-    set(state => ({
-      settings: {
-        ...state.settings,
-        [agentId]: { ...state.settings[agentId], ...partial },
-      },
-    })),
-}));
+export const useAgentSettingsStore = create<AgentSettingsState>()(
+  persist(
+    set => ({
+      settings: DEFAULT_SETTINGS,
+      updateSettings: (agentId, partial) =>
+        set(state => ({
+          settings: {
+            ...state.settings,
+            [agentId]: { ...state.settings[agentId], ...partial },
+          },
+        })),
+    }),
+    {
+      name: "agent-settings",
+    }
+  )
+);
 
 interface FavoriteAgentsState {
   favoriteAgentIds: string[];

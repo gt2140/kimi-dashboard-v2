@@ -1,10 +1,8 @@
-import { ensureConversationalCatalogSeeded } from "../server/queries/agents";
 import { getDb } from "../server/queries/connection";
 import { agentDefinitions, modelEndpoints, modelProviders } from "./schema";
 
 async function seed() {
-  console.log("Seeding conversational catalog...");
-  await ensureConversationalCatalogSeeded();
+  console.log("Inspecting catalog tables...");
 
   const db = getDb();
   const [providers, endpoints, agents] = await Promise.all([

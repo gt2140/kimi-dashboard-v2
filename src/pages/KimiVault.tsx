@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { KimiHeader } from "@/components/kimi/KimiHeader";
+import { KimiLaunchpad } from "@/components/kimi/KimiLaunchpad";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -307,6 +308,7 @@ export default function KimiVault() {
         </section>
 
         <aside className="space-y-4">
+          <KimiLaunchpad variant="vault" />
           <SideStat
             title="Kimi extraction flow"
             lines={[

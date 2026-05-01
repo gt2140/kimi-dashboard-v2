@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { KimiHeader } from "@/components/kimi/KimiHeader";
+import { KimiLaunchpad } from "@/components/kimi/KimiLaunchpad";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useKimiChatData } from "@/hooks/useKimiChatData";
@@ -348,6 +349,7 @@ export default function KimiChat() {
         </section>
 
         <aside className="space-y-4">
+          <KimiLaunchpad variant="chat" />
           <InfoCard
             title="Current run profile"
             items={[

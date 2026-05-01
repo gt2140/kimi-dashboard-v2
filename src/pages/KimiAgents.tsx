@@ -10,6 +10,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { KimiHeader } from "@/components/kimi/KimiHeader";
+import { KimiLaunchpad } from "@/components/kimi/KimiLaunchpad";
 import { Input } from "@/components/ui/input";
 import { useAgentCatalog } from "@/hooks/useAgentCatalog";
 import { useChatStore } from "@/hooks/useStore";
@@ -57,6 +58,10 @@ export default function KimiAgents() {
           placeholder="Search Kimi agents..."
           className="h-9 border-border/30 bg-card/30 pl-9 text-[12px]"
         />
+      </div>
+
+      <div className="mt-6">
+        <KimiLaunchpad variant="agents" />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">

@@ -169,6 +169,12 @@ export default function KimiAgentSettings() {
             description="Define how much the model should think and whether official Kimi memory is preferred."
             icon={<Brain className="h-4 w-4" />}
           >
+            <div className="rounded-2xl border border-border/20 bg-background/35 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground/50">
+              Generalist funciona como una memoria tipo proyecto: mezcla
+              contexto fijo del agente, notas operativas, resumen de la
+              conversación y memorias estables del usuario extraídas después de
+              cada respuesta.
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {(["enabled", "disabled"] as const).map(mode => (
                 <button

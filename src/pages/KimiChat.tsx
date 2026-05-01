@@ -13,8 +13,6 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { KimiHeader } from "@/components/kimi/KimiHeader";
-import { KimiLaunchpad } from "@/components/kimi/KimiLaunchpad";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useKimiChatData } from "@/hooks/useKimiChatData";
@@ -52,9 +50,9 @@ type KimiMetadata = Message["metadata"] & {
 };
 
 const SHORTCUTS = [
-  "Resume esta conversación y detecta hechos estables sobre mí",
-  "Usá mi vault y decime qué documentos son relevantes para esta pregunta",
-  "Pensá paso a paso y decime si necesitás usar web-search o memory",
+  "Resume esta conversacion y detecta hechos estables sobre mi",
+  "Usa mi vault y decime que documentos son relevantes para esta pregunta",
+  "Pensa paso a paso y decime si necesitas usar web-search o memory",
 ];
 
 export default function KimiChat() {
@@ -172,25 +170,23 @@ export default function KimiChat() {
   }, [activeAgentId, calledAgentIds, input, isSending, streamMessage]);
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-3rem)] w-full max-w-[1400px] min-w-0 flex-col overflow-hidden p-4 sm:p-6 lg:p-8">
-      <KimiHeader
-        title="Chat, memory y tools sobre Kimi"
-        description="Esta capa usa el runtime nuevo de Aura sobre Kimi: streaming real, Kimi memory, prompt cache, retrieval desde vault y tools oficiales cuando el turno lo pide."
-      />
-
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-[1500px] min-w-0 flex-col overflow-hidden p-3 sm:p-4 lg:p-5">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-border/40 bg-card/20">
           <div className="flex items-center justify-between border-b border-border/30 px-4 py-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
-                Lead agent
+                Kimi chat
               </p>
               <div className="mt-1 flex items-center gap-2 text-[14px] text-foreground">
                 <span className={cn("text-amber-200/85", activeAgent.color)}>
                   {allIcons[activeAgent.icon] ?? <Sparkles className="h-3.5 w-3.5" />}
                 </span>
-                {activeAgent.name}
+                <span className="truncate">{activeAgent.name}</span>
               </div>
+              <p className="mt-1 text-[11px] text-muted-foreground/45">
+                Memoria, vault y tools en una vista mas compacta.
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -229,7 +225,7 @@ export default function KimiChat() {
                 ))}
                 {availableHelpers.length === 0 && (
                   <span className="text-[11px] text-muted-foreground/35">
-                    No hay más helpers disponibles.
+                    No hay mas helpers disponibles.
                   </span>
                 )}
               </div>
@@ -348,15 +344,14 @@ export default function KimiChat() {
           </div>
         </section>
 
-        <aside className="space-y-4">
-          <KimiLaunchpad variant="chat" />
+        <aside className="hidden min-h-0 space-y-4 overflow-y-auto xl:block">
           <InfoCard
             title="Current run profile"
             items={[
               "Model: kimi-k2.6",
               "Memory: Kimi official memory preferred",
               "Vault: contextual chunk injection",
-              "Tools: web-search, rethink y memory según settings",
+              "Tools: web-search, rethink y memory segun settings",
             ]}
           />
           <InfoCard
@@ -387,10 +382,10 @@ function EmptyState({ onShortcutClick }: { onShortcutClick: (value: string) => v
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
       <Sparkles className="h-6 w-6 text-amber-200/70" />
       <h2 className="mt-4 text-[18px] font-medium text-foreground">
-        Kimi V1 está listo
+        Kimi V1 esta listo
       </h2>
       <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted-foreground/45">
-        Esta versión prioriza Kimi memory, tools oficiales y retrieval desde el
+        Esta version prioriza Kimi memory, tools oficiales y retrieval desde el
         vault antes de llegar al texto final.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">

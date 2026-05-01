@@ -9,8 +9,6 @@ import {
   Sparkles,
   Wrench,
 } from "lucide-react";
-import { KimiHeader } from "@/components/kimi/KimiHeader";
-import { KimiLaunchpad } from "@/components/kimi/KimiLaunchpad";
 import { Input } from "@/components/ui/input";
 import { useAgentCatalog } from "@/hooks/useAgentCatalog";
 import { useChatStore } from "@/hooks/useStore";
@@ -44,27 +42,33 @@ export default function KimiAgents() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] min-w-0 p-4 sm:p-6 lg:p-8">
-      <KimiHeader
-        title="Agents con política Kimi-first"
-        description="En Kimi V1 los specialists pasan a ser perfiles de comportamiento, permisos y tools. El runtime sigue siendo generalist-first con settings finos por agente."
-      />
+    <div className="mx-auto w-full max-w-[1500px] min-w-0 p-3 sm:p-4 lg:p-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
+            Kimi agents
+          </p>
+          <h1 className="mt-1 text-[22px] font-medium tracking-tight text-foreground">
+            Perfiles y permisos
+          </h1>
+          <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
+            Los specialists funcionan como perfiles de comportamiento, memoria y
+            tools sobre el runtime de Kimi.
+          </p>
+        </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/25" />
-        <Input
-          value={search}
-          onChange={event => setSearch(event.target.value)}
-          placeholder="Search Kimi agents..."
-          className="h-9 border-border/30 bg-card/30 pl-9 text-[12px]"
-        />
+        <div className="relative w-full max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/25" />
+          <Input
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder="Search Kimi agents..."
+            className="h-9 border-border/30 bg-card/30 pl-9 text-[12px]"
+          />
+        </div>
       </div>
 
-      <div className="mt-6">
-        <KimiLaunchpad variant="agents" />
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {filteredAgents.map(agent => {
           const setting = settingsBySlug.get(agent.slug);
           const tools = Array.from(
@@ -83,7 +87,12 @@ export default function KimiAgents() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className={cn("text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35", agent.color ?? "")}>
+                  <p
+                    className={cn(
+                      "text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35",
+                      agent.color ?? "",
+                    )}
+                  >
                     {agent.slug}
                   </p>
                   <h2 className="mt-1 text-[16px] font-medium text-foreground">

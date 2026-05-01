@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   Database,
   File,
@@ -8,13 +9,12 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
   XCircle,
 } from "lucide-react";
-import { KimiHeader } from "@/components/kimi/KimiHeader";
-import { KimiLaunchpad } from "@/components/kimi/KimiLaunchpad";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,6 +45,8 @@ type KimiVaultFile = {
   extractionError?: string | null;
   contentHash?: string | null;
 };
+
+type DerivedVaultState = "ready" | "processing" | "failed" | "needs-reupload";
 
 const categoryOptions = [
   "bloodwork",
@@ -91,10 +93,26 @@ function formatBytes(bytes: number) {
 
 function normalizePreview(text: string | null | undefined) {
   if (!text) {
-    return "Kimi todavía no devolvió texto extraído para este archivo.";
+    return "Kimi todavia no devolvio texto extraido para este archivo.";
   }
 
-  return text.trim().slice(0, 2200) || "Kimi devolvió un payload vacío.";
+  return text.trim().slice(0, 2200) || "Kimi devolvio un payload vacio.";
+}
+
+function deriveVaultState(file: KimiVaultFile): DerivedVaultState {
+  if (file.extractionStatus === "failed") {
+    return "failed";
+  }
+
+  if (file.extractionStatus === "ready" || Boolean(file.extractedText?.trim())) {
+    return "ready";
+  }
+
+  if (file.remoteFileId) {
+    return "processing";
+  }
+
+  return "needs-reupload";
 }
 
 export default function KimiVault() {
@@ -114,12 +132,28 @@ export default function KimiVault() {
       ),
     [files, search],
   );
-  const readyFiles = files.filter(file => file.extractionStatus === "ready").length;
+  const readyFiles = files.filter(file => deriveVaultState(file) === "ready").length;
+  const pendingFiles = files.filter(file => deriveVaultState(file) === "processing")
+    .length;
+  const legacyFiles = files.filter(file => deriveVaultState(file) === "needs-reupload")
+    .length;
   const error = uploadError || filesQuery.error || deleteMutation.error || null;
 
   const refreshVault = useCallback(async () => {
     await utils.vault.list.invalidate();
   }, [utils.vault.list]);
+
+  useEffect(() => {
+    if (pendingFiles === 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshVault();
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [pendingFiles, refreshVault]);
 
   async function readAccessToken() {
     if (!isSupabaseConfigured) {
@@ -193,13 +227,51 @@ export default function KimiVault() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] min-w-0 p-4 sm:p-6 lg:p-8">
-      <KimiHeader
-        title="Vault con extracción real de Kimi"
-        description="Cada archivo se sube a Files API de Kimi para extracción, se persiste el snapshot textual en Aura y queda listo para retrieval contextual en chat."
-      />
+    <div className="mx-auto w-full max-w-[1500px] min-w-0 p-3 sm:p-4 lg:p-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
+            Kimi vault
+          </p>
+          <h1 className="mt-1 text-[22px] font-medium tracking-tight text-foreground">
+            Archivos listos para retrieval
+          </h1>
+          <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
+            Cada archivo debe quedar vinculado a Kimi y con texto extraido antes
+            de usarse bien en chat.
+          </p>
+        </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-full border-border/30 bg-card/30 px-3 text-[11px]"
+            onClick={() => {
+              void refreshVault();
+            }}
+          >
+            <RefreshCw className="mr-2 h-3.5 w-3.5" />
+            Refresh
+          </Button>
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-100/85">
+            <Upload className="h-3.5 w-3.5" />
+            {isUploading ? "Uploading..." : "Upload to Kimi"}
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.csv,.png,.jpg,.jpeg,.webp,.txt,.md"
+              className="hidden"
+              onChange={event => {
+                void handleUpload(event.target.files);
+                event.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <section className="rounded-3xl border border-border/35 bg-card/20 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -207,24 +279,27 @@ export default function KimiVault() {
                 File ingestion
               </h2>
               <p className="mt-1 text-[12px] text-muted-foreground/40">
-                {files.length} files registrados, {readyFiles} listos para retrieval.
+                {files.length} archivos, {readyFiles} listos, {pendingFiles} en proceso.
               </p>
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-100/85">
-              <Upload className="h-3.5 w-3.5" />
-              {isUploading ? "Uploading..." : "Upload to Kimi"}
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.csv,.png,.jpg,.jpeg,.webp,.txt,.md"
-                className="hidden"
-                onChange={event => {
-                  void handleUpload(event.target.files);
-                  event.target.value = "";
-                }}
-              />
-            </label>
+            <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground/45">
+              <StatusChip label={`${readyFiles} ready`} tone="ready" />
+              {pendingFiles > 0 && (
+                <StatusChip label={`${pendingFiles} processing`} tone="processing" />
+              )}
+              {legacyFiles > 0 && (
+                <StatusChip label={`${legacyFiles} reupload`} tone="warning" />
+              )}
+            </div>
           </div>
+
+          {legacyFiles > 0 && (
+            <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-400/8 px-4 py-3 text-[12px] text-amber-100/80">
+              Los archivos marcados como <strong>needs reupload</strong> no estan
+              vinculados a Kimi. No quedan listos para chat hasta borrarlos y
+              subirlos otra vez desde esta vista.
+            </div>
+          )}
 
           <div className="relative mt-4 max-w-sm">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/25" />
@@ -237,59 +312,63 @@ export default function KimiVault() {
           </div>
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-border/25">
-            <div className="grid grid-cols-[minmax(0,1fr)_120px_120px_80px] gap-3 border-b border-border/20 bg-background/40 px-4 py-2 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
+            <div className="grid grid-cols-[minmax(0,1fr)_140px_120px_80px] gap-3 border-b border-border/20 bg-background/40 px-4 py-2 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
               <span>File</span>
               <span>Extraction</span>
               <span>Remote</span>
               <span />
             </div>
             <div className="divide-y divide-border/15">
-              {filteredFiles.map(file => (
-                <div
-                  key={file.id}
-                  className="grid grid-cols-[minmax(0,1fr)_120px_120px_80px] gap-3 px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground/30">
-                        {getFileIcon(file.filename)}
-                      </span>
-                      <p className="truncate text-[12px] text-foreground">
-                        {file.filename}
+              {filteredFiles.map(file => {
+                const derivedState = deriveVaultState(file);
+
+                return (
+                  <div
+                    key={file.id}
+                    className="grid grid-cols-[minmax(0,1fr)_140px_120px_80px] gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground/30">
+                          {getFileIcon(file.filename)}
+                        </span>
+                        <p className="truncate text-[12px] text-foreground">
+                          {file.filename}
+                        </p>
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted-foreground/30">
+                        {file.category} | {formatBytes(file.size)}
                       </p>
                     </div>
-                    <p className="mt-1 text-[10px] text-muted-foreground/30">
-                      {file.category} | {formatBytes(file.size)}
-                    </p>
+                    <div className="flex items-center">
+                      <StatusPill status={derivedState} />
+                    </div>
+                    <div className="flex items-center text-[10px] text-muted-foreground/35">
+                      {file.remoteFileId ? "linked" : "local only"}
+                    </div>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground/35 hover:text-foreground"
+                        onClick={() => setPreviewFile(file)}
+                      >
+                        <FileSearch className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground/35 hover:text-destructive/70"
+                        onClick={() => {
+                          void handleDelete(file.id);
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center">
-                    <StatusPill status={file.extractionStatus ?? "pending"} />
-                  </div>
-                  <div className="flex items-center text-[10px] text-muted-foreground/35">
-                    {file.remoteFileId ? "linked" : "local only"}
-                  </div>
-                  <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground/35 hover:text-foreground"
-                      onClick={() => setPreviewFile(file)}
-                    >
-                      <FileSearch className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground/35 hover:text-destructive/70"
-                      onClick={() => {
-                        void handleDelete(file.id);
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               {filteredFiles.length === 0 && (
                 <div className="px-4 py-10 text-center text-[12px] text-muted-foreground/35">
                   No files found.
@@ -307,24 +386,23 @@ export default function KimiVault() {
           )}
         </section>
 
-        <aside className="space-y-4">
-          <KimiLaunchpad variant="vault" />
+        <aside className="hidden space-y-4 xl:block">
           <SideStat
-            title="Kimi extraction flow"
+            title="Extraction flow"
             lines={[
               "1. Upload file to Files API",
-              "2. Pull extracted text snapshot",
-              "3. Chunk locally for retrieval",
-              "4. Inject selected chunks into chat",
+              "2. Read extracted text from Kimi",
+              "3. Chunk it locally for retrieval",
+              "4. Inject relevant chunks into chat",
             ]}
           />
           <SideStat
-            title="Current limits"
+            title="How to read the status"
             lines={[
-              "Up to 1000 files per org",
-              "100 MB per file",
-              "10 GB aggregate storage",
-              "Aura persists extraction locally",
+              "ready: file can be used in chat now",
+              "processing: Kimi link exists, wait a moment",
+              "needs reupload: old local-only row, upload again",
+              "failed: extraction returned an error",
             ]}
           />
         </aside>
@@ -343,7 +421,7 @@ export default function KimiVault() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <PreviewMetric
                   label="Extraction status"
-                  value={previewFile.extractionStatus ?? "pending"}
+                  value={deriveVaultState(previewFile)}
                 />
                 <PreviewMetric
                   label="Remote file id"
@@ -385,10 +463,31 @@ export default function KimiVault() {
   );
 }
 
+function StatusChip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "ready" | "processing" | "warning";
+}) {
+  const classes =
+    tone === "ready"
+      ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200/80"
+      : tone === "processing"
+        ? "border-sky-500/25 bg-sky-500/10 text-sky-200/80"
+        : "border-amber-500/25 bg-amber-500/10 text-amber-200/80";
+
+  return (
+    <span className={cn("rounded-full border px-2 py-1", classes)}>
+      {label}
+    </span>
+  );
+}
+
 function StatusPill({
   status,
 }: {
-  status: "pending" | "ready" | "failed";
+  status: DerivedVaultState;
 }) {
   if (status === "ready") {
     return (
@@ -408,10 +507,19 @@ function StatusPill({
     );
   }
 
+  if (status === "needs-reupload") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200/80">
+        <AlertTriangle className="h-3 w-3" />
+        needs reupload
+      </span>
+    );
+  }
+
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200/80">
+    <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-[10px] text-sky-200/80">
       <Loader2 className="h-3 w-3 animate-spin" />
-      pending
+      processing
     </span>
   );
 }

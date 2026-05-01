@@ -41,6 +41,11 @@ function getBaseUrl() {
   return env.kimiOpenUrl.replace(/\/$/, "");
 }
 
+function getVersionedBaseUrl() {
+  const baseUrl = getBaseUrl();
+  return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
+}
+
 function getApiKey() {
   if (!env.kimiApiKey) {
     throw new Error(
@@ -52,25 +57,49 @@ function getApiKey() {
 }
 
 async function kimiFetch(path: string, init?: RequestInit) {
-  const response = await fetch(`${getBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${getApiKey()}`,
-      ...(init?.headers ?? {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`Kimi request timed out while calling ${path}.`));
+  }, 30_000);
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Kimi request failed (${response.status}): ${body.slice(0, 500)}`);
+  try {
+    const response = await fetch(`${getVersionedBaseUrl()}${path}`, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+      headers: {
+        Authorization: `Bearer ${getApiKey()}`,
+        ...(init?.headers ?? {}),
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      const normalizedBody = body.toLowerCase();
+
+      if (
+        response.status === 401 &&
+        (
+          normalizedBody.includes("invalid authentication") ||
+          normalizedBody.includes("incorrect api key provided")
+        )
+      ) {
+        throw new Error(
+          "KIMI_API_KEY is invalid for the Kimi API. Update the server environment with a valid key from platform.kimi.ai.",
+        );
+      }
+
+      throw new Error(`Kimi request failed (${response.status}): ${body.slice(0, 500)}`);
+    }
+
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response;
 }
 
 export class KimiApiClient {
   async createChatCompletion(request: KimiChatRequest) {
-    const response = await kimiFetch("/v1/chat/completions", {
+    const response = await kimiFetch("/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -82,7 +111,7 @@ export class KimiApiClient {
   }
 
   async streamChatCompletion(request: KimiChatRequest, handlers: StreamHandlers) {
-    const response = await kimiFetch("/v1/chat/completions", {
+    const response = await kimiFetch("/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -169,7 +198,7 @@ export class KimiApiClient {
     form.append("file", blob, params.filename);
     form.append("purpose", params.purpose ?? "file-extract");
 
-    const response = await kimiFetch("/v1/files", {
+    const response = await kimiFetch("/files", {
       method: "POST",
       body: form,
     });
@@ -178,12 +207,12 @@ export class KimiApiClient {
   }
 
   async getFileContent(fileId: string) {
-    const response = await kimiFetch(`/v1/files/${fileId}/content`);
+    const response = await kimiFetch(`/files/${fileId}/content`);
     return await response.text();
   }
 
   async deleteFile(fileId: string) {
-    await kimiFetch(`/v1/files/${fileId}`, {
+    await kimiFetch(`/files/${fileId}`, {
       method: "DELETE",
     });
   }

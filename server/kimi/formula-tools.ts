@@ -25,7 +25,8 @@ function normalizeFormulaUri(uri: string) {
 }
 
 function getBaseUrl() {
-  return env.kimiOpenUrl.replace(/\/$/, "");
+  const baseUrl = env.kimiOpenUrl.replace(/\/$/, "");
+  return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
 }
 
 function getApiKey() {
@@ -37,21 +38,45 @@ function getApiKey() {
 }
 
 async function formulaFetch(path: string, init?: RequestInit) {
-  const response = await fetch(`${getBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${getApiKey()}`,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`Kimi formula request timed out while calling ${path}.`));
+  }, 20_000);
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Kimi formula request failed (${response.status}): ${body.slice(0, 400)}`);
+  try {
+    const response = await fetch(`${getBaseUrl()}${path}`, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+      headers: {
+        Authorization: `Bearer ${getApiKey()}`,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      const normalizedBody = body.toLowerCase();
+
+      if (
+        response.status === 401 &&
+        (
+          normalizedBody.includes("invalid authentication") ||
+          normalizedBody.includes("incorrect api key provided")
+        )
+      ) {
+        throw new Error(
+          "KIMI_API_KEY is invalid for official Kimi tools. Update the server environment with a valid key from platform.kimi.ai.",
+        );
+      }
+
+      throw new Error(`Kimi formula request failed (${response.status}): ${body.slice(0, 400)}`);
+    }
+
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response;
 }
 
 export class KimiFormulaToolExecutor {

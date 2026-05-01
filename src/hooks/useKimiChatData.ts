@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { ensureBackendSession, trpc } from "@/providers/trpc";
+import {
+  ensureBackendSession,
+  trpc,
+  useBackendSessionState,
+} from "@/providers/trpc";
 import { useChatStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
@@ -54,6 +58,7 @@ function mapMessage(item: {
 export function useKimiChatData() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const backendSession = useBackendSessionState();
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const calledAgentIds = useChatStore(state => state.calledAgentIds);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
@@ -66,13 +71,18 @@ export function useKimiChatData() {
   const activeConversationId = rawConversationId
     ? Number(rawConversationId)
     : null;
+  const authedQueriesEnabled =
+    !isSupabaseConfigured || backendSession.backendReady;
 
   const utils = trpc.useUtils();
-  const conversationsQuery = trpc.chat.listConversations.useQuery();
+  const conversationsQuery = trpc.chat.listConversations.useQuery(undefined, {
+    enabled: authedQueriesEnabled,
+    retry: false,
+  });
   const conversationQuery = trpc.chat.getConversation.useQuery(
     { id: activeConversationId ?? 0 },
     {
-      enabled: activeConversationId !== null,
+      enabled: activeConversationId !== null && authedQueriesEnabled,
       retry: false,
     },
   );
@@ -176,21 +186,38 @@ export function useKimiChatData() {
     );
 
     try {
-      const headers = await buildAuthenticatedHeaders(readAccessToken, {
-        "Content-Type": "application/json",
-      });
-      const response = await fetch("/api/kimi/chat/stream", {
-        method: "POST",
-        credentials: "include",
-        signal: streamWatchdog.signal,
-        headers,
-        body: JSON.stringify({
-          conversationId,
-          content,
-          agentId: activeAgentId,
-          calledAgentIds,
-        }),
-      });
+      async function openStream(forceSessionRefresh = false) {
+        if (forceSessionRefresh) {
+          const refreshed = await ensureBackendSession({ force: true });
+          if (!refreshed) {
+            throw new Error(
+              "Your browser session exists, but the backend session is not ready yet.",
+            );
+          }
+        }
+
+        const headers = await buildAuthenticatedHeaders(readAccessToken, {
+          "Content-Type": "application/json",
+        });
+        return fetch("/api/kimi/chat/stream", {
+          method: "POST",
+          credentials: "include",
+          signal: streamWatchdog.signal,
+          headers,
+          body: JSON.stringify({
+            conversationId,
+            content,
+            agentId: activeAgentId,
+            calledAgentIds,
+          }),
+        });
+      }
+
+      let response = await openStream();
+
+      if (response.status === 401) {
+        response = await openStream(true);
+      }
 
       if (!response.ok) {
         throw new Error(`Kimi chat failed with HTTP ${response.status}.`);

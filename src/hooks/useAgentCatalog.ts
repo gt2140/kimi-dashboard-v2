@@ -1,8 +1,13 @@
 import { useEffect, useMemo } from "react";
-import { trpc, ensureBackendSession } from "@/providers/trpc";
+import {
+  trpc,
+  ensureBackendSession,
+  useBackendSessionState,
+} from "@/providers/trpc";
 import { useFavoriteAgentsStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { AGENTS } from "@/lib/data";
+import { isSupabaseConfigured } from "@/lib/supabase";
 
 function isUnauthorizedError(error: unknown) {
   if (!error || typeof error !== "object") {
@@ -18,6 +23,7 @@ function isUnauthorizedError(error: unknown) {
 
 export function useAgentCatalog() {
   const utils = trpc.useUtils();
+  const backendSession = useBackendSessionState();
   const localFavoriteAgentIds = useFavoriteAgentsStore(
     state => state.favoriteAgentIds
   );
@@ -26,7 +32,10 @@ export function useAgentCatalog() {
   );
 
   const agentsQuery = trpc.agents.list.useQuery();
+  const userSettingsEnabled =
+    !isSupabaseConfigured || backendSession.backendReady;
   const userSettingsQuery = trpc.agents.listUserSettings.useQuery(undefined, {
+    enabled: userSettingsEnabled,
     retry: false,
   });
   const saveUserSettingsMutation = trpc.agents.saveUserSettings.useMutation();

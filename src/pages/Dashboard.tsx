@@ -59,14 +59,14 @@ export default function Dashboard() {
             <h1 className="text-[20px] font-medium tracking-tight text-foreground">
               Overview
             </h1>
-            <p className="mt-1 text-[12px] text-muted-foreground/40">
+            <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/40">
               {user?.name
-                ? `Welcome back, ${user.name}.`
-                : "Your authenticated workspace."}
+                ? `${user.name}, esta capa ahora gira alrededor de Kimi Chat, Kimi Agents y Kimi Vault.`
+                : "Aura ahora prioriza Kimi Chat, Kimi Agents y Kimi Vault."}
             </p>
           </div>
           <span className="text-[12px] text-muted-foreground/40">
-            Stable MVP
+            Kimi-first
           </span>
         </div>
       </motion.div>
@@ -79,13 +79,13 @@ export default function Dashboard() {
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground/40">
-            {isMobile ? "Favorite agents" : "Built-in agents"}
+            {isMobile ? "Favorite agents" : "Kimi agents"}
           </h2>
           <button
-            onClick={() => navigate("/agents")}
+            onClick={() => navigate("/kimi/agents")}
             className="flex items-center gap-1 text-[11px] text-muted-foreground/40 transition-colors hover:text-foreground"
           >
-            {isMobile ? "Marketplace" : "All agents"} <ArrowUpRight className="h-3 w-3" />
+            {isMobile ? "Manage" : "Open agents"} <ArrowUpRight className="h-3 w-3" />
           </button>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:hidden">
@@ -94,7 +94,7 @@ export default function Dashboard() {
               key={agent.slug}
               onClick={() => {
                 setActiveAgent(agent.slug);
-                navigate("/chat");
+                navigate("/kimi/chat");
               }}
               className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/40 bg-card/20 px-4 py-3 text-left transition-all hover:border-border/70 hover:bg-card/50"
             >
@@ -118,15 +118,15 @@ export default function Dashboard() {
             </button>
           ))}
           <button
-            onClick={() => navigate("/agents")}
+            onClick={() => navigate("/kimi/agents")}
             className="flex items-center justify-between rounded-xl border border-dashed border-border/40 bg-card/10 px-4 py-3 text-left transition-all hover:border-border/70 hover:bg-card/30"
           >
             <div>
               <p className="text-[13px] font-medium text-foreground">
-                Explore marketplace agents
+                Open Kimi Agents
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground/40">
-                Discover more specialists beyond your pinned favorites.
+                Elegí favoritos y ajustá memoria, web y tools por perfil.
               </p>
             </div>
             <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground/25" />
@@ -138,7 +138,7 @@ export default function Dashboard() {
               key={agent.id}
               onClick={() => {
                 setActiveAgent(agent.id);
-                navigate("/chat");
+                navigate("/kimi/chat");
               }}
               className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/40 bg-card/20 px-4 py-3 text-left transition-all hover:border-border/70 hover:bg-card/50"
             >
@@ -174,19 +174,19 @@ export default function Dashboard() {
           icon={<FileText className="h-4 w-4" />}
           label="Vault files"
           value={vaultQuery.data?.length ?? 0}
-          onClick={() => navigate("/vault")}
+          onClick={() => navigate("/kimi/vault")}
         />
         <StatCard
           icon={<Zap className="h-4 w-4" />}
-          label="Active agents"
-          value={BUILT_IN_AGENTS.length}
-          onClick={() => navigate("/agents")}
+          label="Favorite agents"
+          value={favoriteAgentIds.length}
+          onClick={() => navigate("/kimi/agents")}
         />
         <StatCard
           icon={<FileText className="h-4 w-4" />}
-          label="Saved chats"
+          label="Kimi chats"
           value={conversationsQuery.data?.length ?? 0}
-          onClick={() => navigate("/chat")}
+          onClick={() => navigate("/kimi/chat")}
         />
         <StatCard
           icon={<Users className="h-4 w-4" />}
@@ -208,7 +208,7 @@ export default function Dashboard() {
               Recent uploads
             </h2>
             <button
-              onClick={() => navigate("/vault")}
+              onClick={() => navigate("/kimi/vault")}
               className="text-[11px] text-muted-foreground/40 transition-colors hover:text-foreground"
             >
               View all
@@ -218,7 +218,7 @@ export default function Dashboard() {
             {recentFiles.map(file => (
               <button
                 key={file.id}
-                onClick={() => navigate("/vault")}
+                onClick={() => navigate("/kimi/vault")}
                 className="group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-card/40"
               >
                 <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground/25 transition-colors group-hover:text-muted-foreground/40" />
@@ -232,7 +232,7 @@ export default function Dashboard() {
             ))}
             {recentFiles.length === 0 && (
               <p className="px-3 py-4 text-[12px] text-muted-foreground/35">
-                No vault metadata yet.
+                Todavia no hay archivos en Kimi Vault.
               </p>
             )}
           </div>
@@ -241,15 +241,13 @@ export default function Dashboard() {
         <div className="hidden rounded-xl border border-border/30 bg-card/20 p-4 lg:block">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground/40">
-              MVP focus
+              Kimi focus
             </h2>
           </div>
           <div className="rounded-xl border border-border/20 bg-background/35 p-4 text-[12px] leading-relaxed text-muted-foreground/50">
-            This MVP is now intentionally centered on the parts that are truly
-            persisted: authenticated sessions, saved conversations, and vault
-            metadata. Predictions, token economy, and per-agent settings stay
-            outside the stable feature set until they are backed by the API and
-            database.
+            Aura ahora se apoya en tres piezas vivas: conversaciones sobre
+            Kimi, agentes con memoria y permisos configurables, y un vault con
+            archivos que quedan guardados y se pueden reutilizar como contexto.
           </div>
         </div>
       </motion.div>

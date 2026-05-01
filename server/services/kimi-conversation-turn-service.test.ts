@@ -180,4 +180,125 @@ describe("KimiConversationTurnService", () => {
     );
     expect(result.assistantMessage?.content).toBe("ApoB looks improved.");
   });
+
+  it("falls back to a direct Kimi answer when official tools are unavailable", async () => {
+    const conversationRepository = {
+      requireConversationOwner: vi.fn().mockResolvedValue({
+        id: 18,
+        title: "Fallback conversation",
+      }),
+      createUserMessage: vi.fn().mockResolvedValue({ id: 111 }),
+      createAssistantMessage: vi.fn().mockResolvedValue({
+        id: 222,
+        createdAt: new Date("2026-05-01T04:00:00.000Z"),
+      }),
+      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const agentRunRepository = {
+      createPrimaryRun: vi.fn().mockResolvedValue({ id: 333 }),
+      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
+      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
+      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const kimiClient = {
+      createChatCompletion: vi.fn().mockResolvedValue({
+        id: "chatcmpl-fallback",
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              role: "assistant",
+              content: "Te respondo directamente sin tools oficiales.",
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 80,
+          completion_tokens: 24,
+          total_tokens: 104,
+        },
+      }),
+      streamChatCompletion: vi.fn().mockResolvedValue({
+        id: "chatcmpl-fallback-stream",
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              role: "assistant",
+              content: "Te respondo directamente sin tools oficiales.",
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 80,
+          completion_tokens: 24,
+          total_tokens: 104,
+        },
+      }),
+    };
+
+    const toolExecutor = {
+      getEnabledTools: vi
+        .fn()
+        .mockRejectedValue(new Error("Tool registry unavailable")),
+      executeToolCalls: vi.fn(),
+    };
+
+    const contextLoader = vi.fn().mockResolvedValue({
+      systemPrompt: "You are Generalist.",
+      responseStyle: "detailed",
+      recentMessages: [],
+      conversationSummary: null,
+      longTermMemories: [],
+      selectedVaultChunks: [],
+      relatedVaultFiles: [],
+      enabledFormulaTools: [
+        "moonshot/memory:latest",
+        "moonshot/web-search:latest",
+      ],
+      thinkingMode: "enabled",
+      promptCacheKey: "kimi:v1:conversation:18",
+      safetyIdentifier: "user-18",
+    });
+
+    const service = new KimiConversationTurnService({
+      conversationRepository,
+      agentRunRepository,
+      kimiClient,
+      toolExecutor,
+      contextLoader,
+    });
+
+    const result = await service.executeTurn({
+      input: {
+        conversationId: 18,
+        content: "Analiza este caso aunque no tengas tools.",
+        agentId: "generalist",
+        calledAgentIds: [],
+      },
+      userId: 9,
+      streamPrimary: false,
+    });
+
+    expect(toolExecutor.getEnabledTools).toHaveBeenCalledTimes(1);
+    expect(kimiClient.createChatCompletion).toHaveBeenCalled();
+    expect(kimiClient.createChatCompletion.mock.calls[0]?.[0]).not.toHaveProperty(
+      "tools",
+    );
+    expect(toolExecutor.executeToolCalls).not.toHaveBeenCalled();
+    expect(result.assistantMessage?.content).toBe(
+      "Te respondo directamente sin tools oficiales.",
+    );
+    expect(agentRunRepository.finalizePrimaryRun).toHaveBeenCalledWith(
+      333,
+      expect.objectContaining({
+        status: "completed",
+        toolCallsJson: [],
+      }),
+    );
+  });
 });

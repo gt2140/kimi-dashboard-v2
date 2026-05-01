@@ -4,9 +4,9 @@ import {
   Brain,
   DatabaseZap,
   Globe,
+  Heart,
   Search,
   Settings2,
-  Sparkles,
   Wrench,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,8 @@ import { cn } from "@/lib/utils";
 export default function KimiAgents() {
   const navigate = useNavigate();
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
-  const { agents, userSettings, error } = useAgentCatalog();
+  const { agents, userSettings, favoriteAgentIds, saveUserSettings, error } =
+    useAgentCatalog();
   const [search, setSearch] = useState("");
 
   const settingsBySlug = useMemo(
@@ -48,12 +49,12 @@ export default function KimiAgents() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
             Kimi agents
           </p>
-          <h1 className="mt-1 text-[22px] font-medium tracking-tight text-foreground">
-            Perfiles y permisos
+          <h1 className="mt-1 text-[20px] font-medium tracking-tight text-foreground">
+            Favoritos, memoria y tools
           </h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
-            Los specialists funcionan como perfiles de comportamiento, memoria y
-            tools sobre el runtime de Kimi.
+            Elegí qué agentes querés fijar en el sidebar y ajustá cómo usan
+            Kimi memory, web-search y el vault.
           </p>
         </div>
 
@@ -68,9 +69,11 @@ export default function KimiAgents() {
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-5 grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
         {filteredAgents.map(agent => {
           const setting = settingsBySlug.get(agent.slug);
+          const isFavorite = favoriteAgentIds.includes(agent.slug);
+          const isPinnedGeneralist = agent.slug === "generalist";
           const tools = Array.from(
             new Set([
               ...(setting?.preferKimiMemory ? ["memory"] : []),
@@ -83,7 +86,7 @@ export default function KimiAgents() {
           return (
             <div
               key={agent.slug}
-              className="rounded-3xl border border-border/35 bg-card/20 p-3.5"
+              className="rounded-2xl border border-border/35 bg-card/20 p-3"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -95,17 +98,39 @@ export default function KimiAgents() {
                   >
                     {agent.slug}
                   </p>
-                  <h2 className="mt-1 text-[15px] font-medium text-foreground">
+                  <h2 className="mt-1 text-[14px] font-medium text-foreground">
                     {agent.name}
                   </h2>
                   <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground/45">
                     {agent.description}
                   </p>
                 </div>
-                <Sparkles className="h-4.5 w-4.5 text-amber-200/70" />
+                <button
+                  onClick={() => {
+                    if (isPinnedGeneralist) {
+                      return;
+                    }
+                    void saveUserSettings({
+                      slug: agent.slug,
+                      isFavorite: !isFavorite,
+                    });
+                  }}
+                  disabled={isPinnedGeneralist}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] transition-colors",
+                    isFavorite
+                      ? "border-rose-300/35 bg-rose-400/10 text-rose-200"
+                      : "border-border/30 bg-background/35 text-muted-foreground/55 hover:text-foreground",
+                    isPinnedGeneralist && "cursor-default",
+                  )}
+                  title={isPinnedGeneralist ? "Generalist siempre queda fijado" : undefined}
+                >
+                  <Heart className={cn("h-3 w-3", isFavorite && "fill-current")} />
+                  {isPinnedGeneralist ? "Pinned" : isFavorite ? "Favorite" : "Save"}
+                </button>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-1.5">
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
                 <Pill icon={<Brain className="h-3 w-3" />}>
                   thinking {setting?.kimiThinkingMode ?? "enabled"}
                 </Pill>
@@ -117,7 +142,7 @@ export default function KimiAgents() {
                 </Pill>
               </div>
 
-              <div className="mt-2.5">
+              <div className="mt-2">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground/35">
                   Enabled tools
                 </p>
@@ -136,7 +161,7 @@ export default function KimiAgents() {
                 </div>
               </div>
 
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3 flex gap-1.5">
                 <button
                   onClick={() => {
                     setActiveAgent(agent.slug);

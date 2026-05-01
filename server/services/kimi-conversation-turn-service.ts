@@ -249,8 +249,23 @@ export class KimiConversationTurnService {
         .filter(Boolean)
         .join("\n\n");
 
-      const tools = await toolExecutor.getEnabledTools(context.enabledFormulaTools);
-      const effectiveThinkingMode =
+      let toolWarnings: string[] = [];
+      let tools: Array<Record<string, unknown>> = [];
+
+      if (context.enabledFormulaTools.length > 0) {
+        try {
+          tools = await toolExecutor.getEnabledTools(context.enabledFormulaTools);
+        } catch (error) {
+          toolWarnings.push(
+            error instanceof Error
+              ? error.message
+              : "Official Kimi tools are unavailable for this turn.",
+          );
+          tools = [];
+        }
+      }
+
+      let effectiveThinkingMode =
         tools.length > 0 ? "disabled" : context.thinkingMode;
       let request = buildKimiChatRequest({
         model: "kimi-k2.6",
@@ -271,7 +286,7 @@ export class KimiConversationTurnService {
 
       const firstCompletion = await kimiClient.createChatCompletion(request);
       const firstChoice = firstCompletion.choices?.[0];
-      const toolCalls = firstChoice?.message?.tool_calls ?? [];
+      let toolCalls = firstChoice?.message?.tool_calls ?? [];
       let toolResults: ToolResult[] = [];
 
       if (firstChoice?.finish_reason === "tool_calls" && toolCalls.length > 0) {
@@ -279,40 +294,66 @@ export class KimiConversationTurnService {
           id: "tools",
           label: `Running ${toolCalls.length} Kimi tool call${toolCalls.length === 1 ? "" : "s"}`,
         });
-        toolResults = await toolExecutor.executeToolCalls({
-          toolCalls,
-          enabledFormulaUris: context.enabledFormulaTools,
-        });
-        await agentRunRepository.saveToolCallBatch({
-          agentRunId: primaryRun.id,
-          toolCalls,
-          toolResults,
-        });
+        try {
+          toolResults = await toolExecutor.executeToolCalls({
+            toolCalls,
+            enabledFormulaUris: context.enabledFormulaTools,
+          });
+          await agentRunRepository.saveToolCallBatch({
+            agentRunId: primaryRun.id,
+            toolCalls,
+            toolResults,
+          });
 
-        request = buildKimiChatRequest({
-          model: "kimi-k2.6",
-          systemPrompt: resolvedSystemPrompt,
-          promptCacheKey:
-            context.promptCacheKey ??
-            buildKimiPromptCacheKey(params.input.conversationId),
-          safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
-          thinking: effectiveThinkingMode,
-          messages: [
-            ...contextPayload.messages,
-            {
-              role: "assistant",
-              content: firstChoice.message?.content ?? "",
-              toolCalls,
-            },
-            ...toolResults.map(result => ({
-              role: "tool" as const,
-              content: result.content,
-              name: result.toolName,
-              toolCallId: result.toolCallId,
-            })),
-          ],
-          tools,
-        });
+          request = buildKimiChatRequest({
+            model: "kimi-k2.6",
+            systemPrompt: resolvedSystemPrompt,
+            promptCacheKey:
+              context.promptCacheKey ??
+              buildKimiPromptCacheKey(params.input.conversationId),
+            safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
+            thinking: effectiveThinkingMode,
+            messages: [
+              ...contextPayload.messages,
+              {
+                role: "assistant",
+                content: firstChoice.message?.content ?? "",
+                toolCalls,
+              },
+              ...toolResults.map(result => ({
+                role: "tool" as const,
+                content: result.content,
+                name: result.toolName,
+                toolCallId: result.toolCallId,
+              })),
+            ],
+            tools,
+          });
+        } catch (error) {
+          toolWarnings.push(
+            error instanceof Error
+              ? error.message
+              : "Kimi tool execution failed for this turn.",
+          );
+          toolCalls = [];
+          toolResults = [];
+          tools = [];
+          effectiveThinkingMode = context.thinkingMode;
+
+          request = buildKimiChatRequest({
+            model: "kimi-k2.6",
+            systemPrompt: [
+              resolvedSystemPrompt,
+              "Official Kimi tools are unavailable for this turn. Respond directly using the available memory and vault context without attempting tool calls.",
+            ].join("\n\n"),
+            promptCacheKey:
+              context.promptCacheKey ??
+              buildKimiPromptCacheKey(params.input.conversationId),
+            safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
+            thinking: effectiveThinkingMode,
+            messages: contextPayload.messages,
+          });
+        }
       }
 
       await params.onStage?.({
@@ -341,6 +382,7 @@ export class KimiConversationTurnService {
         memoryApplied: context.longTermMemories.length > 0,
         toolCalls: toolCalls.map(toolCall => toolCall.function.name),
         toolResults: toolResults.map(result => result.toolName),
+        toolWarnings,
         finishReason: finalCompletion.choices?.[0]?.finish_reason ?? null,
         usage: extractKimiUsage(finalCompletion),
       };

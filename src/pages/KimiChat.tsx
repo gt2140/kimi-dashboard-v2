@@ -4,13 +4,9 @@ import remarkGfm from "remark-gfm";
 import {
   ArrowRight,
   Brain,
-  DatabaseZap,
-  FileSearch,
   Loader2,
-  Plus,
   Send,
   Sparkles,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -52,9 +48,6 @@ const SHORTCUTS = [
 
 export default function KimiChat() {
   const activeAgentId = useChatStore(state => state.activeAgentId);
-  const calledAgentIds = useChatStore(state => state.calledAgentIds);
-  const callAgent = useChatStore(state => state.callAgent);
-  const removeCalledAgent = useChatStore(state => state.removeCalledAgent);
   const clearChat = useChatStore(state => state.clearChat);
   const {
     messages,
@@ -69,13 +62,9 @@ export default function KimiChat() {
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const [streamingAssistant, setStreamingAssistant] =
     useState<StreamingAssistant | null>(null);
-  const [showHelperPicker, setShowHelperPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
-  const availableHelpers = AGENTS.filter(
-    agent => agent.id !== activeAgentId && !calledAgentIds.includes(agent.id),
-  );
 
   const displayedMessages = useMemo(() => {
     if (!streamingAssistant) {
@@ -136,7 +125,7 @@ export default function KimiChat() {
     } finally {
       setPendingUserMessage(null);
     }
-  }, [activeAgentId, calledAgentIds, input, isSending, streamMessage]);
+  }, [input, isSending, streamMessage]);
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-[1500px] min-w-0 flex-col overflow-hidden p-3 sm:p-4 lg:p-5">
@@ -151,19 +140,15 @@ export default function KimiChat() {
                   {allIcons[activeAgent.icon] ?? <Sparkles className="h-3.5 w-3.5" />}
                 </span>
                 <span className="truncate">{activeAgent.name}</span>
+                <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-emerald-100/70">
+                  MVP Direct
+                </span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/45">
-                Memoria, vault y tools en una vista mas compacta.
+                Chat directo con Kimi. Sin helpers, memory ni vault en el turno activo.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowHelperPicker(current => !current)}
-                className="inline-flex items-center gap-1 rounded-full border border-border/35 bg-card/30 px-3 py-1.5 text-[11px] text-muted-foreground/50 transition-colors hover:text-foreground"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Helper
-              </button>
               <button
                 onClick={() => {
                   clearChat();
@@ -175,30 +160,6 @@ export default function KimiChat() {
               </button>
             </div>
           </div>
-
-          {showHelperPicker && (
-            <div className="border-b border-border/25 px-4 py-3">
-              <div className="flex flex-wrap gap-2">
-                {availableHelpers.map(agent => (
-                  <button
-                    key={agent.id}
-                    onClick={() => {
-                      callAgent(agent.id);
-                      setShowHelperPicker(false);
-                    }}
-                    className="rounded-full border border-border/30 bg-card/25 px-3 py-1.5 text-[11px] text-muted-foreground/55 transition-colors hover:text-foreground"
-                  >
-                    {agent.name}
-                  </button>
-                ))}
-                {availableHelpers.length === 0 && (
-                  <span className="text-[11px] text-muted-foreground/35">
-                    No hay mas helpers disponibles.
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
             {isConversationLoading ? (
@@ -231,27 +192,6 @@ export default function KimiChat() {
           </div>
 
           <div className="border-t border-border/30 bg-background/70 px-4 py-4 backdrop-blur">
-            {calledAgentIds.length > 0 && (
-              <div className="mb-3 flex flex-wrap gap-2">
-                {calledAgentIds.map(id => {
-                  const agent = AGENTS.find(item => item.id === id);
-                  if (!agent) {
-                    return null;
-                  }
-
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => removeCalledAgent(id)}
-                      className="inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-400/10 px-2.5 py-1 text-[10px] text-amber-100/80"
-                    >
-                      {agent.name}
-                      <X className="h-3 w-3" />
-                    </button>
-                  );
-                })}
-              </div>
-            )}
             <div className="flex items-end gap-2 rounded-2xl border border-border/35 bg-card/30 p-3">
               <Textarea
                 ref={textareaRef}
@@ -263,7 +203,7 @@ export default function KimiChat() {
                     void handleSend();
                   }
                 }}
-                placeholder="Preguntale a Aura usando Kimi, memory y vault..."
+                placeholder="Escribile a Kimi..."
                 className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 text-[13px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0"
               />
               <Button
@@ -295,11 +235,11 @@ function EmptyState({ onShortcutClick }: { onShortcutClick: (value: string) => v
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
       <Sparkles className="h-6 w-6 text-amber-200/70" />
       <h2 className="mt-4 text-[18px] font-medium text-foreground">
-        Kimi V1 esta listo
+        Chat MVP listo
       </h2>
       <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted-foreground/45">
-        Esta version prioriza Kimi memory, tools oficiales y retrieval desde el
-        vault antes de llegar al texto final.
+        Esta version usa un turno minimo: mensaje, llamada directa a Kimi,
+        persistencia y respuesta.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         {SHORTCUTS.map(shortcut => (
@@ -380,16 +320,6 @@ function KimiMessageBubble({
             {metadata.thinkingMode && (
               <MetaPill icon={<Brain className="h-3 w-3" />}>
                 thinking {metadata.thinkingMode}
-              </MetaPill>
-            )}
-            {metadata.memoryApplied && (
-              <MetaPill icon={<DatabaseZap className="h-3 w-3" />}>
-                memory applied
-              </MetaPill>
-            )}
-            {metadata.relatedVaultFiles && metadata.relatedVaultFiles.length > 0 && (
-              <MetaPill icon={<FileSearch className="h-3 w-3" />}>
-                {metadata.relatedVaultFiles.length} vault files
               </MetaPill>
             )}
           </div>

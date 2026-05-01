@@ -10,7 +10,6 @@ type ConversationTurnInput = {
   conversationId: number;
   content: string;
   agentId: string;
-  calledAgentIds: string[];
 };
 
 type ConversationRepositoryLike = {
@@ -86,7 +85,6 @@ export class MinimalKimiChatService {
       agentId: params.input.agentId,
       metadata: {
         engine: "kimi-v0-direct",
-        ignoredHelperAgentIds: params.input.calledAgentIds,
       },
     });
 
@@ -110,7 +108,6 @@ export class MinimalKimiChatService {
       modelName: "kimi-k2.6",
       finishReason: completion.choices?.[0]?.finish_reason ?? null,
       usage: extractKimiUsage(completion),
-      ignoredHelperAgentIds: params.input.calledAgentIds,
       userMessageId: userMessage.id,
     };
 

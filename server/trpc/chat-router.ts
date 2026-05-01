@@ -10,7 +10,6 @@ export const chatSendMessageInputSchema = z.object({
   conversationId: z.number(),
   content: z.string().min(1),
   agentId: z.string(),
-  calledAgentIds: z.array(z.string()).default([]),
 });
 
 export type ChatSendMessageInput = z.infer<typeof chatSendMessageInputSchema>;

@@ -173,9 +173,7 @@ function ConversationList({
                       {session.title}
                     </p>
                     <p className="text-[10px] text-sidebar-foreground/30">
-                      {session.calledAgentIds.length > 0
-                        ? `+${session.calledAgentIds.length} agents`
-                        : "Single"}
+                      Chat
                     </p>
                   </div>
                 </button>
@@ -523,9 +521,7 @@ export function MobileSidebar() {
                           {session.title}
                         </p>
                         <p className="text-[10px] text-sidebar-foreground/30">
-                          {session.calledAgentIds.length > 0
-                            ? `+${session.calledAgentIds.length} agents`
-                            : "Single agent"}
+                          Chat
                         </p>
                       </div>
                     </button>

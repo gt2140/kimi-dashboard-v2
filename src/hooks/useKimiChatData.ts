@@ -48,7 +48,6 @@ export function useKimiChatData() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeAgentId = useChatStore(state => state.activeAgentId);
-  const calledAgentIds = useChatStore(state => state.calledAgentIds);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
   const hydrateConversation = useChatStore(state => state.hydrateConversation);
   const clearChatStore = useChatStore(state => state.clearChat);
@@ -172,7 +171,6 @@ export function useKimiChatData() {
             conversationId,
             content,
             agentId: activeAgentId,
-            calledAgentIds,
           }),
         });
       }

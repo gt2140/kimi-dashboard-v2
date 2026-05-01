@@ -64,7 +64,6 @@ describe("MinimalKimiChatService", () => {
         conversationId: 12,
         content: "How is my ApoB trend looking?",
         agentId: "cardio-deep",
-        calledAgentIds: [],
       },
       userId: 7,
     });
@@ -84,7 +83,7 @@ describe("MinimalKimiChatService", () => {
     );
   });
 
-  it("ignores helper agent ids and completes the turn as a single-agent Kimi request", async () => {
+  it("completes the turn as a single-agent Kimi request", async () => {
     const conversationRepository = {
       requireConversationOwner: vi.fn().mockResolvedValue({
         id: 18,
@@ -126,9 +125,8 @@ describe("MinimalKimiChatService", () => {
     const result = await service.executeTurn({
       input: {
         conversationId: 18,
-        content: "Analiza esto sin helpers.",
+        content: "Analiza esto.",
         agentId: "generalist",
-        calledAgentIds: ["bloodwork", "cardio-deep"],
       },
       userId: 9,
     });
@@ -140,15 +138,8 @@ describe("MinimalKimiChatService", () => {
     expect(kimiClient.createChatCompletion).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([
-          { role: "user", content: "Analiza esto sin helpers." },
+          { role: "user", content: "Analiza esto." },
         ]),
-      }),
-    );
-    expect(conversationRepository.createUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: expect.objectContaining({
-          ignoredHelperAgentIds: ["bloodwork", "cardio-deep"],
-        }),
       }),
     );
     expect(conversationRepository.updateConversationAfterTurn).toHaveBeenCalledWith(

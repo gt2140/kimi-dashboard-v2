@@ -10,13 +10,9 @@ import { formatRuntimeError } from "@/lib/app-errors";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
-  createChatStreamWatchdog,
-  parseChatStreamChunk,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
 import type { ChatSession, Message } from "@/types";
-
-const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
 
 function mapConversationSummary(item: {
   id: number;
@@ -180,13 +176,9 @@ export function useKimiChatData() {
 
     setStreamError(null);
     setIsStreaming(true);
-    const streamWatchdog = createChatStreamWatchdog(
-      CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
-      "Kimi chat stream",
-    );
 
     try {
-      async function openStream(forceSessionRefresh = false) {
+      async function requestResponse(forceSessionRefresh = false) {
         if (forceSessionRefresh) {
           const refreshed = await ensureBackendSession({ force: true });
           if (!refreshed) {
@@ -199,10 +191,9 @@ export function useKimiChatData() {
         const headers = await buildAuthenticatedHeaders(readAccessToken, {
           "Content-Type": "application/json",
         });
-        return fetch("/api/kimi/chat/stream", {
+        return fetch("/api/kimi/chat/respond", {
           method: "POST",
           credentials: "include",
-          signal: streamWatchdog.signal,
           headers,
           body: JSON.stringify({
             conversationId,
@@ -213,70 +204,82 @@ export function useKimiChatData() {
         });
       }
 
-      let response = await openStream();
+      handlers.onEvent?.({
+        type: "stage",
+        stageId: "analyze",
+        label: "Analyzing your message",
+      });
+      handlers.onStage?.({
+        type: "stage",
+        stageId: "analyze",
+        label: "Analyzing your message",
+      });
+
+      handlers.onEvent?.({
+        type: "stage",
+        stageId: "context",
+        label: "Reviewing available context",
+      });
+      handlers.onStage?.({
+        type: "stage",
+        stageId: "context",
+        label: "Reviewing available context",
+      });
+
+      handlers.onEvent?.({
+        type: "stage",
+        stageId: "draft",
+        label: "Drafting the answer",
+      });
+      handlers.onStage?.({
+        type: "stage",
+        stageId: "draft",
+        label: "Drafting the answer",
+      });
+
+      let response = await requestResponse();
 
       if (response.status === 401) {
-        response = await openStream(true);
+        response = await requestResponse(true);
       }
 
       if (!response.ok) {
-        throw new Error(`Kimi chat failed with HTTP ${response.status}.`);
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(
+          payload?.error ?? `Kimi chat failed with HTTP ${response.status}.`,
+        );
       }
 
-      if (!response.body) {
-        throw new Error("Kimi chat did not return a readable stream.");
-      }
+      const payload = (await response.json()) as {
+        message: Extract<ChatStreamEvent, { type: "message-complete" }>["message"];
+      };
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let completedMessage:
-        | Extract<ChatStreamEvent, { type: "message-complete" }>["message"]
-        | null = null;
+      handlers.onEvent?.({
+        type: "text-delta",
+        delta: payload.message.content,
+      });
+      handlers.onTextDelta?.({
+        type: "text-delta",
+        delta: payload.message.content,
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        streamWatchdog.touch();
-        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-
-        const parsed = parseChatStreamChunk(buffer);
-        buffer = parsed.remainder;
-
-        for (const event of parsed.events) {
-          handlers.onEvent?.(event);
-
-          if (event.type === "stage") {
-            handlers.onStage?.(event);
-            continue;
-          }
-
-          if (event.type === "text-delta") {
-            handlers.onTextDelta?.(event);
-            continue;
-          }
-
-          if (event.type === "message-complete") {
-            completedMessage = event.message;
-            handlers.onMessageComplete?.(event);
-            continue;
-          }
-
-          if (event.type === "error") {
-            throw new Error(event.message);
-          }
-        }
-
-        if (done) {
-          break;
-        }
-      }
+      handlers.onEvent?.({
+        type: "message-complete",
+        message: payload.message,
+      });
+      handlers.onMessageComplete?.({
+        type: "message-complete",
+        message: payload.message,
+      });
 
       await Promise.all([
         utils.chat.listConversations.invalidate(),
         utils.chat.getConversation.invalidate({ id: conversationId }),
       ]);
 
-      return completedMessage;
+      return payload.message;
     } catch (error) {
       const message =
         error instanceof Error
@@ -285,7 +288,6 @@ export function useKimiChatData() {
       setStreamError(message);
       throw error;
     } finally {
-      streamWatchdog.cancel();
       setIsStreaming(false);
     }
   }

@@ -30,6 +30,20 @@ describe("Kimi HTTP routes", () => {
     expect(response.status).toBe(401);
   });
 
+  it("protects kimi chat respond with auth", async () => {
+    const response = await app.fetch(
+      new Request("http://localhost/api/kimi/chat/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
   it("protects kimi vault upload with auth", async () => {
     const formData = new FormData();
     formData.append("category", "bloodwork");

@@ -105,6 +105,66 @@ app.post("/api/kimi/chat/stream", async (c) => {
     },
   });
 });
+app.post("/api/kimi/chat/respond", async (c) => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = chatSendMessageInputSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: "Invalid request body.",
+        details: parsed.error.flatten(),
+      },
+      400,
+    );
+  }
+
+  try {
+    const result = await kimiConversationTurnService.executeTurn({
+      input: parsed.data,
+      userId: user.id,
+      streamPrimary: false,
+    });
+
+    if (!result.assistantMessage) {
+      return c.json(
+        {
+          error: "Kimi V1 finished without a persisted assistant message.",
+        },
+        500,
+      );
+    }
+
+    return c.json({
+      message: {
+        id: String(result.assistantMessage.id),
+        role: "assistant",
+        content: result.assistantMessage.content,
+        agentId: result.assistantMessage.agentId,
+        createdAt: result.assistantMessage.createdAt.toISOString(),
+        metadata: result.assistantMessage.metadata,
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Kimi V1 response failed unexpectedly.",
+      },
+      500,
+    );
+  }
+});
 app.post("/api/kimi/vault/upload", async c => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 

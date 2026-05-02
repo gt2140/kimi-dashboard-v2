@@ -70,7 +70,6 @@ export function useKimiChatData() {
       retry: false,
     },
   );
-  const createConversation = trpc.chat.createConversation.useMutation();
   const deleteConversationMutation = trpc.chat.deleteConversation.useMutation();
 
   const sessions = useMemo(
@@ -117,24 +116,7 @@ export function useKimiChatData() {
     navigate("/kimi/chat");
   }
 
-  async function ensureConversationId(firstMessage?: string) {
-    if (activeConversationId !== null) {
-      return activeConversationId;
-    }
-
-    const created = await createConversation.mutateAsync({
-      agentId: activeAgentId,
-      title: firstMessage ? firstMessage.slice(0, 60) : undefined,
-    });
-    const nextId = created.id;
-    setSearchParams({ conversation: String(nextId) });
-    navigate(`/kimi/chat?conversation=${nextId}`);
-    return nextId;
-  }
-
   async function sendMessage(content: string) {
-    const conversationId = await ensureConversationId(content);
-
     setStreamError(null);
     setIsStreaming(true);
 
@@ -160,7 +142,7 @@ export function useKimiChatData() {
             headers,
             signal: controller.signal,
             body: JSON.stringify({
-              conversationId,
+              conversationId: activeConversationId ?? undefined,
               content,
               agentId: activeAgentId,
             }),
@@ -186,6 +168,7 @@ export function useKimiChatData() {
       }
 
       const payload = (await response.json()) as {
+        conversationId: number;
         message: {
           id: string;
           role: "assistant";
@@ -196,9 +179,16 @@ export function useKimiChatData() {
         };
       };
 
+      const nextConversationId = payload.conversationId;
+
+      if (activeConversationId !== nextConversationId) {
+        setSearchParams({ conversation: String(nextConversationId) });
+        navigate(`/kimi/chat?conversation=${nextConversationId}`);
+      }
+
       await Promise.all([
         utils.chat.listConversations.invalidate(),
-        utils.chat.getConversation.invalidate({ id: conversationId }),
+        utils.chat.getConversation.invalidate({ id: nextConversationId }),
       ]);
 
       return payload.message;
@@ -280,7 +270,6 @@ export function useKimiChatData() {
 
   const error =
     streamError ??
-    createConversation.error ??
     deleteConversationMutation.error ??
     conversationsQuery.error ??
     conversationQuery.error ??
@@ -291,7 +280,7 @@ export function useKimiChatData() {
     messages,
     activeConversationId,
     isConversationLoading: conversationQuery.isLoading,
-    isSending: isStreaming || createConversation.isPending,
+    isSending: isStreaming,
     error:
       typeof error === "string"
         ? error

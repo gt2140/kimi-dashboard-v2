@@ -7,6 +7,7 @@ import { authenticateRequest } from "./trpc/auth.js";
 import { chatSendMessageInputSchema } from "./trpc/chat-router.js";
 import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { vaultFiles } from "../db/schema.js";
 import { logServerDebug, logServerError } from "./lib/debug.js";
 import { getDb } from "./queries/connection.js";
@@ -21,6 +22,10 @@ const mvpChatTurnService = new MvpChatTurnService(
   new MvpChatStore(),
   new KimiDirectClient(),
 );
+const retryChatInputSchema = z.object({
+  conversationId: z.number(),
+  agentId: z.string(),
+});
 
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
@@ -55,7 +60,7 @@ app.post("/api/kimi/chat", async c => {
   try {
     logServerDebug("kimi.chat.http.start", {
       userId: user.id,
-      conversationId: parsed.data.conversationId,
+      conversationId: parsed.data.conversationId ?? null,
       agentId: parsed.data.agentId,
     });
 
@@ -74,14 +79,14 @@ app.post("/api/kimi/chat", async c => {
 
     logServerDebug("kimi.chat.http.success", {
       userId: user.id,
-      conversationId: parsed.data.conversationId,
+      conversationId: message.conversationId,
     });
 
-    return c.json({ message });
+    return c.json({ conversationId: message.conversationId, message });
   } catch (error) {
     logServerError("kimi.chat.http.failed", error, {
       userId: user.id,
-      conversationId: parsed.data.conversationId,
+      conversationId: parsed.data.conversationId ?? null,
       agentId: parsed.data.agentId,
     });
     return c.json(
@@ -105,9 +110,7 @@ app.post("/api/kimi/chat/retry", async c => {
   }
 
   const body = await c.req.json().catch(() => null);
-  const parsed = chatSendMessageInputSchema
-    .pick({ conversationId: true, agentId: true })
-    .safeParse(body);
+  const parsed = retryChatInputSchema.safeParse(body);
 
   if (!parsed.success) {
     return c.json(

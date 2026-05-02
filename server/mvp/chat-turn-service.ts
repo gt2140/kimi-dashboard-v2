@@ -10,24 +10,38 @@ export class MvpChatTurnService {
   ) {}
 
   async execute(params: {
-    conversationId: number;
+    conversationId?: number;
     content: string;
     agentId: string;
     userId: number;
   }) {
+    let conversationId = params.conversationId;
+    let conversationTitle: string | null = null;
+
+    if (conversationId == null) {
+      const created = await this.store.createConversation({
+        userId: params.userId,
+        agentId: params.agentId,
+        title: params.content.slice(0, 60),
+      });
+      conversationId = created.id;
+      conversationTitle = created.title ?? null;
+    } else {
+      const conversation = await this.store.requireConversation(
+        params.userId,
+        conversationId,
+      );
+      conversationTitle = conversation.title;
+    }
+
     logServerDebug("kimi.chat-turn.start", {
       userId: params.userId,
-      conversationId: params.conversationId,
+      conversationId,
       agentId: params.agentId,
     });
 
-    const conversation = await this.store.requireConversation(
-      params.userId,
-      params.conversationId,
-    );
-
     await this.store.createUserMessage({
-      conversationId: params.conversationId,
+      conversationId,
       agentId: params.agentId,
       content: params.content,
     });
@@ -35,11 +49,11 @@ export class MvpChatTurnService {
     const agent =
       AGENTS.find(candidate => candidate.id === params.agentId) ?? AGENTS[0];
     const recentMessages = await this.store.listRecentMessages(
-      params.conversationId,
+      conversationId,
     );
 
     logServerDebug("kimi.chat-turn.context.ready", {
-      conversationId: params.conversationId,
+      conversationId,
       recentMessageCount: recentMessages.length,
       agentId: agent.id,
     });
@@ -64,26 +78,27 @@ export class MvpChatTurnService {
     };
 
     const assistantMessage = await this.store.createAssistantMessage({
-      conversationId: params.conversationId,
+      conversationId,
       agentId: params.agentId,
       content: reply.content,
       metadata,
     });
 
     await this.store.finalizeConversation({
-      conversationId: params.conversationId,
-      currentTitle: conversation.title,
+      conversationId,
+      currentTitle: conversationTitle,
       agentId: params.agentId,
       userMessage: params.content,
     });
 
     logServerDebug("kimi.chat-turn.success", {
       userId: params.userId,
-      conversationId: params.conversationId,
+      conversationId,
       agentId: params.agentId,
     });
 
     return {
+      conversationId,
       id: String(assistantMessage.id),
       role: "assistant" as const,
       content: reply.content,

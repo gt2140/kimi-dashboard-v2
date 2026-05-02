@@ -113,7 +113,10 @@ export class MvpChatStore {
         title: params.title || "New conversation",
         orchestrationMode: "single_agent",
       })
-      .returning({ id: conversations.id });
+      .returning({
+        id: conversations.id,
+        title: conversations.title,
+      });
 
     return inserted[0];
   }

@@ -52,7 +52,6 @@ export default function KimiChat() {
     error,
     startNewChat,
     sendMessage,
-    runBackendCheck,
   } = useKimiChatData();
 
   const [input, setInput] = useState("");
@@ -135,13 +134,7 @@ export default function KimiChat() {
             {isConversationLoading ? (
               <LoadingState label="Loading Kimi conversation" />
             ) : displayedMessages.length === 0 && !pendingUserMessage ? (
-              <EmptyState
-                onShortcutClick={setInput}
-                onRunCheck={() => {
-                  void runBackendCheck();
-                }}
-                isSending={isSending}
-              />
+              <EmptyState onShortcutClick={setInput} />
             ) : (
               <div className="mx-auto max-w-3xl space-y-6">
                 {displayedMessages.map(message => (
@@ -208,12 +201,8 @@ export default function KimiChat() {
 
 function EmptyState({
   onShortcutClick,
-  onRunCheck,
-  isSending,
 }: {
   onShortcutClick: (value: string) => void;
-  onRunCheck: () => void;
-  isSending: boolean;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
@@ -236,14 +225,6 @@ function EmptyState({
           </button>
         ))}
       </div>
-      <button
-        onClick={onRunCheck}
-        disabled={isSending}
-        className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-4 py-2 text-[11px] text-emerald-100/80 transition-colors hover:bg-emerald-400/15 disabled:opacity-60"
-      >
-        {isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-        Test backend Kimi
-      </button>
     </div>
   );
 }

@@ -30,6 +30,7 @@ export default function KimiChat() {
   const clearChat = useChatStore(state => state.clearChat);
   const {
     messages,
+    activeConversationId,
     isConversationLoading,
     isSending,
     error,
@@ -40,6 +41,7 @@ export default function KimiChat() {
 
   const [input, setInput] = useState("");
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
+  const [autoRetryConversationId, setAutoRetryConversationId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
@@ -49,6 +51,26 @@ export default function KimiChat() {
     displayedMessages.length > 0 &&
     displayedMessages[displayedMessages.length - 1]?.role === "user" &&
     !isSending;
+
+  useEffect(() => {
+    if (
+      !hasPendingAssistantReply ||
+      isSending ||
+      activeConversationId === null ||
+      autoRetryConversationId === activeConversationId
+    ) {
+      return;
+    }
+
+    setAutoRetryConversationId(activeConversationId);
+    void retryLastTurn().catch(() => undefined);
+  }, [
+    activeConversationId,
+    autoRetryConversationId,
+    hasPendingAssistantReply,
+    isSending,
+    retryLastTurn,
+  ]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });

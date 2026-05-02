@@ -1,9 +1,10 @@
 import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import { ArrowUpRight, FileText, Sparkles, Users } from "lucide-react";
-import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useChatStore } from "@/hooks/useStore";
+import { useKimiChatData } from "@/hooks/useKimiChatData";
+import { useLocalVaultStore } from "@/hooks/useLocalVaultStore";
 import { BUILT_IN_AGENTS } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +21,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
-  const conversationsQuery = trpc.chat.listConversations.useQuery();
+  const { sessions } = useKimiChatData();
+  const vaultFiles = useLocalVaultStore(state => state.files);
 
   return (
     <div className="mx-auto w-full max-w-[1400px] min-w-0 p-4 sm:p-6 lg:p-8">
@@ -36,8 +38,8 @@ export default function Dashboard() {
             </h1>
             <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/40">
               {user?.name
-                ? `${user.name}, esta capa ahora gira alrededor de un chat simple conectado directo con Kimi.`
-                : "Aura ahora prioriza un chat simple conectado directo con Kimi."}
+                ? `${user.name}, esta base conserva login real y un frontend listo para volver a construir el backend desde cero.`
+                : "Aura conserva auth real y un frontend listo para reconstruir el backend desde cero."}
             </p>
           </div>
           <span className="text-[12px] text-muted-foreground/40">
@@ -109,21 +111,21 @@ export default function Dashboard() {
         />
         <StatCard
           icon={<FileText className="h-4 w-4" />}
-          label="Kimi chats"
-          value={conversationsQuery.data?.length ?? 0}
+          label="Local chats"
+          value={sessions.length}
           onClick={() => navigate("/kimi/chat")}
+        />
+        <StatCard
+          icon={<FileText className="h-4 w-4" />}
+          label="Local vault files"
+          value={vaultFiles.length}
+          onClick={() => navigate("/kimi/vault")}
         />
         <StatCard
           icon={<Users className="h-4 w-4" />}
           label="Signed-in user"
           value={user?.name || "Authenticated"}
           onClick={() => navigate("/profile")}
-        />
-        <StatCard
-          icon={<Sparkles className="h-4 w-4" />}
-          label="Backend mode"
-          value="Direct"
-          onClick={() => navigate("/kimi/chat")}
         />
       </motion.div>
 
@@ -141,8 +143,8 @@ export default function Dashboard() {
           </div>
           <div className="rounded-xl border border-border/20 bg-background/35 p-4 text-[12px] leading-relaxed text-muted-foreground/50">
             Aura ahora se apoya en una sola ruta viva para conversar:
-            mensaje del usuario, llamada directa a Kimi, guardado de la respuesta
-            y recarga del historial.
+            auth real en backend y estado local en frontend para chat, agents y vault
+            mientras se reconstruye el backend nuevo.
           </div>
         </div>
       </motion.div>

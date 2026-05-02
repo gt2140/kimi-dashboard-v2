@@ -74,6 +74,50 @@ app.post("/api/kimi/chat", async c => {
     );
   }
 });
+app.post("/api/kimi/chat/debug", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  try {
+    const reply = await requestKimiChatCompletion({
+      systemPrompt: "You are a helpful assistant.",
+      message:
+        "Respond in one short sentence confirming that the Aura backend can reach Kimi.",
+      userId: user.id,
+    });
+
+    return c.json({
+      ok: true,
+      message: {
+        content: reply.content,
+        metadata: {
+          providerSlug: "kimi",
+          modelName: reply.model,
+          note: "backend-debug-check",
+          responseMode: "model",
+          inputTokens: reply.usage.inputTokens,
+          outputTokens: reply.usage.outputTokens,
+        },
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Kimi debug check failed unexpectedly.",
+      },
+      500,
+    );
+  }
+});
 app.get("/api/health", c => c.json({ ok: true }));
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 

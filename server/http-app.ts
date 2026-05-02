@@ -50,7 +50,7 @@ app.post("/api/kimi/chat", async (c) => {
   }
 
   try {
-    const message = await mvpChatTurnService.execute({
+    const result = await mvpChatTurnService.execute({
       conversationId: parsed.data.conversationId,
       content: parsed.data.content,
       agentId: parsed.data.agentId,
@@ -58,7 +58,15 @@ app.post("/api/kimi/chat", async (c) => {
     });
 
     return c.json({
-      message,
+      conversationId: result.conversationId,
+      message: {
+        id: result.id,
+        role: result.role,
+        content: result.content,
+        agentId: result.agentId,
+        createdAt: result.createdAt,
+        metadata: result.metadata,
+      },
     });
   } catch (error) {
     return c.json(

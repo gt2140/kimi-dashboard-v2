@@ -3,7 +3,7 @@ import { MvpChatStore } from "../mvp/chat-store.js";
 import { createRouter, authedQuery } from "./middleware.js";
 
 export const chatSendMessageInputSchema = z.object({
-  conversationId: z.number(),
+  conversationId: z.number().optional(),
   content: z.string().min(1),
   agentId: z.string(),
 });

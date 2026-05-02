@@ -1,5 +1,5 @@
 import { AGENTS } from "../../src/lib/data.js";
-import { MvpChatStore } from "./chat-store.js";
+import { buildConversationTitle, MvpChatStore } from "./chat-store.js";
 import { KimiDirectClient } from "./kimi-direct-client.js";
 
 export class MvpChatTurnService {
@@ -9,18 +9,28 @@ export class MvpChatTurnService {
   ) {}
 
   async execute(params: {
-    conversationId: number;
+    conversationId?: number;
     content: string;
     agentId: string;
     userId: number;
   }) {
+    const conversationId =
+      params.conversationId ??
+      (
+        await this.store.createConversation({
+          userId: params.userId,
+          agentId: params.agentId,
+          title: buildConversationTitle(params.content),
+        })
+      ).id;
+
     const conversation = await this.store.requireConversation(
       params.userId,
-      params.conversationId,
+      conversationId,
     );
 
     await this.store.createUserMessage({
-      conversationId: params.conversationId,
+      conversationId,
       agentId: params.agentId,
       content: params.content,
     });
@@ -28,7 +38,7 @@ export class MvpChatTurnService {
     const agent =
       AGENTS.find(candidate => candidate.id === params.agentId) ?? AGENTS[0];
     const recentMessages = await this.store.listRecentMessages(
-      params.conversationId,
+      conversationId,
     );
 
     const reply = await this.kimiClient.respond({
@@ -43,7 +53,7 @@ export class MvpChatTurnService {
     });
 
     const assistantMessage = await this.store.createAssistantMessage({
-      conversationId: params.conversationId,
+      conversationId,
       agentId: params.agentId,
       content: reply.content,
       metadata: {
@@ -56,13 +66,14 @@ export class MvpChatTurnService {
     });
 
     await this.store.finalizeConversation({
-      conversationId: params.conversationId,
+      conversationId,
       currentTitle: conversation.title,
       agentId: params.agentId,
       userMessage: params.content,
     });
 
     return {
+      conversationId,
       id: String(assistantMessage.id),
       role: "assistant" as const,
       content: reply.content,

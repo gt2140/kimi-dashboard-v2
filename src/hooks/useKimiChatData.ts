@@ -70,7 +70,6 @@ export function useKimiChatData() {
       retry: false,
     },
   );
-  const createConversation = trpc.chat.createConversation.useMutation();
   const deleteConversationMutation = trpc.chat.deleteConversation.useMutation();
 
   const sessions = useMemo(
@@ -95,6 +94,31 @@ export function useKimiChatData() {
     });
   }, [conversationQuery.data?.conversation, hydrateConversation]);
 
+  useEffect(() => {
+    if (activeConversationId === null || !conversationQuery.error) {
+      return;
+    }
+
+    const message =
+      conversationQuery.error instanceof Error
+        ? conversationQuery.error.message
+        : String(conversationQuery.error);
+
+    if (!message.toLowerCase().includes("conversation not found")) {
+      return;
+    }
+
+    clearChatStore();
+    setSearchParams({});
+    navigate("/kimi/chat", { replace: true });
+  }, [
+    activeConversationId,
+    clearChatStore,
+    conversationQuery.error,
+    navigate,
+    setSearchParams,
+  ]);
+
   async function readAccessToken() {
     if (!isSupabaseConfigured) {
       return null;
@@ -117,24 +141,7 @@ export function useKimiChatData() {
     navigate("/kimi/chat");
   }
 
-  async function ensureConversationId(firstMessage?: string) {
-    if (activeConversationId !== null) {
-      return activeConversationId;
-    }
-
-    const created = await createConversation.mutateAsync({
-      agentId: activeAgentId,
-      title: firstMessage ? firstMessage.slice(0, 60) : undefined,
-    });
-    const nextId = created.id;
-    setSearchParams({ conversation: String(nextId) });
-    navigate(`/kimi/chat?conversation=${nextId}`);
-    return nextId;
-  }
-
   async function sendMessage(content: string) {
-    const conversationId = await ensureConversationId(content);
-
     setStreamError(null);
     setIsStreaming(true);
 
@@ -152,7 +159,7 @@ export function useKimiChatData() {
           credentials: "include",
           headers,
           body: JSON.stringify({
-            conversationId,
+            conversationId: activeConversationId ?? undefined,
             content,
             agentId: activeAgentId,
           }),
@@ -175,6 +182,7 @@ export function useKimiChatData() {
       }
 
       const payload = (await response.json()) as {
+        conversationId: number;
         message: {
           id: string;
           role: "assistant";
@@ -185,9 +193,16 @@ export function useKimiChatData() {
         };
       };
 
+      if (activeConversationId !== payload.conversationId) {
+        setSearchParams({ conversation: String(payload.conversationId) });
+        navigate(`/kimi/chat?conversation=${payload.conversationId}`, {
+          replace: true,
+        });
+      }
+
       await Promise.all([
         utils.chat.listConversations.invalidate(),
-        utils.chat.getConversation.invalidate({ id: conversationId }),
+        utils.chat.getConversation.invalidate({ id: payload.conversationId }),
       ]);
 
       return payload.message;
@@ -219,7 +234,6 @@ export function useKimiChatData() {
 
   const error =
     streamError ??
-    createConversation.error ??
     deleteConversationMutation.error ??
     conversationsQuery.error ??
     conversationQuery.error ??
@@ -230,7 +244,7 @@ export function useKimiChatData() {
     messages,
     activeConversationId,
     isConversationLoading: conversationQuery.isLoading,
-    isSending: isStreaming || createConversation.isPending,
+    isSending: isStreaming,
     error:
       typeof error === "string"
         ? error

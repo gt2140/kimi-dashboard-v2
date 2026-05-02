@@ -5,11 +5,13 @@ import type { ChatSession, Message } from "@/types";
 type LocalChatStore = {
   conversations: ChatSession[];
   createConversation: (agentId: string, firstMessage: string) => ChatSession;
-  appendTurn: (
-    conversationId: string | null,
-    agentId: string,
-    content: string,
-  ) => ChatSession;
+  saveTurn: (params: {
+    conversationId: string | null;
+    agentId: string;
+    userContent: string;
+    assistantContent: string;
+    assistantMetadata?: Message["metadata"];
+  }) => ChatSession;
   deleteConversation: (conversationId: string) => void;
   getConversation: (conversationId: string | null) => ChatSession | null;
   clearAll: () => void;
@@ -24,18 +26,18 @@ function buildTitle(content: string) {
   return trimmed.slice(0, 60) + (trimmed.length > 60 ? "..." : "");
 }
 
-function buildAssistantMessage(agentId: string): Message {
+function buildAssistantMessage(
+  agentId: string,
+  content: string,
+  metadata?: Message["metadata"],
+): Message {
   return {
     id: createId(),
     role: "assistant",
-    content:
-      "Frontend-only mode. El backend todavia no fue reconstruido. Esta respuesta local existe para validar la UI, la navegacion y el flujo de mensajes mientras limpiamos la base del proyecto.",
+    content,
     agentId,
     timestamp: new Date(),
-    metadata: {
-      note: "local-frontend-only",
-      responseMode: "limited",
-    },
+    metadata,
   };
 }
 
@@ -60,26 +62,36 @@ export const useLocalChatStore = create<LocalChatStore>()(
 
         return conversation;
       },
-      appendTurn: (conversationId, agentId, content) => {
+      saveTurn: ({
+        conversationId,
+        agentId,
+        userContent,
+        assistantContent,
+        assistantMetadata,
+      }) => {
         const resolvedConversation =
           get().getConversation(conversationId) ??
-          get().createConversation(agentId, content);
+          get().createConversation(agentId, userContent);
 
         const userMessage: Message = {
           id: createId(),
           role: "user",
-          content,
+          content: userContent,
           agentId,
           timestamp: new Date(),
         };
-        const assistantMessage = buildAssistantMessage(agentId);
+        const assistantMessage = buildAssistantMessage(
+          agentId,
+          assistantContent,
+          assistantMetadata,
+        );
 
         const nextConversation: ChatSession = {
           ...resolvedConversation,
           agentId,
           title:
             resolvedConversation.title === "New conversation"
-              ? buildTitle(content)
+              ? buildTitle(userContent)
               : resolvedConversation.title,
           updatedAt: assistantMessage.timestamp,
           messages: [

@@ -114,7 +114,7 @@ export default function KimiChat() {
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/45">
-                Frontend-only mode. La UI del chat queda lista mientras reconstruimos el backend desde cero.
+                Mensaje directo a Kimi desde backend simple, sin orquestacion extra.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -207,8 +207,7 @@ function EmptyState({ onShortcutClick }: { onShortcutClick: (value: string) => v
         Kimi chat listo
       </h2>
       <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted-foreground/45">
-        Esta vista guarda mensajes en el navegador para validar UX, layout y
-        navegacion sin depender de un backend conversacional.
+        Esta vista envia un mensaje simple a Kimi y guarda el intercambio en el navegador.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         {SHORTCUTS.map(shortcut => (

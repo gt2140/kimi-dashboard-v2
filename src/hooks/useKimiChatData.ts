@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useChatStore } from "@/hooks/useStore";
 import { useLocalChatStore } from "@/hooks/useLocalChatStore";
+import { buildAuthenticatedHeaders } from "@/lib/request-auth";
+import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { ChatSession, Message } from "@/types";
+import { AGENTS } from "@/lib/data";
 
 function reviveMessage(message: Message): Message {
   return {
@@ -34,7 +37,7 @@ export function useKimiChatData() {
   const activeConversationId = rawConversationId;
 
   const storedConversations = useLocalChatStore(state => state.conversations);
-  const appendTurn = useLocalChatStore(state => state.appendTurn);
+  const saveTurn = useLocalChatStore(state => state.saveTurn);
   const deleteConversation = useLocalChatStore(state => state.deleteConversation);
   const getConversation = useLocalChatStore(state => state.getConversation);
 
@@ -100,6 +103,15 @@ export function useKimiChatData() {
     navigate("/kimi/chat");
   }
 
+  async function readAccessToken() {
+    if (!isSupabaseConfigured) {
+      return null;
+    }
+
+    const { data } = await getSupabaseBrowserClient().auth.getSession();
+    return data.session?.access_token ?? null;
+  }
+
   async function sendMessage(content: string) {
     if (!content.trim()) {
       return null;
@@ -109,11 +121,45 @@ export function useKimiChatData() {
     setIsSending(true);
 
     try {
-      const conversation = appendTurn(
-        activeConversationId,
-        activeAgentId,
-        content.trim(),
-      );
+      const activeAgent =
+        AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
+      const headers = await buildAuthenticatedHeaders(readAccessToken, {
+        "Content-Type": "application/json",
+      });
+      const response = await fetch("/api/kimi/chat", {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: JSON.stringify({
+          agentId: activeAgentId,
+          content: content.trim(),
+          systemPrompt: activeAgent.systemPrompt,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(
+          payload?.error ?? `Kimi chat failed with HTTP ${response.status}.`,
+        );
+      }
+
+      const payload = (await response.json()) as {
+        message: {
+          content: string;
+          metadata?: Message["metadata"];
+        };
+      };
+
+      const conversation = saveTurn({
+        conversationId: activeConversationId,
+        agentId: activeAgentId,
+        userContent: content.trim(),
+        assistantContent: payload.message.content,
+        assistantMetadata: payload.message.metadata,
+      });
 
       if (activeConversationId !== conversation.id) {
         setSearchParams({ conversation: conversation.id });

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import {
+  Brain,
   ChevronRight,
   LayoutDashboard,
   Menu,
@@ -10,6 +11,7 @@ import {
   Sparkles,
   Trash2,
   X,
+  Zap,
 } from "lucide-react";
 import { useKimiChatData } from "@/hooks/useKimiChatData";
 import { useAuth } from "@/hooks/useAuth";
@@ -29,6 +31,18 @@ const navItems = [
     label: "Kimi Chat",
     icon: Sparkles,
     path: "/kimi/chat",
+  },
+  {
+    id: "kimi-agents",
+    label: "Kimi Agents",
+    icon: Brain,
+    path: "/kimi/agents",
+  },
+  {
+    id: "kimi-vault",
+    label: "Kimi Vault",
+    icon: Zap,
+    path: "/kimi/vault",
   },
 ];
 

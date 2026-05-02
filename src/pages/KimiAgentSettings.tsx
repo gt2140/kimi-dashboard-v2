@@ -1,62 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import {
-  ArrowLeft,
-  Brain,
-  DatabaseZap,
-  Globe,
-  Save,
-  Sparkles,
-  Wrench,
-} from "lucide-react";
+import { ArrowLeft, Brain, DatabaseZap, Globe, Save, Sparkles } from "lucide-react";
 import { KimiHeader } from "@/components/kimi/KimiHeader";
 import { useAgentCatalog } from "@/hooks/useAgentCatalog";
 import { trpc } from "@/providers/trpc";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_TOOLS = [
-  "moonshot/memory:latest",
-  "moonshot/web-search:latest",
-  "moonshot/rethink:latest",
-];
-
 export default function KimiAgentSettings() {
   const navigate = useNavigate();
   const { agentId } = useParams();
   const slug = agentId ?? "generalist";
   const { saveUserSettings, isSaving } = useAgentCatalog();
-  const providersQuery = trpc.agents.listProviders.useQuery();
-  const settingsQuery = trpc.agents.getUserSettings.useQuery(
-    { slug },
-    { retry: false },
-  );
+  const settingsQuery = trpc.agents.getUserSettings.useQuery({ slug }, { retry: false });
 
   const [customContext, setCustomContext] = useState("");
-  const [trainingNotes, setTrainingNotes] = useState("");
-  const [thinkingMode, setThinkingMode] = useState<"enabled" | "disabled">(
-    "enabled",
-  );
+  const [thinkingMode, setThinkingMode] = useState<"enabled" | "disabled">("enabled");
   const [preferKimiMemory, setPreferKimiMemory] = useState(true);
   const [webResearchEnabled, setWebResearchEnabled] = useState(true);
-  const [scientificResearchEnabled, setScientificResearchEnabled] =
-    useState(false);
-  const [formulaToolsText, setFormulaToolsText] = useState("");
-  const [responseStyle, setResponseStyle] = useState<
-    "concise" | "detailed" | "academic"
-  >("detailed");
-  const [preferredProviderId, setPreferredProviderId] = useState<number | null>(
-    null,
-  );
-  const [preferredModelId, setPreferredModelId] = useState<number | null>(null);
+  const [vaultContextEnabled, setVaultContextEnabled] = useState(true);
+  const [responseStyle, setResponseStyle] = useState<"concise" | "detailed" | "academic">("detailed");
 
   const agent = settingsQuery.data?.agent;
   const setting = settingsQuery.data?.setting;
-  const providers = providersQuery.data ?? [];
-  const selectedProvider = providers.find(
-    provider => provider.id === preferredProviderId,
-  );
-  const availableModels = selectedProvider?.endpoints ?? [];
 
   useEffect(() => {
     if (!setting) {
@@ -64,66 +30,32 @@ export default function KimiAgentSettings() {
     }
 
     setCustomContext(setting.customContext ?? "");
-    setTrainingNotes(setting.trainingNotes ?? "");
     setThinkingMode(setting.kimiThinkingMode ?? "enabled");
     setPreferKimiMemory(setting.preferKimiMemory ?? true);
     setWebResearchEnabled(setting.allowWebResearch ?? true);
-    setScientificResearchEnabled(setting.allowScientificResearch ?? false);
-    setFormulaToolsText(
-      ((setting.enabledFormulaTools as string[] | undefined) ?? []).join(", "),
-    );
+    setVaultContextEnabled(setting.allowVaultContext ?? true);
     setResponseStyle(setting.responseStyle);
-    setPreferredProviderId(setting.preferredProviderId ?? null);
-    setPreferredModelId(setting.preferredModelId ?? null);
   }, [setting]);
-
-  useEffect(() => {
-    if (preferredProviderId || providers.length === 0) {
-      return;
-    }
-
-    const kimiProvider = providers.find(
-      provider => provider.slug?.toLowerCase() === "kimi",
-    );
-    if (kimiProvider) {
-      setPreferredProviderId(kimiProvider.id);
-    }
-  }, [preferredProviderId, providers]);
-
-  const resolvedTools = useMemo(
-    () =>
-      formulaToolsText
-        .split(",")
-        .map(value => value.trim())
-        .filter(Boolean),
-    [formulaToolsText],
-  );
 
   async function handleSave() {
     await saveUserSettings({
       slug,
       customContext: customContext || null,
-      trainingNotes: trainingNotes || null,
       kimiThinkingMode: thinkingMode,
       preferKimiMemory,
       allowWebResearch: webResearchEnabled,
-      allowScientificResearch: scientificResearchEnabled,
-      enabledFormulaTools: resolvedTools,
+      allowVaultContext: vaultContextEnabled,
       responseStyle,
-      preferredProviderId,
-      preferredModelId,
-      allowVaultContext: true,
-      allowedContextOverrides: agent?.allowedVaultCategories ?? [],
     });
   }
 
-  const error = settingsQuery.error ?? providersQuery.error ?? null;
+  const error = settingsQuery.error ?? null;
 
   return (
     <div className="mx-auto w-full max-w-[1200px] p-4 sm:p-6 lg:p-8">
       <KimiHeader
         title={`${agent?.name ?? "Agent"} settings`}
-        description="Ajustá cómo este perfil usa thinking, Kimi memory, tools oficiales y routing de modelo dentro del runtime nuevo."
+        description="Cada perfil de Kimi se reduce a lo esencial: contexto extra, thinking, memory, vault y estilo de respuesta."
       />
 
       <button
@@ -137,8 +69,8 @@ export default function KimiAgentSettings() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="space-y-4">
           <Panel
-            title="Prompt and role"
-            description="Base prompt from Aura plus user-specific context and operating notes."
+            title="Prompt"
+            description="El prompt base del agente sigue igual. Acá solo podés sumar una capa corta de contexto personal."
             icon={<Sparkles className="h-4 w-4" />}
           >
             <Field label="Base system prompt">
@@ -155,26 +87,13 @@ export default function KimiAgentSettings() {
                 className="min-h-[120px] w-full rounded-2xl border border-border/25 bg-card/30 p-3 text-[12px] text-foreground outline-none"
               />
             </Field>
-            <Field label="Training notes">
-              <textarea
-                value={trainingNotes}
-                onChange={event => setTrainingNotes(event.target.value)}
-                className="min-h-[120px] w-full rounded-2xl border border-border/25 bg-card/30 p-3 text-[12px] text-foreground outline-none"
-              />
-            </Field>
           </Panel>
 
           <Panel
-            title="Kimi reasoning and memory"
-            description="Define how much the model should think and whether official Kimi memory is preferred."
+            title="Thinking and memory"
+            description="El backend nuevo usa un loop directo a Kimi con historial corto. Solo ajustamos intensidad y memory strategy."
             icon={<Brain className="h-4 w-4" />}
           >
-            <div className="rounded-2xl border border-border/20 bg-background/35 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground/50">
-              Generalist funciona como una memoria tipo proyecto: mezcla
-              contexto fijo del agente, notas operativas, resumen de la
-              conversación y memorias estables del usuario extraídas después de
-              cada respuesta.
-            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {(["enabled", "disabled"] as const).map(mode => (
                 <button
@@ -190,129 +109,46 @@ export default function KimiAgentSettings() {
                   <div className="text-[12px] font-medium capitalize">{mode}</div>
                   <p className="mt-1 text-[11px] leading-relaxed">
                     {mode === "enabled"
-                      ? "Use Kimi thinking mode for harder reasoning turns."
-                      : "Favor speed and direct output over deliberate thinking."}
+                      ? "Use more deliberate reasoning for harder prompts."
+                      : "Favor speed and direct answers."}
                   </p>
                 </button>
               ))}
             </div>
 
-            <button
-              onClick={() => setPreferKimiMemory(current => !current)}
-              className="mt-4 flex w-full items-center justify-between rounded-2xl border border-border/25 bg-card/25 px-4 py-3 text-left"
-            >
-              <div>
-                <p className="text-[12px] font-medium text-foreground">
-                  Prefer Kimi memory
-                </p>
-                <p className="mt-1 text-[11px] text-muted-foreground/45">
-                  When enabled, Aura exposes `moonshot/memory:latest` as the primary memory capability.
-                </p>
-              </div>
-              <span
-                className={cn(
-                  "rounded-full px-3 py-1 text-[10px]",
-                  preferKimiMemory
-                    ? "bg-emerald-500/15 text-emerald-200"
-                    : "bg-muted/30 text-muted-foreground/45",
-                )}
-              >
-                {preferKimiMemory ? "enabled" : "disabled"}
-              </span>
-            </button>
+            <ToggleRow
+              title="Prefer Kimi memory"
+              description="Mantiene la estrategia de memoria centrada en Kimi para este perfil."
+              enabled={preferKimiMemory}
+              onToggle={() => setPreferKimiMemory(current => !current)}
+            />
           </Panel>
 
           <Panel
-            title="Official tools"
-            description="Turn Kimi formula tools on or off and add custom entries when needed."
-            icon={<Wrench className="h-4 w-4" />}
+            title="Context toggles"
+            description="Dos switches simples para decidir si este perfil puede apoyarse en web y vault."
+            icon={<DatabaseZap className="h-4 w-4" />}
           >
             <ToggleRow
               title="Web search"
-              description="Expose official web-search to this profile."
+              description="Permite usar b\u00fasqueda web cuando haga falta."
               enabled={webResearchEnabled}
               onToggle={() => setWebResearchEnabled(current => !current)}
             />
             <ToggleRow
-              title="Rethink / scientific mode"
-              description="Expose rethink for research-heavy or analytical turns."
-              enabled={scientificResearchEnabled}
-              onToggle={() => setScientificResearchEnabled(current => !current)}
+              title="Vault context"
+              description="Permite que este perfil use archivos del vault como contexto."
+              enabled={vaultContextEnabled}
+              onToggle={() => setVaultContextEnabled(current => !current)}
             />
-
-            <Field label="Enabled formula tools">
-              <textarea
-                value={formulaToolsText}
-                onChange={event => setFormulaToolsText(event.target.value)}
-                placeholder="moonshot/memory:latest, moonshot/web-search:latest"
-                className="min-h-[90px] w-full rounded-2xl border border-border/25 bg-card/30 p-3 text-[12px] text-foreground outline-none"
-              />
-            </Field>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {DEFAULT_TOOLS.map(tool => (
-                <button
-                  key={tool}
-                  onClick={() => {
-                    if (resolvedTools.includes(tool)) {
-                      return;
-                    }
-                    setFormulaToolsText(current =>
-                      [current, tool].filter(Boolean).join(", "),
-                    );
-                  }}
-                  className="rounded-full border border-border/25 bg-background/40 px-2.5 py-1 text-[10px] text-muted-foreground/55"
-                >
-                  {tool}
-                </button>
-              ))}
-            </div>
           </Panel>
 
           <Panel
-            title="Routing"
-            description="Keep the provider pinned to Kimi or override model selection per profile."
+            title="Response style"
+            description="No cambia el modelo. Solo ordena la forma de responder."
             icon={<Globe className="h-4 w-4" />}
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Preferred provider">
-                <select
-                  value={preferredProviderId ?? ""}
-                  onChange={event => {
-                    const value = event.target.value;
-                    setPreferredProviderId(value ? Number(value) : null);
-                    setPreferredModelId(null);
-                  }}
-                  className="h-10 w-full rounded-2xl border border-border/25 bg-card/30 px-3 text-[12px] text-foreground outline-none"
-                >
-                  <option value="">System default</option>
-                  {providers.map(provider => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Preferred model">
-                <select
-                  value={preferredModelId ?? ""}
-                  onChange={event => {
-                    const value = event.target.value;
-                    setPreferredModelId(value ? Number(value) : null);
-                  }}
-                  className="h-10 w-full rounded-2xl border border-border/25 bg-card/30 px-3 text-[12px] text-foreground outline-none"
-                >
-                  <option value="">System default</option>
-                  {availableModels.map(model => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               {(["concise", "detailed", "academic"] as const).map(style => (
                 <button
                   key={style}
@@ -334,24 +170,13 @@ export default function KimiAgentSettings() {
         <aside className="space-y-4">
           <Panel
             title="Resolved profile"
-            description="Quick view of what this agent will expose to Kimi."
+            description="Vista r\u00e1pida de lo que realmente cambia en este agent."
             icon={<DatabaseZap className="h-4 w-4" />}
           >
             <Info label="Thinking mode" value={thinkingMode} />
-            <Info
-              label="Memory strategy"
-              value={preferKimiMemory ? "Kimi official memory" : "Aura-first memory"}
-            />
-            <Info
-              label="Research tools"
-              value={
-                scientificResearchEnabled
-                  ? "web-search + rethink"
-                  : webResearchEnabled
-                    ? "web-search"
-                    : "manual only"
-              }
-            />
+            <Info label="Memory strategy" value={preferKimiMemory ? "Kimi memory" : "Aura memory"} />
+            <Info label="Web access" value={webResearchEnabled ? "enabled" : "disabled"} />
+            <Info label="Vault context" value={vaultContextEnabled ? "enabled" : "disabled"} />
             <Info label="Response style" value={responseStyle} />
           </Panel>
 
@@ -440,9 +265,7 @@ function ToggleRow({
     >
       <div>
         <p className="text-[12px] font-medium text-foreground">{title}</p>
-        <p className="mt-1 text-[11px] text-muted-foreground/45">
-          {description}
-        </p>
+        <p className="mt-1 text-[11px] text-muted-foreground/45">{description}</p>
       </div>
       <span
         className={cn(

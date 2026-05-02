@@ -3,10 +3,12 @@ import { vaultChunks, vaultFiles } from "../../db/schema.js";
 import { getDb } from "../queries/connection.js";
 import { KimiApiClient } from "../kimi/api-client.js";
 import { buildVaultChunks, computeVaultContentHash } from "./kimi-vault.js";
+import { storeOriginalVaultFile } from "./vault-original-file.js";
 
 const kimiApiClient = new KimiApiClient();
 
 export async function ingestKimiVaultFile(params: {
+  headers: Headers;
   userId: number;
   filename: string;
   fileType: string;
@@ -21,6 +23,13 @@ export async function ingestKimiVaultFile(params: {
   bytes: Uint8Array;
 }) {
   const db = getDb();
+  const originalFileReference = await storeOriginalVaultFile({
+    headers: params.headers,
+    userId: params.userId,
+    filename: params.filename,
+    contentType: params.contentType,
+    bytes: params.bytes,
+  });
   const uploaded = await kimiApiClient.uploadFile({
     filename: params.filename,
     contentType: params.contentType,
@@ -39,6 +48,7 @@ export async function ingestKimiVaultFile(params: {
       size: params.bytes.byteLength,
       status: "ready",
       extractionStatus: "ready",
+      encryptedUrl: originalFileReference,
       remoteFileId: uploaded.id,
       extractedText,
       contentHash,

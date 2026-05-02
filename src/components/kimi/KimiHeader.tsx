@@ -25,29 +25,25 @@ export function KimiHeader({
   description,
 }: {
   title: string;
-  description: string;
+  description?: string;
 }) {
   return (
-    <div className="mb-6 space-y-4">
-      <div className="overflow-hidden rounded-3xl border border-border/40 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.18),transparent_35%),radial-gradient(circle_at_top_right,rgba(56,189,248,0.16),transparent_32%),linear-gradient(180deg,rgba(20,20,25,0.95),rgba(12,12,16,0.92))] p-5 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-2xl">
-            <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-amber-200/65">
-              Aura Kimi V1
+    <div className="mb-4 space-y-3 sm:mb-5">
+      <div className="overflow-hidden rounded-3xl border border-border/40 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.14),transparent_35%),linear-gradient(180deg,rgba(20,20,25,0.95),rgba(12,12,16,0.92))] px-4 py-4 sm:px-5 sm:py-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-amber-200/60">
+              Aura Kimi
             </p>
-            <h1 className="mt-2 text-[24px] font-medium tracking-tight text-white sm:text-[28px]">
+            <h1 className="mt-1 truncate text-[20px] font-medium tracking-tight text-white sm:text-[24px]">
               {title}
             </h1>
-            <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-white/60 sm:text-[13px]">
+          </div>
+          {description ? (
+            <div className="hidden rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-white/55 lg:block">
               {description}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[11px] text-white/60">
-            Kimi-first runtime
-            <div className="mt-1 text-[14px] font-medium text-white">
-              kimi-k2.6 + official tools
             </div>
-          </div>
+          ) : null}
         </div>
       </div>
 
@@ -60,7 +56,7 @@ export function KimiHeader({
               to={tab.to}
               className={({ isActive }) =>
                 cn(
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] transition-colors",
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] transition-colors sm:text-[12px]",
                   isActive
                     ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
                     : "border-border/30 bg-card/25 text-muted-foreground/50 hover:text-foreground",

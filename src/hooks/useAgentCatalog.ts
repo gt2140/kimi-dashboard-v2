@@ -99,19 +99,12 @@ export function useAgentCatalog() {
   async function saveUserSettings(input: {
     slug: string;
     isFavorite?: boolean;
-    isEnabled?: boolean;
     customContext?: string | null;
-    trainingNotes?: string | null;
     responseStyle?: "concise" | "detailed" | "academic";
-    preferredProviderId?: number | null;
-    preferredModelId?: number | null;
     allowVaultContext?: boolean;
     allowWebResearch?: boolean;
-    allowScientificResearch?: boolean;
     kimiThinkingMode?: "enabled" | "disabled";
     preferKimiMemory?: boolean;
-    enabledFormulaTools?: string[];
-    allowedContextOverrides?: string[];
   }) {
     const synced = await ensureBackendSession();
     if (!synced) {

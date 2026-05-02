@@ -7,7 +7,6 @@ import {
   getAgentDefinitionBySlug,
   getUserAgentSetting,
   listAgentDefinitions,
-  listModelProvidersWithEndpoints,
   listUserAgentSettings,
 } from "../queries/agents.js";
 import { getDb } from "../queries/connection.js";
@@ -16,19 +15,12 @@ import { agentDefinitions, userAgentSettings } from "../../db/schema.js";
 const userAgentSettingsInput = z.object({
   slug: z.string().min(1),
   isFavorite: z.boolean().optional(),
-  isEnabled: z.boolean().optional(),
   customContext: z.string().nullable().optional(),
-  trainingNotes: z.string().nullable().optional(),
   responseStyle: z.enum(["concise", "detailed", "academic"]).optional(),
-  preferredProviderId: z.number().int().nullable().optional(),
-  preferredModelId: z.number().int().nullable().optional(),
   allowVaultContext: z.boolean().optional(),
   allowWebResearch: z.boolean().optional(),
-  allowScientificResearch: z.boolean().optional(),
   kimiThinkingMode: z.enum(["enabled", "disabled"]).optional(),
   preferKimiMemory: z.boolean().optional(),
-  enabledFormulaTools: z.array(z.string()).optional(),
-  allowedContextOverrides: z.array(z.string()).optional(),
 });
 
 export const agentsRouter = createRouter({
@@ -49,10 +41,6 @@ export const agentsRouter = createRouter({
         systemPrompt: systemPrompt?.templateText ?? null,
       };
     }),
-
-  listProviders: publicQuery.query(async () => {
-    return listModelProvidersWithEndpoints();
-  }),
 
   listUserSettings: authedQuery.query(async ({ ctx }) => {
     return listUserAgentSettings(ctx.user.id);
@@ -80,19 +68,12 @@ export const agentsRouter = createRouter({
             userId: ctx.user.id,
             agentDefinitionId: agent.id,
             isFavorite: agent.slug === "generalist",
-            isEnabled: true,
             customContext: null,
-            trainingNotes: null,
             responseStyle: "detailed",
-            preferredProviderId: null,
-            preferredModelId: null,
             allowVaultContext: true,
             allowWebResearch: true,
-            allowScientificResearch: false,
             kimiThinkingMode: "enabled",
             preferKimiMemory: true,
-            enabledFormulaTools: [],
-            allowedContextOverrides: [],
           } as const),
       };
     }),
@@ -125,42 +106,20 @@ export const agentsRouter = createRouter({
           agent.slug === "generalist"
             ? true
             : (input.isFavorite ?? (existing[0]?.isFavorite ?? false)),
-        isEnabled: input.isEnabled ?? (existing[0]?.isEnabled ?? true),
         customContext:
           input.customContext !== undefined
             ? input.customContext
             : (existing[0]?.customContext ?? null),
-        trainingNotes:
-          input.trainingNotes !== undefined
-            ? input.trainingNotes
-            : (existing[0]?.trainingNotes ?? null),
         responseStyle:
           input.responseStyle ?? existing[0]?.responseStyle ?? "detailed",
-        preferredProviderId:
-          input.preferredProviderId !== undefined
-            ? input.preferredProviderId
-            : (existing[0]?.preferredProviderId ?? null),
-        preferredModelId:
-          input.preferredModelId !== undefined
-            ? input.preferredModelId
-            : (existing[0]?.preferredModelId ?? null),
         allowVaultContext:
           input.allowVaultContext ?? (existing[0]?.allowVaultContext ?? true),
         allowWebResearch:
           input.allowWebResearch ?? (existing[0]?.allowWebResearch ?? true),
-        allowScientificResearch:
-          input.allowScientificResearch ??
-          (existing[0]?.allowScientificResearch ?? false),
         kimiThinkingMode:
           input.kimiThinkingMode ?? existing[0]?.kimiThinkingMode ?? "enabled",
         preferKimiMemory:
           input.preferKimiMemory ?? (existing[0]?.preferKimiMemory ?? true),
-        enabledFormulaTools:
-          input.enabledFormulaTools ?? existing[0]?.enabledFormulaTools ?? [],
-        allowedContextOverrides:
-          input.allowedContextOverrides ??
-          existing[0]?.allowedContextOverrides ??
-          [],
         updatedAt: new Date(),
       };
 
@@ -171,19 +130,12 @@ export const agentsRouter = createRouter({
           target: [userAgentSettings.userId, userAgentSettings.agentDefinitionId],
           set: {
             isFavorite: nextValues.isFavorite,
-            isEnabled: nextValues.isEnabled,
             customContext: nextValues.customContext,
-            trainingNotes: nextValues.trainingNotes,
             responseStyle: nextValues.responseStyle,
-            preferredProviderId: nextValues.preferredProviderId,
-            preferredModelId: nextValues.preferredModelId,
             allowVaultContext: nextValues.allowVaultContext,
             allowWebResearch: nextValues.allowWebResearch,
-            allowScientificResearch: nextValues.allowScientificResearch,
             kimiThinkingMode: nextValues.kimiThinkingMode,
             preferKimiMemory: nextValues.preferKimiMemory,
-            enabledFormulaTools: nextValues.enabledFormulaTools,
-            allowedContextOverrides: nextValues.allowedContextOverrides,
             updatedAt: nextValues.updatedAt,
           },
         });

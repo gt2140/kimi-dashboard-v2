@@ -75,7 +75,6 @@ export interface VaultFile {
 export interface ChatSession {
   id: string;
   agentId: string;
-  calledAgentIds: string[];
   title: string;
   messages: Message[];
   createdAt: Date;

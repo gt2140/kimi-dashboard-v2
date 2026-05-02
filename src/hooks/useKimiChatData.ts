@@ -5,14 +5,7 @@ import { useChatStore } from "@/hooks/useStore";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
-import {
-  createChatStreamWatchdog,
-  parseChatStreamChunk,
-  type ChatStreamEvent,
-} from "@/lib/chat-stream";
 import type { ChatSession, Message } from "@/types";
-
-const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
 
 function mapConversationSummary(item: {
   id: number;
@@ -20,12 +13,10 @@ function mapConversationSummary(item: {
   title: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
-  calledAgentIds?: string[];
 }): ChatSession {
   return {
     id: String(item.id),
     agentId: item.agentId,
-    calledAgentIds: item.calledAgentIds ?? [],
     title: item.title || "New conversation",
     messages: [],
     createdAt: new Date(item.createdAt),
@@ -55,7 +46,6 @@ export function useKimiChatData() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeAgentId = useChatStore(state => state.activeAgentId);
-  const calledAgentIds = useChatStore(state => state.calledAgentIds);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
   const hydrateConversation = useChatStore(state => state.hydrateConversation);
   const clearChatStore = useChatStore(state => state.clearChat);
@@ -66,13 +56,17 @@ export function useKimiChatData() {
   const activeConversationId = rawConversationId
     ? Number(rawConversationId)
     : null;
+  const authedQueriesEnabled = true;
 
   const utils = trpc.useUtils();
-  const conversationsQuery = trpc.chat.listConversations.useQuery();
+  const conversationsQuery = trpc.chat.listConversations.useQuery(undefined, {
+    enabled: authedQueriesEnabled,
+    retry: false,
+  });
   const conversationQuery = trpc.chat.getConversation.useQuery(
     { id: activeConversationId ?? 0 },
     {
-      enabled: activeConversationId !== null,
+      enabled: activeConversationId !== null && authedQueriesEnabled,
       retry: false,
     },
   );
@@ -98,7 +92,6 @@ export function useKimiChatData() {
     hydrateConversation({
       sessionId: conversation.id,
       agentId: conversation.agentId,
-      calledAgentIds: conversation.calledAgentIds ?? [],
     });
   }, [conversationQuery.data?.conversation, hydrateConversation]);
 
@@ -129,13 +122,6 @@ export function useKimiChatData() {
       return activeConversationId;
     }
 
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
-
     const created = await createConversation.mutateAsync({
       agentId: activeAgentId,
       title: firstMessage ? firstMessage.slice(0, 60) : undefined,
@@ -146,131 +132,78 @@ export function useKimiChatData() {
     return nextId;
   }
 
-  async function streamMessage(
-    content: string,
-    handlers: {
-      onEvent?: (event: ChatStreamEvent) => void;
-      onStage?: (stage: Extract<ChatStreamEvent, { type: "stage" }>) => void;
-      onTextDelta?: (
-        event: Extract<ChatStreamEvent, { type: "text-delta" }>,
-      ) => void;
-      onMessageComplete?: (
-        event: Extract<ChatStreamEvent, { type: "message-complete" }>,
-      ) => void;
-    } = {},
-  ) {
+  async function sendMessage(content: string) {
     const conversationId = await ensureConversationId(content);
-    const synced = await ensureBackendSession();
-
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
 
     setStreamError(null);
     setIsStreaming(true);
-    const streamWatchdog = createChatStreamWatchdog(
-      CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
-      "Kimi chat stream",
-    );
 
     try {
-      const headers = await buildAuthenticatedHeaders(readAccessToken, {
-        "Content-Type": "application/json",
-      });
-      const response = await fetch("/api/kimi/chat/stream", {
-        method: "POST",
-        credentials: "include",
-        signal: streamWatchdog.signal,
-        headers,
-        body: JSON.stringify({
-          conversationId,
-          content,
-          agentId: activeAgentId,
-          calledAgentIds,
-        }),
-      });
+      async function requestResponse(forceSessionRefresh = false) {
+        if (forceSessionRefresh) {
+          await ensureBackendSession({ force: true });
+        }
+
+        const headers = await buildAuthenticatedHeaders(readAccessToken, {
+          "Content-Type": "application/json",
+        });
+        return fetch("/api/kimi/chat", {
+          method: "POST",
+          credentials: "include",
+          headers,
+          body: JSON.stringify({
+            conversationId,
+            content,
+            agentId: activeAgentId,
+          }),
+        });
+      }
+
+      let response = await requestResponse();
+
+      if (response.status === 401) {
+        response = await requestResponse(true);
+      }
 
       if (!response.ok) {
-        throw new Error(`Kimi chat failed with HTTP ${response.status}.`);
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(
+          payload?.error ?? `Kimi chat failed with HTTP ${response.status}.`,
+        );
       }
 
-      if (!response.body) {
-        throw new Error("Kimi chat did not return a readable stream.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let completedMessage:
-        | Extract<ChatStreamEvent, { type: "message-complete" }>["message"]
-        | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        streamWatchdog.touch();
-        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-
-        const parsed = parseChatStreamChunk(buffer);
-        buffer = parsed.remainder;
-
-        for (const event of parsed.events) {
-          handlers.onEvent?.(event);
-
-          if (event.type === "stage") {
-            handlers.onStage?.(event);
-            continue;
-          }
-
-          if (event.type === "text-delta") {
-            handlers.onTextDelta?.(event);
-            continue;
-          }
-
-          if (event.type === "message-complete") {
-            completedMessage = event.message;
-            handlers.onMessageComplete?.(event);
-            continue;
-          }
-
-          if (event.type === "error") {
-            throw new Error(event.message);
-          }
-        }
-
-        if (done) {
-          break;
-        }
-      }
+      const payload = (await response.json()) as {
+        message: {
+          id: string;
+          role: "assistant";
+          content: string;
+          agentId: string;
+          createdAt: string;
+          metadata?: Record<string, unknown>;
+        };
+      };
 
       await Promise.all([
         utils.chat.listConversations.invalidate(),
         utils.chat.getConversation.invalidate({ id: conversationId }),
       ]);
 
-      return completedMessage;
+      return payload.message;
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : "Kimi streaming failed unexpectedly.";
+          : "Kimi chat failed unexpectedly.";
       setStreamError(message);
       throw error;
     } finally {
-      streamWatchdog.cancel();
       setIsStreaming(false);
     }
   }
 
   async function removeConversation(sessionId: string) {
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
-
     const numericId = Number(sessionId);
     await deleteConversationMutation.mutateAsync({ id: numericId });
 
@@ -306,7 +239,7 @@ export function useKimiChatData() {
           : null,
     selectConversation,
     startNewChat,
-    streamMessage,
+    sendMessage,
     removeConversation,
   };
 }

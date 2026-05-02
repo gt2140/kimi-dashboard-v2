@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useChatStore } from "@/hooks/useStore";
 import { useLocalChatStore } from "@/hooks/useLocalChatStore";
+import { postKimiChatMessage } from "@/lib/kimi-chat-api";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { ChatSession, Message } from "@/types";
@@ -123,35 +124,12 @@ export function useKimiChatData() {
     try {
       const activeAgent =
         AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
-      const headers = await buildAuthenticatedHeaders(readAccessToken, {
-        "Content-Type": "application/json",
+      const payload = await postKimiChatMessage({
+        readAccessToken,
+        agentId: activeAgentId,
+        content: content.trim(),
+        systemPrompt: activeAgent.systemPrompt,
       });
-      const response = await fetch("/api/kimi/chat", {
-        method: "POST",
-        credentials: "include",
-        headers,
-        body: JSON.stringify({
-          agentId: activeAgentId,
-          content: content.trim(),
-          systemPrompt: activeAgent.systemPrompt,
-        }),
-      });
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(
-          payload?.error ?? `Kimi chat failed with HTTP ${response.status}.`,
-        );
-      }
-
-      const payload = (await response.json()) as {
-        message: {
-          content: string;
-          metadata?: Message["metadata"];
-        };
-      };
 
       const conversation = saveTurn({
         conversationId: activeConversationId,

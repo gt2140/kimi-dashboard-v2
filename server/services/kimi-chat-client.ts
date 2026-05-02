@@ -1,4 +1,7 @@
 import { env } from "../lib/env.js";
+import { withAbortableTimeout } from "./async-guard.js";
+
+const KIMI_CHAT_TIMEOUT_MS = 30_000;
 
 type KimiChatPayload = {
   model?: string;
@@ -33,30 +36,38 @@ export async function requestKimiChatCompletion(params: {
   message: string;
   userId: number;
 }) {
-  const response = await fetch(`${getBaseUrl()}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${getApiKey()}`,
-      "Content-Type": "application/json",
+  const response = await withAbortableTimeout(
+    signal =>
+      fetch(`${getBaseUrl()}/chat/completions`, {
+        signal,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${getApiKey()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: env.kimiModel || "kimi-k2.6",
+          messages: [
+            {
+              role: "system",
+              content: params.systemPrompt,
+            },
+            {
+              role: "user",
+              content: params.message,
+            },
+          ],
+          safety_identifier: `user-${params.userId}`,
+          thinking: {
+            type: "disabled",
+          },
+        }),
+      }),
+    {
+      label: "Kimi chat completion",
+      timeoutMs: KIMI_CHAT_TIMEOUT_MS,
     },
-    body: JSON.stringify({
-      model: env.kimiModel || "kimi-k2.6",
-      messages: [
-        {
-          role: "system",
-          content: params.systemPrompt,
-        },
-        {
-          role: "user",
-          content: params.message,
-        },
-      ],
-      safety_identifier: `user-${params.userId}`,
-      thinking: {
-        type: "disabled",
-      },
-    }),
-  });
+  );
 
   if (!response.ok) {
     const body = await response.text();

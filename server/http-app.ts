@@ -4,6 +4,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { createContext } from "./trpc/context.js";
 import { appRouter } from "./trpc/router.js";
 import { authenticateRequest } from "./trpc/auth.js";
+import { logServerDebug, logServerError } from "./lib/debug.js";
 import { requestKimiChatCompletion } from "./services/kimi-chat-client.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
@@ -43,10 +44,21 @@ app.post("/api/kimi/chat", async c => {
   }
 
   try {
+    logServerDebug("kimi.chat.start", {
+      userId: user.id,
+      agentId: body.agentId,
+    });
+
     const reply = await requestKimiChatCompletion({
       systemPrompt: body.systemPrompt,
       message: body.content.trim(),
       userId: user.id,
+    });
+
+    logServerDebug("kimi.chat.success", {
+      userId: user.id,
+      agentId: body.agentId,
+      model: reply.model,
     });
 
     return c.json({
@@ -63,6 +75,11 @@ app.post("/api/kimi/chat", async c => {
       },
     });
   } catch (error) {
+    logServerError("kimi.chat.failed", error, {
+      userId: user.id,
+      agentId: body.agentId,
+    });
+
     return c.json(
       {
         error:

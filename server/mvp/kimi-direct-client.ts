@@ -1,4 +1,6 @@
 import { env } from "../lib/env.js";
+import { logServerDebug, logServerError } from "../lib/debug.js";
+import { withAbortableTimeout } from "../services/async-guard.js";
 
 type KimiReply = {
   content: string;
@@ -50,28 +52,37 @@ export class KimiDirectClient {
     messages: KimiChatMessage[];
     userId: number;
   }): Promise<KimiReply> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort(new Error("Kimi direct request timed out after 30000ms."));
-    }, 30_000);
+    logServerDebug("kimi.direct.request.start", {
+      userId: params.userId,
+      messageCount: params.messages.length,
+      model: env.kimiModel || "kimi-k2.6",
+    });
 
     try {
-      const response = await fetch(`${getBaseUrl()}/v1/chat/completions`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${getApiKey()}`,
-          "Content-Type": "application/json",
+      const response = await withAbortableTimeout(
+        signal =>
+          fetch(`${getBaseUrl()}/v1/chat/completions`, {
+            method: "POST",
+            signal,
+            headers: {
+              Authorization: `Bearer ${getApiKey()}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: env.kimiModel || "kimi-k2.6",
+              messages: params.messages,
+              safety_identifier: `user-${params.userId}`,
+              max_completion_tokens: 800,
+              thinking: {
+                type: "disabled",
+              },
+            }),
+          }),
+        {
+          label: "Kimi direct request",
+          timeoutMs: 45_000,
         },
-        body: JSON.stringify({
-          model: env.kimiModel || "kimi-k2.6",
-          messages: params.messages,
-          safety_identifier: `user-${params.userId}`,
-          thinking: {
-            type: "disabled",
-          },
-        }),
-      });
+      );
 
       if (!response.ok) {
         const body = await response.text();
@@ -87,6 +98,12 @@ export class KimiDirectClient {
         throw new Error("Kimi returned an empty assistant message.");
       }
 
+      logServerDebug("kimi.direct.request.success", {
+        userId: params.userId,
+        model: payload.model ?? env.kimiModel ?? "kimi-k2.6",
+        outputTokens: payload.usage?.completion_tokens,
+      });
+
       return {
         content,
         model: payload.model ?? env.kimiModel ?? "kimi-k2.6",
@@ -98,8 +115,12 @@ export class KimiDirectClient {
           cachedTokens: payload.usage?.cached_tokens,
         },
       };
-    } finally {
-      clearTimeout(timeoutId);
+    } catch (error) {
+      logServerError("kimi.direct.request.failed", error, {
+        userId: params.userId,
+        model: env.kimiModel || "kimi-k2.6",
+      });
+      throw error;
     }
   }
 }

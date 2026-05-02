@@ -1,4 +1,5 @@
 import { AGENTS } from "../../src/lib/data.js";
+import { logServerDebug } from "../lib/debug.js";
 import { MvpChatStore } from "./chat-store.js";
 import { KimiDirectClient } from "./kimi-direct-client.js";
 
@@ -14,6 +15,12 @@ export class MvpChatTurnService {
     agentId: string;
     userId: number;
   }) {
+    logServerDebug("kimi.chat-turn.start", {
+      userId: params.userId,
+      conversationId: params.conversationId,
+      agentId: params.agentId,
+    });
+
     const conversation = await this.store.requireConversation(
       params.userId,
       params.conversationId,
@@ -30,6 +37,12 @@ export class MvpChatTurnService {
     const recentMessages = await this.store.listRecentMessages(
       params.conversationId,
     );
+
+    logServerDebug("kimi.chat-turn.context.ready", {
+      conversationId: params.conversationId,
+      recentMessageCount: recentMessages.length,
+      agentId: agent.id,
+    });
 
     const reply = await this.kimiClient.respond({
       messages: [
@@ -62,6 +75,12 @@ export class MvpChatTurnService {
       currentTitle: conversation.title,
       agentId: params.agentId,
       userMessage: params.content,
+    });
+
+    logServerDebug("kimi.chat-turn.success", {
+      userId: params.userId,
+      conversationId: params.conversationId,
+      agentId: params.agentId,
     });
 
     return {

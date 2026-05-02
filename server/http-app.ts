@@ -8,8 +8,10 @@ import { chatSendMessageInputSchema } from "./trpc/chat-router.js";
 import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
 import { and, eq } from "drizzle-orm";
 import { vaultFiles } from "../db/schema.js";
+import { logServerDebug, logServerError } from "./lib/debug.js";
 import { getDb } from "./queries/connection.js";
 import { readOriginalVaultFile } from "./services/vault-original-file.js";
+import { withTimeout } from "./services/async-guard.js";
 import { MvpChatStore } from "./mvp/chat-store.js";
 import { KimiDirectClient } from "./mvp/kimi-direct-client.js";
 import { MvpChatTurnService } from "./mvp/chat-turn-service.js";
@@ -51,15 +53,37 @@ app.post("/api/kimi/chat", async c => {
   }
 
   try {
-    const message = await mvpChatTurnService.execute({
-      conversationId: parsed.data.conversationId,
-      content: parsed.data.content,
-      agentId: parsed.data.agentId,
+    logServerDebug("kimi.chat.http.start", {
       userId: user.id,
+      conversationId: parsed.data.conversationId,
+      agentId: parsed.data.agentId,
+    });
+
+    const message = await withTimeout(
+      mvpChatTurnService.execute({
+        conversationId: parsed.data.conversationId,
+        content: parsed.data.content,
+        agentId: parsed.data.agentId,
+        userId: user.id,
+      }),
+      {
+        label: "Kimi chat request",
+        timeoutMs: 60_000,
+      },
+    );
+
+    logServerDebug("kimi.chat.http.success", {
+      userId: user.id,
+      conversationId: parsed.data.conversationId,
     });
 
     return c.json({ message });
   } catch (error) {
+    logServerError("kimi.chat.http.failed", error, {
+      userId: user.id,
+      conversationId: parsed.data.conversationId,
+      agentId: parsed.data.agentId,
+    });
     return c.json(
       {
         error:

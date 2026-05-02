@@ -95,6 +95,41 @@ app.post("/api/kimi/chat", async c => {
     );
   }
 });
+app.get("/api/kimi/health", async c => {
+  try {
+    const reply = await withTimeout(
+      new KimiDirectClient().respond({
+        userId: 0,
+        messages: [
+          { role: "system", content: "Reply with exactly: ok" },
+          { role: "user", content: "healthcheck" },
+        ],
+      }),
+      {
+        label: "Kimi healthcheck",
+        timeoutMs: 20_000,
+      },
+    );
+
+    return c.json({
+      ok: true,
+      model: reply.model,
+      content: reply.content,
+    });
+  } catch (error) {
+    logServerError("kimi.health.failed", error);
+    return c.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Kimi healthcheck failed unexpectedly.",
+      },
+      500,
+    );
+  }
+});
 app.post("/api/kimi/vault/upload", async c => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 

@@ -144,19 +144,30 @@ export function useKimiChatData() {
           await ensureBackendSession({ force: true });
         }
 
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => {
+          controller.abort("Kimi chat request timed out.");
+        }, 70_000);
+
         const headers = await buildAuthenticatedHeaders(readAccessToken, {
           "Content-Type": "application/json",
         });
-        return fetch("/api/kimi/chat", {
-          method: "POST",
-          credentials: "include",
-          headers,
-          body: JSON.stringify({
-            conversationId,
-            content,
-            agentId: activeAgentId,
-          }),
-        });
+
+        try {
+          return await fetch("/api/kimi/chat", {
+            method: "POST",
+            credentials: "include",
+            headers,
+            signal: controller.signal,
+            body: JSON.stringify({
+              conversationId,
+              content,
+              agentId: activeAgentId,
+            }),
+          });
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
       }
 
       let response = await requestResponse();
@@ -193,7 +204,9 @@ export function useKimiChatData() {
       return payload.message;
     } catch (error) {
       const message =
-        error instanceof Error
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Kimi is taking too long to answer. Please try again."
+          : error instanceof Error
           ? error.message
           : "Kimi chat failed unexpectedly.";
       setStreamError(message);

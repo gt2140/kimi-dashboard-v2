@@ -35,6 +35,7 @@ export default function KimiChat() {
     error,
     startNewChat,
     sendMessage,
+    retryLastTurn,
   } = useKimiChatData();
 
   const [input, setInput] = useState("");
@@ -44,6 +45,10 @@ export default function KimiChat() {
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
 
   const displayedMessages = useMemo(() => messages, [messages]);
+  const hasPendingAssistantReply =
+    displayedMessages.length > 0 &&
+    displayedMessages[displayedMessages.length - 1]?.role === "user" &&
+    !isSending;
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -112,6 +117,21 @@ export default function KimiChat() {
             <EmptyState onShortcutClick={setInput} />
           ) : (
             <div className="mx-auto max-w-3xl space-y-5 sm:space-y-6">
+              {hasPendingAssistantReply && (
+                <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-[12px] text-amber-100/85">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>The last reply did not finish. You can retry it.</span>
+                    <button
+                      onClick={() => {
+                        void retryLastTurn();
+                      }}
+                      className="inline-flex items-center justify-center rounded-full border border-amber-300/25 px-3 py-1.5 text-[11px] transition-colors hover:bg-amber-300/10"
+                    >
+                      Retry reply
+                    </button>
+                  </div>
+                </div>
+              )}
               {displayedMessages.map(message => (
                 <KimiMessageBubble key={message.id} message={message} />
               ))}

@@ -216,6 +216,54 @@ export function useKimiChatData() {
     }
   }
 
+  async function retryLastTurn() {
+    if (activeConversationId === null) {
+      throw new Error("No active conversation to retry.");
+    }
+
+    setStreamError(null);
+    setIsStreaming(true);
+
+    try {
+      const headers = await buildAuthenticatedHeaders(readAccessToken, {
+        "Content-Type": "application/json",
+      });
+
+      const response = await fetch("/api/kimi/chat/retry", {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: JSON.stringify({
+          conversationId: activeConversationId,
+          agentId: activeAgentId,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(
+          payload?.error ?? `Kimi retry failed with HTTP ${response.status}.`,
+        );
+      }
+
+      await Promise.all([
+        utils.chat.listConversations.invalidate(),
+        utils.chat.getConversation.invalidate({ id: activeConversationId }),
+      ]);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Kimi retry failed unexpectedly.";
+      setStreamError(message);
+      throw error;
+    } finally {
+      setIsStreaming(false);
+    }
+  }
+
   async function removeConversation(sessionId: string) {
     const numericId = Number(sessionId);
     await deleteConversationMutation.mutateAsync({ id: numericId });
@@ -253,6 +301,7 @@ export function useKimiChatData() {
     selectConversation,
     startNewChat,
     sendMessage,
+    retryLastTurn,
     removeConversation,
   };
 }

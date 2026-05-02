@@ -95,6 +95,61 @@ app.post("/api/kimi/chat", async c => {
     );
   }
 });
+app.post("/api/kimi/chat/retry", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = chatSendMessageInputSchema
+    .pick({ conversationId: true, agentId: true })
+    .safeParse(body);
+
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: "Invalid request body.",
+        details: parsed.error.flatten(),
+      },
+      400,
+    );
+  }
+
+  try {
+    const message = await withTimeout(
+      mvpChatTurnService.retryLastUserTurn({
+        conversationId: parsed.data.conversationId,
+        agentId: parsed.data.agentId,
+        userId: user.id,
+      }),
+      {
+        label: "Kimi retry request",
+        timeoutMs: 60_000,
+      },
+    );
+
+    return c.json({ message });
+  } catch (error) {
+    logServerError("kimi.chat.retry.failed", error, {
+      userId: user.id,
+      conversationId: parsed.data.conversationId,
+      agentId: parsed.data.agentId,
+    });
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Kimi retry failed unexpectedly.",
+      },
+      500,
+    );
+  }
+});
 app.get("/api/kimi/health", async c => {
   try {
     const reply = await withTimeout(

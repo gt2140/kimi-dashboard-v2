@@ -83,6 +83,23 @@ export class MvpChatStore {
     };
   }
 
+  async getLastMessage(conversationId: number) {
+    const rows = await getDb()
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
+
+    const message = rows[0];
+    return message
+      ? {
+          ...message,
+          metadata: parseMetadata(message.metadata),
+        }
+      : null;
+  }
+
   async createConversation(params: {
     userId: number;
     agentId: string;

@@ -1,11 +1,14 @@
 import { AGENTS } from "../../src/lib/data.js";
 import { buildConversationTitle, MvpChatStore } from "./chat-store.js";
 import { KimiDirectClient } from "./kimi-direct-client.js";
+import { MedicalResearchService } from "../services/medical-research.js";
+import { buildMedicalResearchPrompt } from "../services/medical-synthesis.js";
 
 export class MvpChatTurnService {
   constructor(
     private readonly store: MvpChatStore,
     private readonly kimiClient: KimiDirectClient,
+    private readonly medicalResearchService = new MedicalResearchService(),
   ) {}
 
   async execute(params: {
@@ -40,12 +43,23 @@ export class MvpChatTurnService {
     const recentMessages = await this.store.listRecentMessages(
       conversationId,
     );
+    const medicalEvidence =
+      params.agentId === "research-synthesizer"
+        ? await this.medicalResearchService.search(params.content)
+        : [];
+    const systemPrompt =
+      params.agentId === "research-synthesizer"
+        ? buildMedicalResearchPrompt({
+            userQuestion: params.content,
+            evidence: medicalEvidence,
+          })
+        : agent.systemPrompt;
 
     const reply = await this.kimiClient.respond({
       messages: [
         {
           role: "system",
-          content: agent.systemPrompt,
+          content: systemPrompt,
         },
         ...recentMessages,
       ],
@@ -62,6 +76,15 @@ export class MvpChatTurnService {
         modelName: reply.model,
         finishReason: reply.finishReason,
         usage: reply.usage,
+        researchEvidence:
+          medicalEvidence.length === 0
+            ? undefined
+            : medicalEvidence.map(item => ({
+                source: item.source,
+                title: item.title,
+                url: item.url,
+                citation: item.citation,
+              })),
       },
     });
 
@@ -85,6 +108,15 @@ export class MvpChatTurnService {
         modelName: reply.model,
         finishReason: reply.finishReason,
         usage: reply.usage,
+        researchEvidence:
+          medicalEvidence.length === 0
+            ? undefined
+            : medicalEvidence.map(item => ({
+                source: item.source,
+                title: item.title,
+                url: item.url,
+                citation: item.citation,
+              })),
       },
     };
   }

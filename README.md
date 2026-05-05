@@ -7,12 +7,24 @@ This stabilized MVP supports:
 - backend session synchronization with an app cookie
 - persisted user conversations
 - persisted vault metadata per authenticated user
+- medical research synthesis for the `Research Synthesizer` agent using public PubMed and ClinicalTrials evidence
 
 Out of scope for the stable MVP:
 
 - predictions / token economy
 - persistent per-agent settings
 - real vault file upload, parsing, or retrieval beyond metadata
+
+## Medical research synthesis
+
+The `research-synthesizer` agent now performs a lightweight evidence pass before model synthesis:
+
+- queries PubMed for recent relevant literature metadata
+- queries ClinicalTrials.gov for matching public trial records
+- injects those sources into a guarded synthesis prompt with explicit safety language
+- stores the evidence metadata alongside the assistant response
+
+This layer is educational and evidence-oriented. It is not a diagnostic engine and does not integrate private EHR/FHIR systems in this version.
 
 ## Local development
 

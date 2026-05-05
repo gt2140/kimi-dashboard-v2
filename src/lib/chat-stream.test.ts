@@ -73,6 +73,11 @@ describe("chat-stream", () => {
     ).toBe(true);
     expect(
       isRecoverableChatStreamError(
+        new Error("BodyStreamBuffer was aborted")
+      )
+    ).toBe(true);
+    expect(
+      isRecoverableChatStreamError(
         new Error("Streaming request failed with HTTP 503.")
       )
     ).toBe(true);

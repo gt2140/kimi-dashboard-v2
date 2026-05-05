@@ -16,31 +16,38 @@ const TURN_STAGE_COPY: Record<
   {
     analyze: string;
     context: string;
+    draft?: string;
   }
 > = {
   generalist: {
-    analyze: "Mapping the full picture",
-    context: "Reviewing your context",
+    analyze: "Thinking through your question",
+    context: "Checking your context",
+    draft: "Writing the reply",
   },
   bloodwork: {
     analyze: "Checking marker patterns",
-    context: "Reviewing lab context",
+    context: "Checking lab context",
+    draft: "Writing the lab summary",
   },
   nutrition: {
     analyze: "Looking at intake and metabolism",
-    context: "Reviewing nutrition context",
+    context: "Checking nutrition context",
+    draft: "Writing the nutrition summary",
   },
   supplements: {
     analyze: "Reviewing stack and interactions",
     context: "Checking supplement context",
+    draft: "Writing the recommendation",
   },
   peptides: {
     analyze: "Checking protocol and safety",
-    context: "Reviewing peptide context",
+    context: "Checking peptide context",
+    draft: "Writing the protocol notes",
   },
   psychedelics: {
     analyze: "Reviewing safety and setting",
     context: "Checking mental health context",
+    draft: "Writing the guidance",
   },
 };
 
@@ -154,8 +161,9 @@ function predictSupportingAgentIds(input: BuildPendingTurnStagesInput) {
 function getTurnStageCopy(primaryAgentId: string) {
   return (
     TURN_STAGE_COPY[primaryAgentId] ?? {
-      analyze: "Analyzing your message",
-      context: "Reviewing available context",
+      analyze: "Thinking through your question",
+      context: "Checking available context",
+      draft: "Writing the reply",
     }
   );
 }
@@ -181,7 +189,7 @@ export function buildPendingTurnStages(
     })),
     {
       id: "draft",
-      label: "Drafting the answer",
+      label: stageCopy.draft ?? "Writing the reply",
     },
   ];
 }

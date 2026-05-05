@@ -82,6 +82,8 @@ export function isRecoverableChatStreamError(error: unknown) {
 
   if (
     normalized.includes("this operation was aborted") ||
+    normalized.includes("bodystreambuffer was aborted") ||
+    normalized.includes("was aborted") ||
     normalized.includes("failed to fetch") ||
     normalized.includes("network") ||
     normalized.includes("timed out")

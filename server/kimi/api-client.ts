@@ -130,6 +130,7 @@ export class KimiApiClient {
     const decoder = new TextDecoder();
     let buffer = "";
     let finalPayload: KimiCompletionResponse = {};
+    let streamedContent = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -141,6 +142,7 @@ export class KimiApiClient {
         const choice = payload.choices?.[0];
         const delta = choice && "delta" in choice ? (choice as { delta?: { content?: string } }).delta : undefined;
         if (delta?.content) {
+          streamedContent += delta.content;
           await handlers.onTextDelta?.(delta.content);
         }
 
@@ -152,9 +154,7 @@ export class KimiApiClient {
                 finish_reason: choice.finish_reason,
                 message: {
                   role: "assistant",
-                  content:
-                    (finalPayload.choices?.[0]?.message?.content ?? "") +
-                    collectedContentFromPayloads(parsed.payloads),
+                  content: streamedContent,
                 },
               },
             ],
@@ -168,7 +168,6 @@ export class KimiApiClient {
     }
 
     if (!finalPayload.choices?.[0]?.message?.content) {
-      const allContent = collectedContentFromPayloads(parseKimiSseBuffer(buffer).payloads);
       finalPayload = {
         ...finalPayload,
         choices: [
@@ -176,7 +175,7 @@ export class KimiApiClient {
             finish_reason: finalPayload.choices?.[0]?.finish_reason ?? "stop",
             message: {
               role: "assistant",
-              content: allContent,
+              content: streamedContent,
             },
           },
         ],
@@ -246,13 +245,6 @@ function parseKimiSseBuffer(buffer: string) {
     payloads,
     remainder,
   };
-}
-
-function collectedContentFromPayloads(payloads: Array<Record<string, any>>) {
-  return payloads
-    .map(payload => payload?.choices?.[0]?.delta?.content)
-    .filter((value): value is string => typeof value === "string")
-    .join("");
 }
 
 export type { KimiCompletionResponse, KimiUploadedFile };

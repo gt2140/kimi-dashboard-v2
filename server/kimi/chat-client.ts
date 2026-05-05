@@ -10,7 +10,7 @@ type KimiToolCall = {
 type KimiMessage =
   | {
       role: "system" | "user" | "assistant" | "tool";
-      content: string;
+      content?: string;
       name?: string;
       tool_call_id?: string;
       tool_calls?: KimiToolCall[];
@@ -35,7 +35,7 @@ type BuildKimiChatRequestInput = {
   systemPrompt?: string | null;
   messages: Array<{
     role: "user" | "assistant" | "tool";
-    content: string;
+    content?: string;
     name?: string;
     toolCallId?: string;
     toolCalls?: KimiToolCall[];
@@ -109,7 +109,7 @@ export function buildKimiChatRequest(
         : []),
       ...input.messages.map(message => ({
         role: message.role,
-        content: message.content,
+        ...(typeof message.content === "string" ? { content: message.content } : {}),
         ...(message.name ? { name: message.name } : {}),
         ...(message.toolCallId
           ? { tool_call_id: message.toolCallId }

@@ -16,15 +16,21 @@ type StreamMessage = {
 
 export class TurnStreamController {
   private terminal = false;
+  private writerClosed = false;
 
   constructor(private readonly writer: StreamWriter) {}
+
+  disconnect() {
+    this.terminal = true;
+    this.closeSafely();
+  }
 
   emitStage(stage: { id: string; label: string }) {
     if (this.terminal) {
       return;
     }
 
-    this.writer.write(
+    this.writeSafely(
       encodeChatStreamEvent({
         type: "stage",
         stageId: stage.id,
@@ -38,7 +44,7 @@ export class TurnStreamController {
       return;
     }
 
-    this.writer.write(
+    this.writeSafely(
       encodeChatStreamEvent({
         type: "text-delta",
         delta,
@@ -52,13 +58,13 @@ export class TurnStreamController {
     }
 
     this.terminal = true;
-    this.writer.write(
+    this.writeSafely(
       encodeChatStreamEvent({
         type: "message-complete",
         message,
       })
     );
-    this.writer.close();
+    this.closeSafely();
   }
 
   fail(message: string) {
@@ -67,12 +73,38 @@ export class TurnStreamController {
     }
 
     this.terminal = true;
-    this.writer.write(
+    this.writeSafely(
       encodeChatStreamEvent({
         type: "error",
         message,
       })
     );
-    this.writer.close();
+    this.closeSafely();
+  }
+
+  private writeSafely(payload: string) {
+    if (this.writerClosed) {
+      return;
+    }
+
+    try {
+      this.writer.write(payload);
+    } catch {
+      this.writerClosed = true;
+    }
+  }
+
+  private closeSafely() {
+    if (this.writerClosed) {
+      return;
+    }
+
+    this.writerClosed = true;
+
+    try {
+      this.writer.close();
+    } catch {
+      // Ignore disconnect races from the HTTP body consumer.
+    }
   }
 }

@@ -50,6 +50,16 @@ export interface Message {
     requestedModelName?: string;
     inputTokens?: number;
     outputTokens?: number;
+    runtimeVersion?: "classic" | "aura-medical-v1";
+    medicalMode?: "personal-health" | "research";
+    policyLevel?: "interpretive-on-request";
+    reasoningProfile?: string;
+    researchEvidence?: Array<{
+      source: "pubmed" | "clinicaltrials";
+      title: string;
+      url: string;
+      citation?: string;
+    }>;
   };
 }
 

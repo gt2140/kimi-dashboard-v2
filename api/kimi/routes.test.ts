@@ -19,4 +19,9 @@ describe("Kimi Vercel route handlers", () => {
     const mod = await import("./vault/file/[id].ts");
     expect(typeof mod.default).toBe("function");
   });
+
+  it("exposes the Aura medical chat stream handler", async () => {
+    const mod = await import("../aura-medical/chat/stream.ts");
+    expect(typeof mod.default).toBe("function");
+  });
 });

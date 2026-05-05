@@ -26,6 +26,9 @@ export const chatSendMessageInputSchema = z.object({
   content: z.string().min(1),
   agentId: z.string(),
   calledAgentIds: z.array(z.string()).default([]),
+  runtimeVersion: z.enum(["classic", "aura-medical-v1"]).optional(),
+  medicalMode: z.enum(["personal-health", "research"]).optional(),
+  policyLevel: z.enum(["interpretive-on-request"]).optional(),
 });
 
 export type ChatSendMessageInput = z.infer<typeof chatSendMessageInputSchema>;
@@ -49,6 +52,20 @@ const chatMetadataSchema = z
     requestedModelName: z.string().optional(),
     inputTokens: z.number().optional(),
     outputTokens: z.number().optional(),
+    runtimeVersion: z.enum(["classic", "aura-medical-v1"]).optional(),
+    medicalMode: z.enum(["personal-health", "research"]).optional(),
+    policyLevel: z.enum(["interpretive-on-request"]).optional(),
+    reasoningProfile: z.string().optional(),
+    researchEvidence: z
+      .array(
+        z.object({
+          source: z.enum(["pubmed", "clinicaltrials"]),
+          title: z.string(),
+          url: z.string(),
+          citation: z.string().optional(),
+        }),
+      )
+      .optional(),
   })
   .optional();
 

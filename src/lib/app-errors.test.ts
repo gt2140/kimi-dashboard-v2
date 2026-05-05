@@ -21,6 +21,9 @@ describe("formatRuntimeError", () => {
     expect(
       formatRuntimeError(new Error("This operation was aborted"), "Chat")
     ).toBe("Network error: the request was interrupted. Try again.");
+    expect(
+      formatRuntimeError(new Error("BodyStreamBuffer was aborted"), "Chat")
+    ).toBe("Network error: the request was interrupted. Try again.");
   });
 
   it("normalizes auth provider timeouts into retry guidance", () => {

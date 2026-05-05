@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useKimiChatData } from "@/hooks/useKimiChatData";
 import { useChatStore } from "@/hooks/useStore";
+import { resolveAuraRuntimeOptions } from "@/lib/aura-runtime";
 import { AGENTS } from "@/lib/data";
 import {
   buildPendingTurnStages,
@@ -32,6 +33,7 @@ const allIcons: Record<string, React.ReactNode> = {
 
 type StreamingAssistant = {
   content: string;
+  metadata?: Message["metadata"];
 };
 
 type KimiMetadata = Message["metadata"] & {
@@ -58,6 +60,11 @@ const SHORTCUTS = [
 export default function KimiChat() {
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const calledAgentIds = useChatStore(state => state.calledAgentIds);
+  const runtimeVersion = useChatStore(state => state.runtimeVersion);
+  const medicalMode = useChatStore(state => state.medicalMode);
+  const policyLevel = useChatStore(state => state.policyLevel);
+  const setRuntimeVersion = useChatStore(state => state.setRuntimeVersion);
+  const setMedicalMode = useChatStore(state => state.setMedicalMode);
   const callAgent = useChatStore(state => state.callAgent);
   const removeCalledAgent = useChatStore(state => state.removeCalledAgent);
   const clearChat = useChatStore(state => state.clearChat);
@@ -77,9 +84,15 @@ export default function KimiChat() {
   const [streamingAssistant, setStreamingAssistant] =
     useState<StreamingAssistant | null>(null);
   const [showHelperPicker, setShowHelperPicker] = useState(false);
+  const hasReceivedRuntimeStageRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
+  const runtime = resolveAuraRuntimeOptions({
+    runtimeVersion,
+    medicalMode,
+    policyLevel,
+  });
   const availableHelpers = AGENTS.filter(
     agent => agent.id !== activeAgentId && !calledAgentIds.includes(agent.id),
   );
@@ -97,6 +110,7 @@ export default function KimiChat() {
         content: streamingAssistant.content,
         agentId: activeAgentId,
         timestamp: new Date(),
+        metadata: streamingAssistant.metadata,
       },
     ];
   }, [activeAgentId, messages, streamingAssistant]);
@@ -108,6 +122,21 @@ export default function KimiChat() {
   useEffect(() => {
     scrollToBottom();
   }, [displayedMessages, pendingUserMessage, pendingStages, scrollToBottom]);
+
+  useEffect(() => {
+    if (!streamingAssistant || messages.length === 0) {
+      return;
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    if (
+      lastMessage?.role === "assistant" &&
+      lastMessage.content.trim() &&
+      lastMessage.content.trim() === streamingAssistant.content.trim()
+    ) {
+      setStreamingAssistant(null);
+    }
+  }, [messages, streamingAssistant]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -135,16 +164,27 @@ export default function KimiChat() {
     setPendingStages(predictedStages);
     setActiveStageIndex(0);
     setStreamingAssistant(null);
+    hasReceivedRuntimeStageRef.current = false;
     setInput("");
 
     try {
       await streamMessage(content, {
         onStage: stage => {
           setPendingStages(current => {
+            if (!hasReceivedRuntimeStageRef.current) {
+              hasReceivedRuntimeStageRef.current = true;
+              setActiveStageIndex(0);
+              return [{ id: stage.stageId, label: stage.label }];
+            }
+
             const existingIndex = current.findIndex(item => item.id === stage.stageId);
             if (existingIndex >= 0) {
               setActiveStageIndex(existingIndex);
-              return current;
+              return current.map((item, index) =>
+                index === existingIndex
+                  ? { id: stage.stageId, label: stage.label }
+                  : item,
+              );
             }
 
             const next = [...current, { id: stage.stageId, label: stage.label }];
@@ -153,12 +193,24 @@ export default function KimiChat() {
           });
         },
         onTextDelta: event => {
+          const draftStageIndex = predictedStages.findIndex(
+            item => item.id === "draft",
+          );
+
+          if (draftStageIndex >= 0) {
+            setActiveStageIndex(current => Math.max(current, draftStageIndex));
+          }
+
           setStreamingAssistant(current => ({
             content: `${current?.content ?? ""}${event.delta}`,
+            metadata: current?.metadata,
           }));
         },
-        onMessageComplete: () => {
-          setStreamingAssistant(null);
+        onMessageComplete: event => {
+          setStreamingAssistant({
+            content: event.message.content,
+            metadata: event.message.metadata,
+          });
         },
       });
     } finally {
@@ -174,7 +226,9 @@ export default function KimiChat() {
           <div className="flex items-center justify-between border-b border-border/30 px-4 py-3">
             <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
-                Kimi chat
+                {runtime.runtimeVersion === "aura-medical-v1"
+                  ? "Aura medical runtime"
+                  : "Kimi chat"}
               </p>
               <div className="mt-1 flex items-center gap-2 text-[14px] text-foreground">
                 <span className={cn("text-amber-200/85", activeAgent.color)}>
@@ -183,7 +237,9 @@ export default function KimiChat() {
                 <span className="truncate">{activeAgent.name}</span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/45">
-                Memoria, vault y tools en una vista mas compacta.
+                {runtime.runtimeVersion === "aura-medical-v1"
+                  ? "Modo dual para personal health y research con policy conservadora por defecto."
+                  : "Memoria, vault y tools en una vista mas compacta."}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -203,6 +259,39 @@ export default function KimiChat() {
               >
                 New chat
               </button>
+            </div>
+          </div>
+
+          <div className="border-b border-border/25 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <RuntimeChip
+                active={runtime.runtimeVersion === "aura-medical-v1"}
+                onClick={() => setRuntimeVersion("aura-medical-v1")}
+              >
+                Aura Medical V1
+              </RuntimeChip>
+              <RuntimeChip
+                active={runtime.runtimeVersion === "classic"}
+                onClick={() => setRuntimeVersion("classic")}
+              >
+                Classic Kimi
+              </RuntimeChip>
+              <div className="mx-1 hidden h-4 w-px bg-border/40 sm:block" />
+              <RuntimeChip
+                active={runtime.medicalMode === "personal-health"}
+                onClick={() => setMedicalMode("personal-health")}
+              >
+                Personal Health
+              </RuntimeChip>
+              <RuntimeChip
+                active={runtime.medicalMode === "research"}
+                onClick={() => setMedicalMode("research")}
+              >
+                Research
+              </RuntimeChip>
+              <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] text-emerald-100/80">
+                policy {runtime.policyLevel}
+              </span>
             </div>
           </div>
 
@@ -318,7 +407,13 @@ export default function KimiChat() {
                     void handleSend();
                   }
                 }}
-                placeholder="Preguntale a Aura usando Kimi, memory y vault..."
+                placeholder={
+                  runtime.runtimeVersion === "aura-medical-v1"
+                    ? runtime.medicalMode === "research"
+                      ? "Preguntale a Aura por evidencia, PubMed, trials o tus documentos..."
+                      : "Preguntale a Aura por biomarcadores, documentos, suplementos o research..."
+                    : "Preguntale a Aura usando Kimi, memory y vault..."
+                }
                 className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 text-[13px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0"
               />
               <Button
@@ -350,7 +445,7 @@ function EmptyState({ onShortcutClick }: { onShortcutClick: (value: string) => v
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
       <Sparkles className="h-6 w-6 text-amber-200/70" />
       <h2 className="mt-4 text-[18px] font-medium text-foreground">
-        Kimi V1 esta listo
+        Aura Medical V1 esta listo
       </h2>
       <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted-foreground/45">
         Esta version prioriza Kimi memory, tools oficiales y retrieval desde el
@@ -390,6 +485,7 @@ function KimiMessageBubble({
 }) {
   const isUser = message.role === "user";
   const metadata = (message.metadata ?? undefined) as KimiMetadata | undefined;
+  const researchEvidence = metadata?.researchEvidence ?? [];
 
   return (
     <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
@@ -427,8 +523,51 @@ function KimiMessageBubble({
           )}
         </div>
 
+        {!isUser && researchEvidence.length > 0 && (
+          <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-3">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-sky-100/70">
+              <FileSearch className="h-3.5 w-3.5" />
+              Evidence
+            </div>
+            <div className="mt-3 space-y-2">
+              {researchEvidence.map(source => (
+                <a
+                  key={`${source.source}-${source.url}`}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-xl border border-border/25 bg-background/40 p-3 transition-colors hover:border-sky-400/30 hover:bg-background/60"
+                >
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-sky-100/55">
+                    <DatabaseZap className="h-3.5 w-3.5" />
+                    {source.source === "pubmed" ? "PubMed" : "ClinicalTrials"}
+                  </div>
+                  <p className="mt-2 text-[12px] font-medium text-foreground/90">
+                    {source.title}
+                  </p>
+                  {source.citation && (
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/65">
+                      {source.citation}
+                    </p>
+                  )}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!isUser && metadata && (
           <div className="flex flex-wrap gap-2">
+            {metadata.runtimeVersion && (
+              <MetaPill icon={<Sparkles className="h-3 w-3" />}>
+                {metadata.runtimeVersion}
+              </MetaPill>
+            )}
+            {metadata.medicalMode && (
+              <MetaPill icon={<Brain className="h-3 w-3" />}>
+                {metadata.medicalMode}
+              </MetaPill>
+            )}
             <MetaPill icon={<Sparkles className="h-3 w-3" />}>
               {metadata.providerSlug ?? "kimi"} | {metadata.modelName ?? "kimi-k2.6"}
             </MetaPill>
@@ -471,5 +610,29 @@ function MetaPill({
       {icon}
       {children}
     </span>
+  );
+}
+
+function RuntimeChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3 py-1.5 text-[11px] transition-colors",
+        active
+          ? "border-sky-400/30 bg-sky-500/12 text-sky-100"
+          : "border-border/30 bg-card/25 text-muted-foreground/55 hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }

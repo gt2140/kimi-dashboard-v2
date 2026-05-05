@@ -178,6 +178,13 @@ describe("KimiConversationTurnService", () => {
         }),
       }),
     );
+    const finalRequest = kimiClient.streamChatCompletion.mock.calls[0]?.[0];
+    expect(finalRequest.messages).not.toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: "",
+      }),
+    );
     expect(result.assistantMessage?.content).toBe("ApoB looks improved.");
   });
 
@@ -300,5 +307,361 @@ describe("KimiConversationTurnService", () => {
         toolCallsJson: [],
       }),
     );
+  });
+
+  it("streams immediately without a planning completion when no tools are enabled", async () => {
+    const conversationRepository = {
+      requireConversationOwner: vi.fn().mockResolvedValue({
+        id: 19,
+        title: "Direct stream conversation",
+      }),
+      createUserMessage: vi.fn().mockResolvedValue({ id: 211 }),
+      createAssistantMessage: vi.fn().mockResolvedValue({
+        id: 212,
+        createdAt: new Date("2026-05-05T15:00:00.000Z"),
+      }),
+      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const agentRunRepository = {
+      createPrimaryRun: vi.fn().mockResolvedValue({ id: 313 }),
+      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
+      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
+      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const kimiClient = {
+      createChatCompletion: vi.fn(),
+      streamChatCompletion: vi.fn().mockImplementation(async (_request, handlers) => {
+        await handlers.onTextDelta?.("Respira");
+        await handlers.onTextDelta?.(" mejor.");
+        return {
+          id: "chatcmpl-direct-stream",
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content: "Respira mejor.",
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 60,
+            completion_tokens: 12,
+            total_tokens: 72,
+          },
+        };
+      }),
+    };
+
+    const toolExecutor = {
+      getEnabledTools: vi.fn().mockResolvedValue([]),
+      executeToolCalls: vi.fn(),
+    };
+
+    const contextLoader = vi.fn().mockResolvedValue({
+      systemPrompt: "You are Generalist.",
+      responseStyle: "detailed",
+      recentMessages: [],
+      conversationSummary: null,
+      longTermMemories: [],
+      selectedVaultChunks: [],
+      relatedVaultFiles: [],
+      enabledFormulaTools: [],
+      thinkingMode: "enabled",
+    });
+
+    const service = new KimiConversationTurnService({
+      conversationRepository,
+      agentRunRepository,
+      kimiClient,
+      toolExecutor,
+      contextLoader,
+    });
+
+    const onTextDelta = vi.fn();
+    const result = await service.executeTurn({
+      input: {
+        conversationId: 19,
+        content: "Ayudame rapido con esta congestion.",
+        agentId: "generalist",
+        calledAgentIds: [],
+      },
+      userId: 9,
+      streamPrimary: true,
+      onTextDelta,
+    });
+
+    expect(kimiClient.createChatCompletion).toHaveBeenCalledTimes(1);
+    expect(kimiClient.streamChatCompletion).toHaveBeenCalledTimes(1);
+    expect(onTextDelta).toHaveBeenCalledTimes(2);
+    expect(result.assistantMessage?.content).toBe("Respira mejor.");
+  });
+
+  it("persists aura medical runtime metadata and extracted research evidence", async () => {
+    const conversationRepository = {
+      requireConversationOwner: vi.fn().mockResolvedValue({
+        id: 29,
+        title: "Research conversation",
+      }),
+      createUserMessage: vi.fn().mockResolvedValue({ id: 501 }),
+      createAssistantMessage: vi.fn().mockResolvedValue({
+        id: 502,
+        createdAt: new Date("2026-05-05T03:00:00.000Z"),
+      }),
+      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const agentRunRepository = {
+      createPrimaryRun: vi.fn().mockResolvedValue({ id: 503 }),
+      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
+      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
+      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const kimiClient = {
+      createChatCompletion: vi
+        .fn()
+        .mockResolvedValueOnce({
+          id: "chatcmpl-initial-research",
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                role: "assistant",
+                content: "I need evidence.",
+                tool_calls: [
+                  {
+                    id: "tool-research-1",
+                    type: "function",
+                    function: {
+                      name: "web_search",
+                      arguments: JSON.stringify({ query: "apob pubmed trial" }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 12,
+            total_tokens: 112,
+          },
+        }),
+      streamChatCompletion: vi.fn().mockResolvedValue({
+        id: "chatcmpl-final-research",
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              role: "assistant",
+              content: "The strongest evidence still points to ApoB lowering.",
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 160,
+          completion_tokens: 32,
+          total_tokens: 192,
+        },
+      }),
+    };
+
+    const toolExecutor = {
+      getEnabledTools: vi.fn().mockResolvedValue([
+        {
+          function: {
+            name: "web_search",
+          },
+        },
+      ]),
+      executeToolCalls: vi.fn().mockResolvedValue([
+        {
+          toolCallId: "tool-research-1",
+          toolName: "web_search",
+          content: [
+            "ApoB and cardiovascular risk",
+            "https://pubmed.ncbi.nlm.nih.gov/39876543/",
+            "Lipoprotein(a) trial update",
+            "https://clinicaltrials.gov/study/NCT01234567",
+          ].join("\n"),
+        },
+      ]),
+    };
+
+    const contextLoader = vi.fn().mockResolvedValue({
+      systemPrompt: "You are Aura Medical Runtime.",
+      responseStyle: "academic",
+      recentMessages: [],
+      conversationSummary: "The user is comparing ApoB evidence.",
+      longTermMemories: [],
+      selectedVaultChunks: [],
+      relatedVaultFiles: ["apob-panel.pdf"],
+      enabledFormulaTools: [
+        "moonshot/memory:latest",
+        "moonshot/web-search:latest",
+        "moonshot/rethink:latest",
+      ],
+      thinkingMode: "disabled",
+    } as any);
+
+    const service = new KimiConversationTurnService({
+      conversationRepository,
+      agentRunRepository,
+      kimiClient,
+      toolExecutor,
+      contextLoader,
+    });
+
+    const result = await service.executeTurn({
+      input: {
+        conversationId: 29,
+        content: "What does the recent evidence say about ApoB lowering?",
+        agentId: "research-synthesizer",
+        calledAgentIds: [],
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: "research",
+        policyLevel: "interpretive-on-request",
+      } as any,
+      userId: 14,
+      streamPrimary: true,
+      onTextDelta: vi.fn(),
+      onStage: vi.fn(),
+    });
+
+    expect(result.assistantMessage?.metadata).toEqual(
+      expect.objectContaining({
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: "research",
+        policyLevel: "interpretive-on-request",
+        researchEvidence: expect.arrayContaining([
+          expect.objectContaining({
+            source: "pubmed",
+          }),
+          expect.objectContaining({
+            source: "clinicaltrials",
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("falls back to a direct answer when the initial tool-planning completion times out", async () => {
+    const conversationRepository = {
+      requireConversationOwner: vi.fn().mockResolvedValue({
+        id: 41,
+        title: "Symptom chat",
+      }),
+      createUserMessage: vi.fn().mockResolvedValue({ id: 601 }),
+      createAssistantMessage: vi.fn().mockResolvedValue({
+        id: 602,
+        createdAt: new Date("2026-05-05T14:20:00.000Z"),
+      }),
+      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const agentRunRepository = {
+      createPrimaryRun: vi.fn().mockResolvedValue({ id: 603 }),
+      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
+      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
+      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const kimiClient = {
+      createChatCompletion: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error("Kimi request timed out while calling /chat/completions."),
+        )
+        .mockResolvedValueOnce({
+          id: "chatcmpl-fallback-direct",
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content:
+                  "Si te cuesta respirar y el descongestivo ya no ayuda, no sigas repitiendolo toda la noche. Eso puede pasar cuando el spray deja rebote. Si la falta de aire es importante o empeora, busca atencion medica urgente.",
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 90,
+            completion_tokens: 40,
+            total_tokens: 130,
+          },
+        }),
+      streamChatCompletion: vi.fn(),
+    };
+
+    const toolExecutor = {
+      getEnabledTools: vi.fn().mockResolvedValue([
+        {
+          function: {
+            name: "web_search",
+          },
+        },
+      ]),
+      executeToolCalls: vi.fn(),
+    };
+
+    const contextLoader = vi.fn().mockResolvedValue({
+      systemPrompt: "You are Aura Medical Runtime.",
+      responseStyle: "detailed",
+      recentMessages: [],
+      conversationSummary: null,
+      longTermMemories: [],
+      selectedVaultChunks: [],
+      relatedVaultFiles: [],
+      enabledFormulaTools: ["moonshot/web-search:latest"],
+      thinkingMode: "enabled",
+      runtimeMetadata: {
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: "personal-health",
+        policyLevel: "interpretive-on-request",
+      },
+    });
+
+    const service = new KimiConversationTurnService({
+      conversationRepository,
+      agentRunRepository,
+      kimiClient,
+      toolExecutor,
+      contextLoader,
+    });
+
+    const result = await service.executeTurn({
+      input: {
+        conversationId: 41,
+        content: "Tengo mucha congestion nasal y el spray no me hace efecto.",
+        agentId: "generalist",
+        calledAgentIds: [],
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: "personal-health",
+        policyLevel: "interpretive-on-request",
+      },
+      userId: 22,
+      streamPrimary: false,
+    });
+
+    expect(kimiClient.createChatCompletion).toHaveBeenCalled();
+    expect(toolExecutor.executeToolCalls).not.toHaveBeenCalled();
+    expect(kimiClient.streamChatCompletion).not.toHaveBeenCalled();
+    expect(result.assistantMessage?.metadata).toEqual(
+      expect.objectContaining({
+        toolWarnings: expect.arrayContaining([
+          expect.stringContaining("timed out"),
+        ]),
+      }),
+    );
+    expect(result.assistantMessage?.content).toContain("no sigas repitiendolo");
   });
 });

@@ -11,12 +11,55 @@ import {
 import { and, eq } from "drizzle-orm";
 import { vaultFiles } from "../db/schema.js";
 import { TurnStreamController } from "./services/turn-stream-controller.js";
-import { kimiConversationTurnService } from "./services/kimi-runtime.js";
+import {
+  auraMedicalConversationTurnService,
+  kimiConversationTurnService,
+} from "./services/kimi-runtime.js";
 import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
 import { getDb } from "./queries/connection.js";
 import { readOriginalVaultFile } from "./services/vault-original-file.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
+
+function createNdjsonStreamResponse(
+  run: (streamController: TurnStreamController) => Promise<void>,
+) {
+  const encoder = new TextEncoder();
+  let streamController: TurnStreamController | null = null;
+  const stream = new ReadableStream({
+    start(controller) {
+      streamController = new TurnStreamController({
+        write: payload => {
+          controller.enqueue(encoder.encode(payload));
+        },
+        close: () => {
+          controller.close();
+        },
+      });
+
+      void run(streamController).catch(error => {
+        streamController?.fail(
+          error instanceof Error
+            ? error.message
+            : "Chat streaming failed unexpectedly.",
+        );
+      });
+    },
+    cancel() {
+      streamController?.disconnect();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
     endpoint: "/api/trpc",
@@ -47,65 +90,34 @@ app.post("/api/chat/stream", async (c) => {
     );
   }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      const streamController = new TurnStreamController({
-        write: (payload) => {
-          controller.enqueue(encoder.encode(payload));
-        },
-        close: () => {
-          controller.close();
-        },
+  return createNdjsonStreamResponse(async streamController => {
+    const result = await sendChatMessage({
+      input: parsed.data,
+      userId: user.id,
+      streamPrimary: true,
+      onStage: async stage => {
+        streamController.emitStage(stage);
+      },
+      onTextDelta: async delta => {
+        streamController.emitDelta(delta);
+      },
+    });
+
+    if (result.assistantMessage) {
+      streamController.complete({
+        id: String(result.assistantMessage.id),
+        role: "assistant",
+        content: result.assistantMessage.content,
+        agentId: result.assistantMessage.agentId,
+        createdAt: result.assistantMessage.createdAt.toISOString(),
+        metadata: result.assistantMessage.metadata,
       });
+      return;
+    }
 
-      void (async () => {
-        try {
-          const result = await sendChatMessage({
-            input: parsed.data,
-            userId: user.id,
-            streamPrimary: true,
-            onStage: async (stage) => {
-              streamController.emitStage(stage);
-            },
-            onTextDelta: async (delta) => {
-              streamController.emitDelta(delta);
-            },
-          });
-
-          if (result.assistantMessage) {
-            streamController.complete({
-              id: String(result.assistantMessage.id),
-              role: "assistant",
-              content: result.assistantMessage.content,
-              agentId: result.assistantMessage.agentId,
-              createdAt: result.assistantMessage.createdAt.toISOString(),
-              metadata: result.assistantMessage.metadata,
-            });
-            return;
-          }
-
-          streamController.fail(
-            "Chat turn finished without a persisted assistant message."
-          );
-        } catch (error) {
-          streamController.fail(
-            error instanceof Error
-              ? error.message
-              : "Chat streaming failed unexpectedly."
-          );
-        }
-      })();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
+    streamController.fail(
+      "Chat turn finished without a persisted assistant message.",
+    );
   });
 });
 app.post("/api/kimi/chat/stream", async (c) => {
@@ -130,65 +142,89 @@ app.post("/api/kimi/chat/stream", async (c) => {
     );
   }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      const streamController = new TurnStreamController({
-        write: payload => {
-          controller.enqueue(encoder.encode(payload));
-        },
-        close: () => {
-          controller.close();
-        },
-      });
+  return createNdjsonStreamResponse(async streamController => {
+    const result = await kimiConversationTurnService.executeTurn({
+      input: parsed.data,
+      userId: user.id,
+      streamPrimary: true,
+      onStage: async stage => {
+        streamController.emitStage(stage);
+      },
+      onTextDelta: async delta => {
+        streamController.emitDelta(delta);
+      },
+    });
 
-      void (async () => {
-        try {
-          const result = await kimiConversationTurnService.executeTurn({
-            input: parsed.data,
-            userId: user.id,
-            streamPrimary: true,
-            onStage: async stage => {
-              streamController.emitStage(stage);
-            },
-            onTextDelta: async delta => {
-              streamController.emitDelta(delta);
-            },
-          });
+    if (!result.assistantMessage) {
+      streamController.fail(
+        "Kimi V1 finished without a persisted assistant message.",
+      );
+      return;
+    }
 
-          if (!result.assistantMessage) {
-            streamController.fail(
-              "Kimi V1 finished without a persisted assistant message.",
-            );
-            return;
-          }
-
-          streamController.complete({
-            id: String(result.assistantMessage.id),
-            role: "assistant",
-            content: result.assistantMessage.content,
-            agentId: result.assistantMessage.agentId,
-            createdAt: result.assistantMessage.createdAt.toISOString(),
-            metadata: result.assistantMessage.metadata,
-          });
-        } catch (error) {
-          streamController.fail(
-            error instanceof Error
-              ? error.message
-              : "Kimi V1 streaming failed unexpectedly.",
-          );
-        }
-      })();
-    },
+    streamController.complete({
+      id: String(result.assistantMessage.id),
+      role: "assistant",
+      content: result.assistantMessage.content,
+      agentId: result.assistantMessage.agentId,
+      createdAt: result.assistantMessage.createdAt.toISOString(),
+      metadata: result.assistantMessage.metadata,
+    });
   });
+});
+app.post("/api/aura-medical/chat/stream", async (c) => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = chatSendMessageInputSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: "Invalid request body.",
+        details: parsed.error.flatten(),
+      },
+      400,
+    );
+  }
+
+  return createNdjsonStreamResponse(async streamController => {
+    const result = await auraMedicalConversationTurnService.executeTurn({
+      input: {
+        ...parsed.data,
+        runtimeVersion: "aura-medical-v1",
+      },
+      userId: user.id,
+      streamPrimary: true,
+      onStage: async stage => {
+        streamController.emitStage(stage);
+      },
+      onTextDelta: async delta => {
+        streamController.emitDelta(delta);
+      },
+    });
+
+    if (!result.assistantMessage) {
+      streamController.fail(
+        "Aura Medical Runtime V1 finished without a persisted assistant message.",
+      );
+      return;
+    }
+
+    streamController.complete({
+      id: String(result.assistantMessage.id),
+      role: "assistant",
+      content: result.assistantMessage.content,
+      agentId: result.assistantMessage.agentId,
+      createdAt: result.assistantMessage.createdAt.toISOString(),
+      metadata: result.assistantMessage.metadata,
+    });
   });
 });
 app.post("/api/kimi/vault/upload", async c => {

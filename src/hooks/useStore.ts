@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type {
+  AuraMedicalMode,
+  AuraPolicyLevel,
+  AuraRuntimeVersion,
+} from "@contracts/aura-runtime";
+import type {
   ActivityLog,
   Agent,
   AgentSettings,
@@ -14,16 +19,25 @@ type ChatSnapshot = {
   activeAgentId: string;
   calledAgentIds: string[];
   activeSessionId: string | null;
+  runtimeVersion: AuraRuntimeVersion;
+  medicalMode: AuraMedicalMode;
+  policyLevel: AuraPolicyLevel;
 };
 
 const defaultChatSnapshot: ChatSnapshot = {
   activeAgentId: "generalist",
   calledAgentIds: [],
   activeSessionId: null,
+  runtimeVersion: "aura-medical-v1",
+  medicalMode: "personal-health",
+  policyLevel: "interpretive-on-request",
 };
 
 interface ChatState extends ChatSnapshot {
   setActiveAgent: (agentId: string) => void;
+  setRuntimeVersion: (runtimeVersion: AuraRuntimeVersion) => void;
+  setMedicalMode: (medicalMode: AuraMedicalMode) => void;
+  setPolicyLevel: (policyLevel: AuraPolicyLevel) => void;
   callAgent: (agentId: string) => void;
   removeCalledAgent: (agentId: string) => void;
   clearCalledAgents: () => void;
@@ -44,6 +58,9 @@ export const useChatStore = create<ChatState>(set => ({
       calledAgentIds: [],
       activeSessionId: null,
     }),
+  setRuntimeVersion: runtimeVersion => set({ runtimeVersion }),
+  setMedicalMode: medicalMode => set({ medicalMode }),
+  setPolicyLevel: policyLevel => set({ policyLevel }),
   callAgent: agentId =>
     set(state => ({
       calledAgentIds: state.calledAgentIds.includes(agentId)
@@ -60,13 +77,19 @@ export const useChatStore = create<ChatState>(set => ({
       activeAgentId: state.activeAgentId,
       calledAgentIds: [],
       activeSessionId: null,
+      runtimeVersion: state.runtimeVersion,
+      medicalMode: state.medicalMode,
+      policyLevel: state.policyLevel,
     })),
   hydrateConversation: ({ sessionId, agentId, calledAgentIds }) =>
-    set({
+    set(state => ({
       activeSessionId: String(sessionId),
       activeAgentId: agentId,
       calledAgentIds,
-    }),
+      runtimeVersion: state.runtimeVersion,
+      medicalMode: state.medicalMode,
+      policyLevel: state.policyLevel,
+    })),
   reset: () => set(defaultChatSnapshot),
 }));
 

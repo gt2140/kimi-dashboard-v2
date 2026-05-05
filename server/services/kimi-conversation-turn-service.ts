@@ -1,10 +1,15 @@
 import {
   buildKimiChatRequest,
+  type BuildKimiChatRequestInput,
   extractKimiAssistantText,
   extractKimiUsage,
   type KimiChatRequest,
   type KimiToolCall,
 } from "../kimi/chat-client.js";
+import {
+  buildAuraMedicalMetadata,
+  resolveAuraRuntimeOptions,
+} from "./aura-medical-runtime.js";
 import {
   buildKimiPromptCacheKey,
   buildLongTermMemorySnippet,
@@ -17,6 +22,9 @@ type ConversationTurnInput = {
   content: string;
   agentId: string;
   calledAgentIds: string[];
+  runtimeVersion?: "classic" | "aura-medical-v1";
+  medicalMode?: "personal-health" | "research";
+  policyLevel?: "interpretive-on-request";
 };
 
 type ChatStage = {
@@ -53,6 +61,10 @@ type RunMessage = {
   content: string;
 };
 
+function normalizeMessageContent(content: string | null | undefined) {
+  return typeof content === "string" ? content.trim() : "";
+}
+
 type ContextLoaderResult = {
   agentDefinitionId?: number;
   systemPrompt: string;
@@ -79,6 +91,8 @@ type ContextLoaderResult = {
   thinkingMode: "enabled" | "disabled";
   promptCacheKey?: string | null;
   safetyIdentifier?: string | null;
+  stageLabels?: Partial<Record<"memory" | "analyze" | "tools" | "draft", string>>;
+  runtimeMetadata?: Record<string, unknown>;
 };
 
 type ConversationRepositoryLike = {
@@ -178,6 +192,9 @@ export class KimiConversationTurnService {
         conversationId: number;
         agentSlug: string;
         latestUserMessage: string;
+        runtimeVersion?: "classic" | "aura-medical-v1";
+        medicalMode?: "personal-health" | "research";
+        policyLevel?: "interpretive-on-request";
       }) => Promise<ContextLoaderResult>;
     },
   ) {}
@@ -209,6 +226,14 @@ export class KimiConversationTurnService {
         conversationId: params.input.conversationId,
         agentSlug: params.input.agentId,
         latestUserMessage: params.input.content,
+        runtimeVersion: params.input.runtimeVersion,
+        medicalMode: params.input.medicalMode,
+        policyLevel: params.input.policyLevel,
+      });
+      const runtimeOptions = resolveAuraRuntimeOptions({
+        runtimeVersion: params.input.runtimeVersion,
+        medicalMode: params.input.medicalMode,
+        policyLevel: params.input.policyLevel,
       });
 
       const userMessage = await conversationRepository.createUserMessage({
@@ -217,6 +242,9 @@ export class KimiConversationTurnService {
         agentId: params.input.agentId,
         metadata: {
           engine: "kimi-v1",
+          runtimeVersion: runtimeOptions.runtimeVersion,
+          medicalMode: runtimeOptions.medicalMode,
+          policyLevel: runtimeOptions.policyLevel,
         },
       });
 
@@ -281,18 +309,55 @@ export class KimiConversationTurnService {
 
       await params.onStage?.({
         id: "analyze",
-        label: "Planning the Kimi turn",
+        label: context.stageLabels?.analyze ?? "Planning the Kimi turn",
       });
 
-      const firstCompletion = await kimiClient.createChatCompletion(request);
-      const firstChoice = firstCompletion.choices?.[0];
+      const shouldStreamDirectly = params.streamPrimary && tools.length === 0;
+      let firstCompletion: KimiCompletionResponse | null = null;
+      let directCompletionFromFallback = false;
+      if (!shouldStreamDirectly) {
+        try {
+          firstCompletion = await kimiClient.createChatCompletion(request);
+        } catch (error) {
+          if (tools.length === 0) {
+            throw error;
+          }
+
+          toolWarnings.push(
+            error instanceof Error
+              ? error.message
+              : "Kimi tool planning failed for this turn.",
+          );
+          tools = [];
+          effectiveThinkingMode = context.thinkingMode;
+          request = buildKimiChatRequest({
+            model: "kimi-k2.6",
+            systemPrompt: [
+              resolvedSystemPrompt,
+              "Tool planning was skipped because the tool-enabled request failed or timed out. Respond directly using the available user context, memory, and vault context.",
+            ].join("\n\n"),
+            promptCacheKey:
+              context.promptCacheKey ??
+              buildKimiPromptCacheKey(params.input.conversationId),
+            safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
+            thinking: effectiveThinkingMode,
+            messages: contextPayload.messages,
+          });
+          firstCompletion = await kimiClient.createChatCompletion(request);
+          directCompletionFromFallback = true;
+        }
+      }
+
+      const firstChoice = firstCompletion?.choices?.[0];
       let toolCalls = firstChoice?.message?.tool_calls ?? [];
       let toolResults: ToolResult[] = [];
 
       if (firstChoice?.finish_reason === "tool_calls" && toolCalls.length > 0) {
         await params.onStage?.({
           id: "tools",
-          label: `Running ${toolCalls.length} Kimi tool call${toolCalls.length === 1 ? "" : "s"}`,
+          label:
+            context.stageLabels?.tools ??
+            `Running ${toolCalls.length} Kimi tool call${toolCalls.length === 1 ? "" : "s"}`,
         });
         try {
           toolResults = await toolExecutor.executeToolCalls({
@@ -313,20 +378,12 @@ export class KimiConversationTurnService {
               buildKimiPromptCacheKey(params.input.conversationId),
             safetyIdentifier: context.safetyIdentifier ?? `user-${params.userId}`,
             thinking: effectiveThinkingMode,
-            messages: [
-              ...contextPayload.messages,
-              {
-                role: "assistant",
-                content: firstChoice.message?.content ?? "",
-                toolCalls,
-              },
-              ...toolResults.map(result => ({
-                role: "tool" as const,
-                content: result.content,
-                name: result.toolName,
-                toolCallId: result.toolCallId,
-              })),
-            ],
+            messages: buildToolFollowupMessages({
+              baseMessages: contextPayload.messages,
+              assistantContent: firstChoice.message?.content,
+              toolCalls,
+              toolResults,
+            }),
             tools,
           });
         } catch (error) {
@@ -358,14 +415,21 @@ export class KimiConversationTurnService {
 
       await params.onStage?.({
         id: "draft",
-        label: "Streaming final answer from Kimi",
+        label:
+          context.stageLabels?.draft ?? "Streaming final answer from Kimi",
       });
 
-      const finalCompletion = params.streamPrimary
-        ? await kimiClient.streamChatCompletion(request, {
-            onTextDelta: params.onTextDelta,
-          })
-        : await kimiClient.createChatCompletion(request);
+      const finalCompletion = directCompletionFromFallback
+        ? firstCompletion
+        : params.streamPrimary
+          ? await kimiClient.streamChatCompletion(request, {
+              onTextDelta: params.onTextDelta,
+            })
+          : await kimiClient.createChatCompletion(request);
+
+      if (!finalCompletion) {
+        throw new Error("Kimi did not return a completion payload.");
+      }
 
       const outputText = extractKimiAssistantText(finalCompletion);
       const assistantMetadata = {
@@ -385,6 +449,11 @@ export class KimiConversationTurnService {
         toolWarnings,
         finishReason: finalCompletion.choices?.[0]?.finish_reason ?? null,
         usage: extractKimiUsage(finalCompletion),
+        ...context.runtimeMetadata,
+        ...buildAuraMedicalMetadata({
+          runtimeOptions,
+          toolResults,
+        }),
       };
 
       const assistantMessage = await conversationRepository.createAssistantMessage({
@@ -427,7 +496,7 @@ export class KimiConversationTurnService {
         usageJson: extractKimiUsage(finalCompletion),
       });
 
-      await persistKimiTurnMemory({
+      void persistKimiTurnMemory({
         userId: params.userId,
         conversationId: params.input.conversationId,
         sourceRunId: primaryRun.id,
@@ -516,8 +585,11 @@ function buildContextPayload(input: {
 function serializeRunMessages(messages: KimiChatRequest["messages"]): RunMessage[] {
   return messages
     .map(message => {
+      const content = normalizeMessageContent(
+        typeof message.content === "string" ? message.content : null,
+      );
       if (
-        typeof message.content !== "string" ||
+        !content ||
         (message.role !== "system" &&
           message.role !== "user" &&
           message.role !== "assistant")
@@ -527,10 +599,38 @@ function serializeRunMessages(messages: KimiChatRequest["messages"]): RunMessage
 
       return {
         role: message.role,
-        content: message.content,
+        content,
       };
     })
     .filter((message): message is RunMessage => Boolean(message));
+}
+
+function buildToolFollowupMessages(input: {
+  baseMessages: BuildKimiChatRequestInput["messages"];
+  assistantContent?: string | null;
+  toolCalls: KimiToolCall[];
+  toolResults: ToolResult[];
+}): BuildKimiChatRequestInput["messages"] {
+  const assistantContent = normalizeMessageContent(input.assistantContent);
+
+  return [
+    ...input.baseMessages,
+    ...(assistantContent || input.toolCalls.length > 0
+      ? [
+          {
+            role: "assistant" as const,
+            ...(assistantContent ? { content: assistantContent } : {}),
+            toolCalls: input.toolCalls,
+          },
+        ]
+      : []),
+    ...input.toolResults.map(result => ({
+      role: "tool" as const,
+      content: result.content,
+      name: result.toolName,
+      toolCallId: result.toolCallId,
+    })),
+  ];
 }
 
 function buildResponseStyleInstruction(

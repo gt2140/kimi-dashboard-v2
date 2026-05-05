@@ -77,9 +77,9 @@ export async function loadKimiTurnContext(params: {
   });
 
   const enabledFormulaTools = buildEnabledFormulaTools({
-    allowWebResearch: userSetting?.allowWebResearch ?? true,
+    allowWebResearch: userSetting?.allowWebResearch ?? false,
     allowScientificResearch: userSetting?.allowScientificResearch ?? false,
-    preferKimiMemory: userSetting?.preferKimiMemory ?? true,
+    preferKimiMemory: userSetting?.preferKimiMemory ?? false,
     enabledFormulaTools: userSetting?.enabledFormulaTools ?? [],
   });
 
@@ -166,3 +166,5 @@ function buildEnabledFormulaTools(input: {
 
   return Array.from(new Set([...defaults, ...input.enabledFormulaTools]));
 }
+
+export { buildEnabledFormulaTools };

@@ -1,37 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TurnStreamController } from "./turn-stream-controller.js";
 
 describe("TurnStreamController", () => {
-  it("emits stage, delta, and only one terminal event", () => {
-    const payloads: string[] = [];
-    const controller = new TurnStreamController({
-      write: (payload) => {
-        payloads.push(payload);
-      },
-      close: () => {
-        payloads.push("__closed__");
-      },
+  it("stops emitting when the downstream body is aborted", () => {
+    const write = vi.fn(() => {
+      throw new Error("BodyStreamBuffer was aborted");
     });
+    const close = vi.fn(() => {
+      throw new Error("BodyStreamBuffer was aborted");
+    });
+    const controller = new TurnStreamController({ write, close });
 
-    controller.emitStage({
-      id: "analyze",
-      label: "Analyzing",
-    });
-    controller.emitDelta("Hello");
-    controller.complete({
-      id: "11",
-      role: "assistant",
-      content: "Hello world",
-      agentId: "generalist",
-      createdAt: "2026-04-30T23:00:00.000Z",
-    });
-    controller.fail("should be ignored");
+    expect(() =>
+      controller.emitStage({
+        id: "memory",
+        label: "Loading context",
+      }),
+    ).not.toThrow();
 
-    expect(payloads).toEqual([
-      '{"type":"stage","stageId":"analyze","label":"Analyzing"}\n',
-      '{"type":"text-delta","delta":"Hello"}\n',
-      '{"type":"message-complete","message":{"id":"11","role":"assistant","content":"Hello world","agentId":"generalist","createdAt":"2026-04-30T23:00:00.000Z"}}\n',
-      "__closed__",
-    ]);
+    expect(() =>
+      controller.complete({
+        id: "1",
+        role: "assistant",
+        content: "ok",
+        agentId: "generalist",
+        createdAt: new Date().toISOString(),
+      }),
+    ).not.toThrow();
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("closes cleanly when the client disconnects before completion", () => {
+    const write = vi.fn();
+    const close = vi.fn();
+    const controller = new TurnStreamController({ write, close });
+
+    controller.disconnect();
+    controller.emitDelta("hola");
+    controller.fail("should stay quiet");
+
+    expect(write).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

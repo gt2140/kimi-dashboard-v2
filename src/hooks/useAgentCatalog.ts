@@ -82,13 +82,13 @@ export function useAgentCatalog() {
       longDescription: agent.longDescription,
       icon: agent.icon,
       color: agent.color,
-      author: agent.author ?? "Aura Marketplace",
+      author: agent.author ?? "Aura",
       installs: agent.installs ?? 0,
       rating:
         typeof agent.rating === "number" ? agent.rating.toFixed(2) : null,
       tags: agent.tags ?? [],
       allowedVaultCategories: agent.allowedVaultCategories,
-      source: "marketplace",
+      source: agent.source ?? "built-in",
     }));
   }, [agentsQuery.data]);
 

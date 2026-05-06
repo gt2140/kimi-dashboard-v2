@@ -43,4 +43,15 @@ describe("formatRuntimeError", () => {
       )
     ).toBe("Auth error: sign-in is still finishing in the background. Try again in a moment.");
   });
+
+  it("surfaces backend chat turn timeouts as runtime failures instead of generic network errors", () => {
+    expect(
+      formatRuntimeError(
+        new Error("Aura Medical chat turn timed out after 45000ms."),
+        "Kimi chat"
+      )
+    ).toBe(
+      "Runtime error: the chat backend timed out before finishing. Check the deployed API, database connectivity, or model provider."
+    );
+  });
 });

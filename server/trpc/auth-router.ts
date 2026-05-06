@@ -7,8 +7,8 @@ import { getSessionCookieOptions } from "../lib/cookies.js";
 import { env } from "../lib/env.js";
 import { createRouter, authedQuery, publicQuery } from "./middleware.js";
 import {
-  checkDatabaseHealth,
   getDatabaseSetupState,
+  checkDatabaseHealth,
 } from "../queries/connection.js";
 import { z } from "zod";
 
@@ -66,23 +66,15 @@ export const authRouter = createRouter({
           });
         }
 
-        const dbHealth = await checkDatabaseHealth(true);
-        if (!dbHealth.ok) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: `Backend setup error: ${dbHealth.message}`,
-          });
-        }
-
         const sessionCookie = await createAppSessionFromSupabaseToken(
           input.accessToken,
           ctx.req.headers
         );
         ctx.resHeaders.append("set-cookie", sessionCookie);
         logServerDebug("auth.syncSession.success", {
-          dbHost: dbHealth.host,
+          dbHost: getDatabaseSetupState().host,
         });
-        return { success: true, dbHost: dbHealth.host };
+        return { success: true, dbHost: getDatabaseSetupState().host };
       } catch (error) {
         logServerError("auth.syncSession.failed", error);
         throw error;

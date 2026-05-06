@@ -20,9 +20,9 @@ const TURN_STAGE_COPY: Record<
   }
 > = {
   generalist: {
-    analyze: "Thinking through your question",
-    context: "Checking your context",
-    draft: "Writing the reply",
+    analyze: "Mapping the full picture",
+    context: "Checking available context",
+    draft: "Drafting the answer",
   },
   bloodwork: {
     analyze: "Checking marker patterns",
@@ -48,6 +48,16 @@ const TURN_STAGE_COPY: Record<
     analyze: "Reviewing safety and setting",
     context: "Checking mental health context",
     draft: "Writing the guidance",
+  },
+  "diagnostic-validator": {
+    analyze: "Stress-testing the differential",
+    context: "Checking diagnostic context",
+    draft: "Writing the diagnostic summary",
+  },
+  "research-synthesizer": {
+    analyze: "Scanning the evidence landscape",
+    context: "Checking research context",
+    draft: "Writing the evidence summary",
   },
 };
 
@@ -115,6 +125,30 @@ const ROUTING_HINTS: Record<string, string[]> = {
     "lsd",
     "integration",
     "set and setting",
+  ],
+  "diagnostic-validator": [
+    "diagnosis",
+    "diagnostic",
+    "differential",
+    "interpretation",
+    "validate",
+    "validation",
+    "second opinion",
+    "rule out",
+    "what am i missing",
+  ],
+  "research-synthesizer": [
+    "research",
+    "study",
+    "studies",
+    "evidence",
+    "pubmed",
+    "trial",
+    "trials",
+    "paper",
+    "papers",
+    "meta analysis",
+    "systematic review",
   ],
 };
 

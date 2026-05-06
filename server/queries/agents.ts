@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { AGENTS } from "../../src/lib/data.js";
 import {
   agentDefinitions,
@@ -82,6 +82,12 @@ const PROVIDER_SEEDS = [
   },
 ];
 
+const CANONICAL_AGENT_SLUGS = AGENTS.map(agent => agent.id);
+
+export function getCanonicalAgentSlugs() {
+  return [...CANONICAL_AGENT_SLUGS];
+}
+
 function buildAgentCapabilities(agent: (typeof AGENTS)[number]) {
   return {
     vault_access: true,
@@ -105,8 +111,8 @@ function buildAgentSeed(agent: (typeof AGENTS)[number]): InsertAgentDefinition {
     status: "active",
     visibility: "public",
     defaultRole: agent.id === "generalist" ? "primary" : "supporting",
-    source: "marketplace",
-    author: agent.author ?? "Aura Marketplace",
+    source: agent.source ?? "built-in",
+    author: agent.author ?? "Aura",
     installs: agent.installs ?? 0,
     rating:
       typeof agent.rating === "number" ? agent.rating.toFixed(2) : undefined,
@@ -318,8 +324,13 @@ async function ensureConversationalCatalogReady() {
   const readiness = await readConversationalCatalogCounts();
 
   if (isConversationalCatalogReadyFromCounts(readiness)) {
+    logServerDebug("agents.catalog.sync.start", readiness);
+    await seedConversationalCatalog();
     catalogReady = true;
-    logServerDebug("agents.catalog.ready", readiness);
+    logServerDebug("agents.catalog.ready", {
+      ...readiness,
+      syncedCanonicalAgents: AGENTS.length,
+    });
     return;
   }
 
@@ -350,7 +361,11 @@ async function readConversationalCatalogCounts() {
 
 export async function listAgentDefinitions() {
   await ensureConversationalCatalogSeeded();
-  return getDb().select().from(agentDefinitions).orderBy(asc(agentDefinitions.name));
+  return getDb()
+    .select()
+    .from(agentDefinitions)
+    .where(inArray(agentDefinitions.slug, CANONICAL_AGENT_SLUGS))
+    .orderBy(asc(agentDefinitions.name));
 }
 
 export async function getAgentDefinitionBySlug(slug: string) {
@@ -449,6 +464,11 @@ export async function listUserAgentSettings(userId: number) {
       agentDefinitions,
       eq(userAgentSettings.agentDefinitionId, agentDefinitions.id)
     )
-    .where(eq(userAgentSettings.userId, userId))
+    .where(
+      and(
+        eq(userAgentSettings.userId, userId),
+        inArray(agentDefinitions.slug, CANONICAL_AGENT_SLUGS)
+      )
+    )
     .orderBy(asc(agentDefinitions.name));
 }

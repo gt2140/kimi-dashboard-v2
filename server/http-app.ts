@@ -11,6 +11,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { vaultFiles } from "../db/schema.js";
 import { TurnStreamController } from "./services/turn-stream-controller.js";
+import { withTimeout } from "./services/async-guard.js";
 import {
   auraMedicalConversationTurnService,
   kimiConversationTurnService,
@@ -21,8 +22,11 @@ import { readOriginalVaultFile } from "./services/vault-original-file.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 
+const CHAT_ROUTE_TIMEOUT_MS = 45_000;
+
 function createNdjsonStreamResponse(
   run: (streamController: TurnStreamController) => Promise<void>,
+  label = "Chat stream",
 ) {
   const encoder = new TextEncoder();
   let streamController: TurnStreamController | null = null;
@@ -37,7 +41,10 @@ function createNdjsonStreamResponse(
         },
       });
 
-      void run(streamController).catch(error => {
+      void withTimeout(run(streamController), {
+        label,
+        timeoutMs: CHAT_ROUTE_TIMEOUT_MS,
+      }).catch(error => {
         streamController?.fail(
           error instanceof Error
             ? error.message
@@ -118,7 +125,7 @@ app.post("/api/chat/stream", async (c) => {
     streamController.fail(
       "Chat turn finished without a persisted assistant message.",
     );
-  });
+  }, "Classic chat turn");
 });
 app.post("/api/kimi/chat/stream", async (c) => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
@@ -170,7 +177,7 @@ app.post("/api/kimi/chat/stream", async (c) => {
       createdAt: result.assistantMessage.createdAt.toISOString(),
       metadata: result.assistantMessage.metadata,
     });
-  });
+  }, "Kimi chat turn");
 });
 app.post("/api/aura-medical/chat/stream", async (c) => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
@@ -225,7 +232,7 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
       createdAt: result.assistantMessage.createdAt.toISOString(),
       metadata: result.assistantMessage.metadata,
     });
-  });
+  }, "Aura Medical chat turn");
 });
 app.post("/api/kimi/vault/upload", async c => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;

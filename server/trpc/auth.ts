@@ -155,6 +155,16 @@ async function authenticateLegacyCookie(headers: Headers) {
 }
 
 export async function authenticateRequest(headers: Headers) {
+  const legacyUser = await authenticateLegacyCookie(headers);
+  if (legacyUser) {
+    logServerDebug("auth.request.resolved", {
+      source: "session-cookie",
+      userId: legacyUser.id,
+      unionId: legacyUser.unionId,
+    });
+    return legacyUser;
+  }
+
   if (env.supabaseUrl) {
     const supabaseUser = await authenticateSupabaseToken(headers);
     if (supabaseUser) {
@@ -165,16 +175,6 @@ export async function authenticateRequest(headers: Headers) {
       });
       return supabaseUser;
     }
-  }
-
-  const legacyUser = await authenticateLegacyCookie(headers);
-  if (legacyUser) {
-    logServerDebug("auth.request.resolved", {
-      source: "session-cookie",
-      userId: legacyUser.id,
-      unionId: legacyUser.unionId,
-    });
-    return legacyUser;
   }
 
   logServerError("auth.request.failed", "no-valid-auth", {

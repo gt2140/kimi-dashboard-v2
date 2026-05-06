@@ -152,13 +152,16 @@ export async function ensureBackendSession(options?: { force?: boolean }) {
         error instanceof Error
           ? error.message
           : "Unable to sync the backend session.";
+      const hadWorkingSession =
+        backendSessionState.backendReady &&
+        backendSessionState.lastSyncedAt !== null;
       logClientError("auth.sync.ensure.failed", error);
       setBackendSessionState({
         phase: "error",
-        backendReady: false,
+        backendReady: hadWorkingSession,
         error: message,
       });
-      return false;
+      return hadWorkingSession;
     } finally {
       backendSessionPromise = null;
     }

@@ -32,6 +32,30 @@ describe("chat-experience", () => {
     );
   });
 
+  it("can route a generalist turn to diagnostic validator when the user asks for a differential check", () => {
+    const stages = buildPendingTurnStages({
+      primaryAgentId: "generalist",
+      helperAgentIds: [],
+      userMessage: "Validate this differential diagnosis and tell me what I might be missing.",
+    });
+
+    expect(stages.map(stage => stage.label)).toContain(
+      "Consulting Diagnostic Validator"
+    );
+  });
+
+  it("can route a generalist turn to research synthesizer for evidence-heavy questions", () => {
+    const stages = buildPendingTurnStages({
+      primaryAgentId: "generalist",
+      helperAgentIds: [],
+      userMessage: "Search PubMed and summarize the evidence behind this intervention.",
+    });
+
+    expect(stages.map(stage => stage.label)).toContain(
+      "Consulting Research Synthesizer"
+    );
+  });
+
   it("splits long responses into reveal chunks without losing content", () => {
     const content = [
       "Direct answer: Your lipid panel looks broadly solid, but ApoB is the marker I would watch most closely here.",

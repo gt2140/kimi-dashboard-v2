@@ -36,19 +36,10 @@ type StreamingAssistant = {
   metadata?: Message["metadata"];
 };
 
-type KimiMetadata = Message["metadata"] & {
+type KimiMetadata = NonNullable<Message["metadata"]> & {
   thinkingMode?: "enabled" | "disabled";
   memoryApplied?: boolean;
   toolCalls?: string[];
-  toolResults?: string[];
-  promptCacheKey?: string;
-  finishReason?: string | null;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    totalTokens?: number;
-    cachedTokens?: number;
-  };
 };
 
 const SHORTCUTS = [

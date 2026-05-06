@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isConversationalCatalogReadyFromCounts } from "./agents.js";
+import {
+  getCanonicalAgentSlugs,
+  isConversationalCatalogReadyFromCounts,
+} from "./agents.js";
 import { AGENTS } from "../../src/lib/data.js";
 
 describe("isConversationalCatalogReadyFromCounts", () => {
@@ -37,5 +40,20 @@ describe("isConversationalCatalogReadyFromCounts", () => {
         promptCount: AGENTS.length - 1,
       })
     ).toBe(false);
+  });
+});
+
+describe("getCanonicalAgentSlugs", () => {
+  it("returns only the dashboard agents we keep in the final catalog", () => {
+    expect(getCanonicalAgentSlugs()).toEqual([
+      "generalist",
+      "bloodwork",
+      "nutrition",
+      "supplements",
+      "peptides",
+      "psychedelics",
+      "diagnostic-validator",
+      "research-synthesizer",
+    ]);
   });
 });

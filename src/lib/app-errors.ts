@@ -42,6 +42,14 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
   }
 
   if (
+    normalized.includes("chat turn timed out") ||
+    normalized.includes("kimi chat turn timed out") ||
+    normalized.includes("aura medical chat turn timed out")
+  ) {
+    return "Runtime error: the chat backend timed out before finishing. Check the deployed API, database connectivity, or model provider.";
+  }
+
+  if (
     normalized.includes("fetch") ||
     normalized.includes("network") ||
     normalized.includes("failed to fetch") ||

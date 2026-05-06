@@ -50,11 +50,11 @@ export default function KimiAgents() {
             Kimi agents
           </p>
           <h1 className="mt-1 text-[20px] font-medium tracking-tight text-foreground">
-            Favoritos, memoria y tools
+            Agentes canonicos, memoria y tools
           </h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
-            Elegí qué agentes querés fijar en el sidebar y ajustá cómo usan
-            Kimi memory, web-search y el vault.
+            Elegi que agentes queres fijar en el sidebar y ajusta como usan
+            memory, web-search y el vault dentro del dashboard final.
           </p>
         </div>
 
@@ -63,7 +63,7 @@ export default function KimiAgents() {
           <Input
             value={search}
             onChange={event => setSearch(event.target.value)}
-            placeholder="Search Kimi agents..."
+            placeholder="Search agents..."
             className="h-9 border-border/30 bg-card/30 pl-9 text-[12px]"
           />
         </div>

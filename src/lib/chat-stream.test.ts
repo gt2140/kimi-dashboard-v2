@@ -120,6 +120,30 @@ describe("chat-stream", () => {
     expect(watchdog.signal.aborted).toBe(true);
   });
 
+  it("allows a longer wait for the first byte before using the regular inactivity timeout", () => {
+    vi.useFakeTimers();
+
+    const watchdog = createChatStreamWatchdog(5_000, "Chat stream", {
+      initialTimeoutMs: 20_000,
+    });
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(watchdog.signal.aborted).toBe(false);
+
+    watchdog.touch();
+    vi.advanceTimersByTime(4_000);
+
+    expect(watchdog.signal.aborted).toBe(false);
+
+    vi.advanceTimersByTime(1_100);
+
+    expect(watchdog.signal.aborted).toBe(true);
+    expect(String(watchdog.signal.reason)).toContain(
+      "Chat stream timed out after 5000ms."
+    );
+  });
+
   it("does not abort after the watchdog is cancelled", () => {
     vi.useFakeTimers();
 

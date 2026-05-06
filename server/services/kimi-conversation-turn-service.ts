@@ -7,6 +7,10 @@ import {
   type KimiToolCall,
 } from "../kimi/chat-client.js";
 import {
+  createChatTurnTrace,
+  type ChatTurnFailureKind,
+} from "./chat-turn-trace.js";
+import {
   buildAuraMedicalMetadata,
   resolveAuraRuntimeOptions,
 } from "./aura-medical-runtime.js";
@@ -205,10 +209,25 @@ export class KimiConversationTurnService {
     streamPrimary?: boolean;
     onStage?: (stage: ChatStage) => void | Promise<void>;
     onTextDelta?: (delta: string) => void | Promise<void>;
+    traceContext?: {
+      requestId: string;
+      route: string;
+    };
   }) {
     const { conversationRepository, agentRunRepository, contextLoader, kimiClient, toolExecutor } =
       this.dependencies;
     let primaryRunId: number | null = null;
+    let failureKind: ChatTurnFailureKind = "unknown";
+    const trace = createChatTurnTrace({
+      requestId:
+        params.traceContext?.requestId ?? globalThis.crypto.randomUUID().slice(0, 8),
+      route: params.traceContext?.route ?? "/api/kimi/chat/stream",
+      conversationId: params.input.conversationId,
+      userId: params.userId,
+      agentId: params.input.agentId,
+      runtimeVersion: params.input.runtimeVersion,
+      medicalMode: params.input.medicalMode,
+    });
 
     const conversation = await conversationRepository.requireConversationOwner(
       params.input.conversationId,
@@ -216,11 +235,14 @@ export class KimiConversationTurnService {
     );
 
     try {
+      trace.debug("start");
       await params.onStage?.({
         id: "memory",
         label: "Loading Kimi memory and Aura context",
       });
+      trace.markStage("memory", "Loading Kimi memory and Aura context");
 
+      failureKind = "context-load";
       const context = await contextLoader({
         userId: params.userId,
         conversationId: params.input.conversationId,
@@ -229,6 +251,12 @@ export class KimiConversationTurnService {
         runtimeVersion: params.input.runtimeVersion,
         medicalMode: params.input.medicalMode,
         policyLevel: params.input.policyLevel,
+      });
+      trace.debug("context.loaded", {
+        hasSummary: Boolean(context.conversationSummary),
+        longTermMemoryCount: context.longTermMemories.length,
+        vaultChunkCount: context.selectedVaultChunks.length,
+        enabledToolCount: context.enabledFormulaTools.length,
       });
       const runtimeOptions = resolveAuraRuntimeOptions({
         runtimeVersion: params.input.runtimeVersion,
@@ -271,7 +299,11 @@ export class KimiConversationTurnService {
         context.trainingNotes?.trim()
           ? `Agent operating notes:\n${context.trainingNotes.trim()}`
           : "",
-        buildResponseStyleInstruction(context.responseStyle),
+        buildResponseStyleInstruction({
+          responseStyle: context.responseStyle,
+          medicalMode: runtimeOptions.medicalMode,
+          agentId: params.input.agentId,
+        }),
         contextPayload.systemContext,
       ]
         .filter(Boolean)
@@ -295,6 +327,10 @@ export class KimiConversationTurnService {
 
       let effectiveThinkingMode =
         tools.length > 0 ? "disabled" : context.thinkingMode;
+      trace.debug("provider.request.prepare", {
+        enabledToolCount: tools.length,
+        thinkingMode: effectiveThinkingMode,
+      });
       let request = buildKimiChatRequest({
         model: "kimi-k2.6",
         systemPrompt: resolvedSystemPrompt,
@@ -311,15 +347,23 @@ export class KimiConversationTurnService {
         id: "analyze",
         label: context.stageLabels?.analyze ?? "Planning the Kimi turn",
       });
+      trace.markStage("analyze", context.stageLabels?.analyze ?? "Planning the Kimi turn");
 
       const shouldStreamDirectly = params.streamPrimary && tools.length === 0;
       let firstCompletion: KimiCompletionResponse | null = null;
       let directCompletionFromFallback = false;
       if (!shouldStreamDirectly) {
         try {
+          failureKind = "provider-plan";
           firstCompletion = await kimiClient.createChatCompletion(request);
+          trace.debug("provider.plan.completed", {
+            finishReason: firstCompletion.choices?.[0]?.finish_reason ?? null,
+          });
         } catch (error) {
           if (tools.length === 0) {
+            trace.fail("provider-plan", error, {
+              mode: "direct",
+            });
             throw error;
           }
 
@@ -343,6 +387,10 @@ export class KimiConversationTurnService {
             thinking: effectiveThinkingMode,
             messages: contextPayload.messages,
           });
+          trace.debug("provider.plan.fallback-direct", {
+            toolWarningCount: toolWarnings.length,
+          });
+          failureKind = "provider-response";
           firstCompletion = await kimiClient.createChatCompletion(request);
           directCompletionFromFallback = true;
         }
@@ -359,10 +407,19 @@ export class KimiConversationTurnService {
             context.stageLabels?.tools ??
             `Running ${toolCalls.length} Kimi tool call${toolCalls.length === 1 ? "" : "s"}`,
         });
+        trace.markStage(
+          "tools",
+          context.stageLabels?.tools ??
+            `Running ${toolCalls.length} Kimi tool call${toolCalls.length === 1 ? "" : "s"}`
+        );
         try {
           toolResults = await toolExecutor.executeToolCalls({
             toolCalls,
             enabledFormulaUris: context.enabledFormulaTools,
+          });
+          trace.debug("tools.completed", {
+            toolCallCount: toolCalls.length,
+            toolResultCount: toolResults.length,
           });
           await agentRunRepository.saveToolCallBatch({
             agentRunId: primaryRun.id,
@@ -410,6 +467,9 @@ export class KimiConversationTurnService {
             thinking: effectiveThinkingMode,
             messages: contextPayload.messages,
           });
+          trace.fail("provider-plan", error, {
+            step: "tool-execution",
+          });
         }
       }
 
@@ -418,7 +478,12 @@ export class KimiConversationTurnService {
         label:
           context.stageLabels?.draft ?? "Streaming final answer from Kimi",
       });
+      trace.markStage(
+        "draft",
+        context.stageLabels?.draft ?? "Streaming final answer from Kimi"
+      );
 
+      failureKind = params.streamPrimary ? "provider-stream" : "provider-response";
       const finalCompletion = directCompletionFromFallback
         ? firstCompletion
         : params.streamPrimary
@@ -426,6 +491,10 @@ export class KimiConversationTurnService {
               onTextDelta: params.onTextDelta,
             })
           : await kimiClient.createChatCompletion(request);
+      trace.debug("provider.response.completed", {
+        streamed: Boolean(params.streamPrimary && !directCompletionFromFallback),
+        finishReason: finalCompletion?.choices?.[0]?.finish_reason ?? null,
+      });
 
       if (!finalCompletion) {
         throw new Error("Kimi did not return a completion payload.");
@@ -456,11 +525,16 @@ export class KimiConversationTurnService {
         }),
       };
 
+      failureKind = "assistant-persist";
       const assistantMessage = await conversationRepository.createAssistantMessage({
         conversationId: params.input.conversationId,
         content: outputText,
         agentId: params.input.agentId,
         metadata: assistantMetadata,
+      });
+      trace.debug("assistant.persisted", {
+        assistantMessageId: assistantMessage.id,
+        outputLength: outputText.length,
       });
 
       await conversationRepository.updateConversationAfterTurn({
@@ -470,6 +544,7 @@ export class KimiConversationTurnService {
         orchestrationMode: "single_agent",
       });
 
+      failureKind = "message-context";
       await agentRunRepository.createMessageContextBlocks({
         conversationId: params.input.conversationId,
         messageId: assistantMessage.id,
@@ -479,6 +554,7 @@ export class KimiConversationTurnService {
         toolResults,
       });
 
+      failureKind = "run-finalize";
       await agentRunRepository.finalizePrimaryRun(primaryRun.id, {
         messageId: assistantMessage.id,
         providerId: null,
@@ -494,6 +570,9 @@ export class KimiConversationTurnService {
         thinkingMode: effectiveThinkingMode,
         toolCallsJson: toolCalls,
         usageJson: extractKimiUsage(finalCompletion),
+      });
+      trace.debug("completed", {
+        assistantMessageId: assistantMessage.id,
       });
 
       void persistKimiTurnMemory({
@@ -535,6 +614,7 @@ export class KimiConversationTurnService {
               : "Kimi V1 turn failed unexpectedly.",
         });
       }
+      trace.fail(failureKind, error);
       throw error;
     }
   }
@@ -634,15 +714,43 @@ function buildToolFollowupMessages(input: {
 }
 
 function buildResponseStyleInstruction(
-  responseStyle: "concise" | "detailed" | "academic",
+  input: {
+    responseStyle: "concise" | "detailed" | "academic";
+    medicalMode?: "personal-health" | "research";
+    agentId?: string;
+  },
 ) {
-  switch (responseStyle) {
+  const isResearchTurn =
+    input.medicalMode === "research" || input.agentId === "research-synthesizer";
+
+  if (isResearchTurn) {
+    return [
+      "Answer in structured markdown.",
+      "Use short sections with short paragraphs.",
+      "Lead with `Direct answer`.",
+      "Use these sections when they fit the question: `Direct answer`, `What the evidence suggests`, `Evidence quality`, `Risks or limits`, `Practical takeaway`.",
+      "Prefer concise bullets over long dense paragraphs.",
+      "Separate established evidence from inference or speculation clearly.",
+    ].join(" ");
+  }
+
+  switch (input.responseStyle) {
     case "concise":
-      return "Response style: keep answers compact, direct, and easy to scan.";
+      return [
+        "Response style: keep answers compact, direct, and easy to scan.",
+        "Lead with `Direct answer` and keep paragraphs short.",
+      ].join(" ");
     case "academic":
-      return "Response style: use a technical tone, distinguish evidence from inference, and surface uncertainty clearly.";
+      return [
+        "Response style: use a technical tone, distinguish evidence from inference, and surface uncertainty clearly.",
+        "Use structured markdown with short sections and short paragraphs.",
+      ].join(" ");
     case "detailed":
     default:
-      return "Response style: be structured, practical, and sufficiently detailed without drifting into filler.";
+      return [
+        "Response style: be structured, practical, and sufficiently detailed without drifting into filler.",
+        "Lead with `Direct answer`, then use short sections for `What stands out`, `What this may mean`, and `Best next step` when helpful.",
+        "Prefer bullets over dense blocks of prose.",
+      ].join(" ");
   }
 }

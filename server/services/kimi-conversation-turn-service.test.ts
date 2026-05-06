@@ -664,4 +664,98 @@ describe("KimiConversationTurnService", () => {
     );
     expect(result.assistantMessage?.content).toContain("no sigas repitiendolo");
   });
+
+  it("uses a more scannable response contract for research-mode turns", async () => {
+    const conversationRepository = {
+      requireConversationOwner: vi.fn().mockResolvedValue({
+        id: 55,
+        title: "Research structure conversation",
+      }),
+      createUserMessage: vi.fn().mockResolvedValue({ id: 701 }),
+      createAssistantMessage: vi.fn().mockResolvedValue({
+        id: 702,
+        createdAt: new Date("2026-05-06T03:20:00.000Z"),
+      }),
+      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const agentRunRepository = {
+      createPrimaryRun: vi.fn().mockResolvedValue({ id: 703 }),
+      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
+      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
+      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const kimiClient = {
+      createChatCompletion: vi.fn(),
+      streamChatCompletion: vi.fn().mockResolvedValue({
+        id: "chatcmpl-research-structured",
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              role: "assistant",
+              content: "Direct answer: still exploratory.",
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 72,
+          completion_tokens: 22,
+          total_tokens: 94,
+        },
+      }),
+    };
+
+    const toolExecutor = {
+      getEnabledTools: vi.fn().mockResolvedValue([]),
+      executeToolCalls: vi.fn(),
+    };
+
+    const contextLoader = vi.fn().mockResolvedValue({
+      systemPrompt: "You are Aura Medical Runtime.",
+      responseStyle: "detailed",
+      recentMessages: [],
+      conversationSummary: null,
+      longTermMemories: [],
+      selectedVaultChunks: [],
+      relatedVaultFiles: [],
+      enabledFormulaTools: [],
+      thinkingMode: "enabled",
+    });
+
+    const service = new KimiConversationTurnService({
+      conversationRepository,
+      agentRunRepository,
+      kimiClient,
+      toolExecutor,
+      contextLoader,
+    });
+
+    await service.executeTurn({
+      input: {
+        conversationId: 55,
+        content: "Busca research de peptidos para crecimiento muscular.",
+        agentId: "research-synthesizer",
+        calledAgentIds: [],
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: "research",
+        policyLevel: "interpretive-on-request",
+      },
+      userId: 40,
+      streamPrimary: true,
+      onTextDelta: vi.fn(),
+    });
+
+    const streamedRequest = kimiClient.streamChatCompletion.mock.calls[0]?.[0];
+    const systemPrompt = streamedRequest.messages[0]?.content;
+    expect(systemPrompt).toContain("Answer in structured markdown.");
+    expect(systemPrompt).toContain("Use short sections with short paragraphs.");
+    expect(systemPrompt).toContain("Lead with `Direct answer`.");
+    expect(systemPrompt).toContain("Use these sections");
+    expect(systemPrompt).toContain("Evidence quality");
+    expect(systemPrompt).toContain("Practical takeaway");
+  });
 });

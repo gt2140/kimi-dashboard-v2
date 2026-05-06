@@ -28,6 +28,10 @@ The app runs on:
 http://localhost:3000
 ```
 
+Development now requires `http://localhost:3000` specifically.
+If that port is already occupied, `npm run dev` fails fast with guidance instead of silently moving to another port.
+This keeps the browser session, local API, and Supabase callback origin aligned to one runtime.
+
 ## Required environment
 
 Create `app/.env` with:

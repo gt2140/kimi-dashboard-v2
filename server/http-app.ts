@@ -19,10 +19,11 @@ import {
 import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
 import { getDb } from "./queries/connection.js";
 import { readOriginalVaultFile } from "./services/vault-original-file.js";
+import { logServerDebug } from "./lib/debug.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 
-const CHAT_ROUTE_TIMEOUT_MS = 45_000;
+const CHAT_ROUTE_TIMEOUT_MS = 120_000;
 
 function createNdjsonStreamResponse(
   run: (streamController: TurnStreamController) => Promise<void>,
@@ -98,10 +99,22 @@ app.post("/api/chat/stream", async (c) => {
   }
 
   return createNdjsonStreamResponse(async streamController => {
+    const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+    logServerDebug("chat.turn.route.start", {
+      requestId,
+      route: "/api/chat/stream",
+      conversationId: parsed.data.conversationId,
+      agentId: parsed.data.agentId,
+      userId: user.id,
+    });
     const result = await sendChatMessage({
       input: parsed.data,
       userId: user.id,
       streamPrimary: true,
+      traceContext: {
+        requestId,
+        route: "/api/chat/stream",
+      },
       onStage: async stage => {
         streamController.emitStage(stage);
       },
@@ -150,10 +163,22 @@ app.post("/api/kimi/chat/stream", async (c) => {
   }
 
   return createNdjsonStreamResponse(async streamController => {
+    const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+    logServerDebug("chat.turn.route.start", {
+      requestId,
+      route: "/api/kimi/chat/stream",
+      conversationId: parsed.data.conversationId,
+      agentId: parsed.data.agentId,
+      userId: user.id,
+    });
     const result = await kimiConversationTurnService.executeTurn({
       input: parsed.data,
       userId: user.id,
       streamPrimary: true,
+      traceContext: {
+        requestId,
+        route: "/api/kimi/chat/stream",
+      },
       onStage: async stage => {
         streamController.emitStage(stage);
       },
@@ -202,6 +227,15 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
   }
 
   return createNdjsonStreamResponse(async streamController => {
+    const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+    logServerDebug("chat.turn.route.start", {
+      requestId,
+      route: "/api/aura-medical/chat/stream",
+      conversationId: parsed.data.conversationId,
+      agentId: parsed.data.agentId,
+      userId: user.id,
+      medicalMode: parsed.data.medicalMode ?? "personal-health",
+    });
     const result = await auraMedicalConversationTurnService.executeTurn({
       input: {
         ...parsed.data,
@@ -209,6 +243,10 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
       },
       userId: user.id,
       streamPrimary: true,
+      traceContext: {
+        requestId,
+        route: "/api/aura-medical/chat/stream",
+      },
       onStage: async stage => {
         streamController.emitStage(stage);
       },

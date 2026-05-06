@@ -17,65 +17,13 @@ import {
   parseChatStreamChunk,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
-import type { ChatSession, Message } from "@/types";
+import { mapConversationSummary, mapMessage } from "@/hooks/kimi-chat-mappers";
+import { createPersistedCompletionReader } from "@/hooks/kimi-chat-recovery";
 
-const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
+const CHAT_STREAM_INITIAL_TIMEOUT_MS = 90_000;
+const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 const STREAM_RECOVERY_POLL_ATTEMPTS = 6;
 const STREAM_RECOVERY_POLL_DELAY_MS = 750;
-
-function mapConversationSummary(item: {
-  id: number;
-  agentId: string;
-  title: string | null;
-  createdAt: Date | string;
-  updatedAt: Date | string;
-  calledAgentIds?: string[];
-}): ChatSession {
-  return {
-    id: String(item.id),
-    agentId: item.agentId,
-    calledAgentIds: item.calledAgentIds ?? [],
-    title: item.title || "New conversation",
-    messages: [],
-    createdAt: new Date(item.createdAt),
-    updatedAt: new Date(item.updatedAt),
-  };
-}
-
-function mapMessage(item: {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-  agentId: string | null;
-  createdAt: Date | string;
-  metadata?: Message["metadata"];
-}): Message {
-  return {
-    id: String(item.id),
-    role: item.role,
-    content: item.content,
-    agentId: item.agentId ?? "generalist",
-    timestamp: new Date(item.createdAt),
-    metadata: item.metadata,
-  };
-}
-
-function findLastMatchingUserIndex(
-  items: Array<{
-    role: "user" | "assistant";
-    content: string;
-  }>,
-  target: string,
-) {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (item.role === "user" && item.content === target) {
-      return index;
-    }
-  }
-
-  return -1;
-}
 
 export function useKimiChatData() {
   const navigate = useNavigate();
@@ -210,67 +158,26 @@ export function useKimiChatData() {
     const streamWatchdog = createChatStreamWatchdog(
       CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
       "Kimi chat stream",
+      {
+        initialTimeoutMs: CHAT_STREAM_INITIAL_TIMEOUT_MS,
+      },
     );
 
-    const readPersistedCompletion = async () => {
-      const normalizedTarget = content.trim();
-
-      for (
-        let attempt = 0;
-        attempt < STREAM_RECOVERY_POLL_ATTEMPTS;
-        attempt += 1
-      ) {
-        await utils.chat.getConversation.invalidate({ id: conversationId });
-        const snapshot = await utils.chat.getConversation.fetch({
-          id: conversationId,
+    const readPersistedCompletion = createPersistedCompletionReader({
+      conversationId,
+      userMessage: content,
+      activeAgentId,
+      pollAttempts: STREAM_RECOVERY_POLL_ATTEMPTS,
+      pollDelayMs: STREAM_RECOVERY_POLL_DELAY_MS,
+      invalidateConversation: args => utils.chat.getConversation.invalidate(args),
+      fetchConversation: args => utils.chat.getConversation.fetch(args),
+      onRecoveredMessage: message => {
+        handlers.onMessageComplete?.({
+          type: "message-complete",
+          message,
         });
-        const conversationMessages = snapshot?.messages ?? [];
-        const normalizedMessages = conversationMessages.map(message => ({
-            role: message.role,
-            content:
-              typeof message.content === "string" ? message.content.trim() : "",
-          }));
-        const matchingUserIndex = findLastMatchingUserIndex(
-          normalizedMessages,
-          normalizedTarget,
-        );
-
-        if (matchingUserIndex >= 0) {
-          const persistedAssistant = conversationMessages
-            .slice(matchingUserIndex + 1)
-            .find(message => message.role === "assistant");
-
-          if (persistedAssistant) {
-            const recoveredMessage = {
-              id: String(persistedAssistant.id),
-              role: "assistant" as const,
-              content: persistedAssistant.content,
-              agentId: persistedAssistant.agentId ?? activeAgentId,
-              createdAt:
-                persistedAssistant.createdAt instanceof Date
-                  ? persistedAssistant.createdAt.toISOString()
-                  : new Date(persistedAssistant.createdAt).toISOString(),
-              metadata: persistedAssistant.metadata,
-            };
-
-            handlers.onMessageComplete?.({
-              type: "message-complete",
-              message: recoveredMessage,
-            });
-
-            return recoveredMessage;
-          }
-        }
-
-        if (attempt < STREAM_RECOVERY_POLL_ATTEMPTS - 1) {
-          await new Promise(resolve =>
-            setTimeout(resolve, STREAM_RECOVERY_POLL_DELAY_MS),
-          );
-        }
-      }
-
-      return null;
-    };
+      },
+    });
 
     try {
       async function openStream(forceSessionRefresh = false) {

@@ -102,6 +102,14 @@ function normalizePreview(text: string | null | undefined) {
 }
 
 function deriveVaultState(file: KimiVaultFile): DerivedVaultState {
+  if (file.status === "failed") {
+    return "failed";
+  }
+
+  if (file.status === "processing") {
+    return "processing";
+  }
+
   if (file.extractionStatus === "failed") {
     return "failed";
   }
@@ -115,6 +123,22 @@ function deriveVaultState(file: KimiVaultFile): DerivedVaultState {
   }
 
   return "needs-reupload";
+}
+
+function describeVaultLinkState(file: KimiVaultFile) {
+  if (file.remoteFileId) {
+    return "linked";
+  }
+
+  if (file.extractionStatus === "ready" && file.encryptedUrl) {
+    return "saved local";
+  }
+
+  if (file.encryptedUrl) {
+    return "saved local";
+  }
+
+  return "local only";
 }
 
 export default function KimiVault() {
@@ -347,8 +371,9 @@ export default function KimiVault() {
             Archivos listos para retrieval
           </h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
-            Cada archivo debe quedar vinculado a Kimi y con texto extraido antes
-            de usarse bien en chat.
+            Cada archivo se guarda primero y despues intentamos extraer texto
+            para que el chat lo pueda usar. Si la extraccion falla, el archivo
+            igual queda persistido.
           </p>
         </div>
 
@@ -446,7 +471,7 @@ export default function KimiVault() {
                       <StatusPill status={derivedState} />
                     </div>
                     <div className="flex items-center text-[10px] text-muted-foreground/35">
-                      {file.remoteFileId ? "linked" : "local only"}
+                      {describeVaultLinkState(file)}
                     </div>
                     <div className="flex items-center justify-end gap-1">
                       <Button

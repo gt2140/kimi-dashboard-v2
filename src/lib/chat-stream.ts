@@ -32,6 +32,10 @@ type ChatStreamWatchdog = {
   cancel: () => void;
 };
 
+type ChatStreamWatchdogOptions = {
+  initialTimeoutMs?: number;
+};
+
 type ChatStreamEvent =
   | ChatStreamStageEvent
   | ChatStreamTextDeltaEvent
@@ -101,12 +105,13 @@ export function isRecoverableChatStreamError(error: unknown) {
 
 export function createChatStreamWatchdog(
   timeoutMs: number,
-  label = "Chat stream"
+  label = "Chat stream",
+  options: ChatStreamWatchdogOptions = {},
 ): ChatStreamWatchdog {
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  const arm = () => {
+  const arm = (nextTimeoutMs: number) => {
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
@@ -115,10 +120,10 @@ export function createChatStreamWatchdog(
       if (!controller.signal.aborted) {
         controller.abort(new Error(`${label} timed out after ${timeoutMs}ms.`));
       }
-    }, timeoutMs);
+    }, nextTimeoutMs);
   };
 
-  arm();
+  arm(options.initialTimeoutMs ?? timeoutMs);
 
   return {
     signal: controller.signal,
@@ -127,7 +132,7 @@ export function createChatStreamWatchdog(
         return;
       }
 
-      arm();
+      arm(timeoutMs);
     },
     cancel() {
       if (timeoutId) {
@@ -171,4 +176,5 @@ export type {
   ChatStreamMessageCompleteEvent,
   ChatStreamStageEvent,
   ChatStreamTextDeltaEvent,
+  ChatStreamWatchdogOptions,
 };

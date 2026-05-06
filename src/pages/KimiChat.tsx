@@ -20,9 +20,14 @@ import { useChatStore } from "@/hooks/useStore";
 import { resolveAuraRuntimeOptions } from "@/lib/aura-runtime";
 import { AGENTS } from "@/lib/data";
 import {
-  buildPendingTurnStages,
   type PendingTurnStage,
 } from "@/lib/chat-experience";
+import { buildKimiChatTimeline } from "@/lib/kimi-chat-timeline";
+import {
+  applyRuntimeStageUpdate,
+  createInitialPendingStages,
+  resolveActiveStageIndex,
+} from "@/lib/kimi-chat-stages";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types";
 
@@ -75,7 +80,6 @@ export default function KimiChat() {
   const [streamingAssistant, setStreamingAssistant] =
     useState<StreamingAssistant | null>(null);
   const [showHelperPicker, setShowHelperPicker] = useState(false);
-  const hasReceivedRuntimeStageRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
@@ -88,23 +92,16 @@ export default function KimiChat() {
     agent => agent.id !== activeAgentId && !calledAgentIds.includes(agent.id),
   );
 
-  const displayedMessages = useMemo(() => {
-    if (!streamingAssistant) {
-      return messages;
-    }
-
-    return [
-      ...messages,
-      {
-        id: "kimi-streaming",
-        role: "assistant" as const,
-        content: streamingAssistant.content,
-        agentId: activeAgentId,
-        timestamp: new Date(),
-        metadata: streamingAssistant.metadata,
-      },
-    ];
-  }, [activeAgentId, messages, streamingAssistant]);
+  const displayedMessages = useMemo(
+    () =>
+      buildKimiChatTimeline({
+        messages,
+        activeAgentId,
+        pendingUserMessage,
+        streamingAssistant,
+      }),
+    [activeAgentId, messages, pendingUserMessage, streamingAssistant],
+  );
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -112,7 +109,7 @@ export default function KimiChat() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [displayedMessages, pendingUserMessage, pendingStages, scrollToBottom]);
+  }, [displayedMessages, pendingStages, scrollToBottom]);
 
   useEffect(() => {
     if (!streamingAssistant || messages.length === 0) {
@@ -139,59 +136,36 @@ export default function KimiChat() {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
   }, [input]);
 
+  const showPendingStages =
+    isSending &&
+    pendingStages.length > 0 &&
+    !(streamingAssistant?.content.trim());
+
   const handleSend = useCallback(async () => {
     if (!input.trim() || isSending) {
       return;
     }
 
     const content = input.trim();
-    const predictedStages = buildPendingTurnStages({
-      primaryAgentId: activeAgentId,
-      helperAgentIds: calledAgentIds,
-      userMessage: content,
-    });
-
     setPendingUserMessage(content);
-    setPendingStages(predictedStages);
+    setPendingStages(createInitialPendingStages());
     setActiveStageIndex(0);
     setStreamingAssistant(null);
-    hasReceivedRuntimeStageRef.current = false;
     setInput("");
 
     try {
       await streamMessage(content, {
         onStage: stage => {
           setPendingStages(current => {
-            if (!hasReceivedRuntimeStageRef.current) {
-              hasReceivedRuntimeStageRef.current = true;
-              setActiveStageIndex(0);
-              return [{ id: stage.stageId, label: stage.label }];
-            }
-
-            const existingIndex = current.findIndex(item => item.id === stage.stageId);
-            if (existingIndex >= 0) {
-              setActiveStageIndex(existingIndex);
-              return current.map((item, index) =>
-                index === existingIndex
-                  ? { id: stage.stageId, label: stage.label }
-                  : item,
-              );
-            }
-
-            const next = [...current, { id: stage.stageId, label: stage.label }];
-            setActiveStageIndex(next.length - 1);
+            const next = applyRuntimeStageUpdate(current, {
+              id: stage.stageId,
+              label: stage.label,
+            });
+            setActiveStageIndex(resolveActiveStageIndex(next));
             return next;
           });
         },
         onTextDelta: event => {
-          const draftStageIndex = predictedStages.findIndex(
-            item => item.id === "draft",
-          );
-
-          if (draftStageIndex >= 0) {
-            setActiveStageIndex(current => Math.max(current, draftStageIndex));
-          }
-
           setStreamingAssistant(current => ({
             content: `${current?.content ?? ""}${event.delta}`,
             metadata: current?.metadata,
@@ -204,6 +178,9 @@ export default function KimiChat() {
           });
         },
       });
+    } catch (error) {
+      setInput(current => (current.trim().length > 0 ? current : content));
+      throw error;
     } finally {
       setPendingUserMessage(null);
       setPendingStages([]);
@@ -324,40 +301,36 @@ export default function KimiChat() {
                     isStreaming={message.id === "kimi-streaming"}
                   />
                 ))}
-                {pendingUserMessage && (
-                  <KimiMessageBubble
-                    message={{
-                      id: "pending-user",
-                      role: "user",
-                      content: pendingUserMessage,
-                      agentId: activeAgentId,
-                      timestamp: new Date(),
-                    }}
-                  />
-                )}
-                {isSending && pendingStages.length > 0 && (
+                {showPendingStages && (
                   <div className="rounded-2xl border border-border/30 bg-background/40 p-3">
                     <div className="flex items-center gap-2 text-[12px] text-muted-foreground/55">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       {pendingStages[activeStageIndex]?.label ?? "Working"}
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {pendingStages.map((stage, index) => (
-                        <span
-                          key={stage.id}
-                          className={cn(
-                            "rounded-full border px-2.5 py-1 text-[10px]",
-                            index < activeStageIndex
-                              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200/80"
-                              : index === activeStageIndex
-                                ? "border-sky-500/25 bg-sky-500/10 text-sky-200/80"
-                                : "border-border/30 bg-card/25 text-muted-foreground/35",
-                          )}
-                        >
-                          {stage.label}
-                        </span>
-                      ))}
-                    </div>
+                    {pendingStages.length > 1 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {pendingStages
+                          .filter((_, index) => index !== activeStageIndex)
+                          .map((stage, index) => {
+                            const originalIndex = pendingStages.findIndex(
+                              item => item.id === stage.id
+                            );
+                            return (
+                              <span
+                                key={`${stage.id}-${index}`}
+                                className={cn(
+                                  "rounded-full border px-2.5 py-1 text-[10px]",
+                                  originalIndex < activeStageIndex
+                                    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200/80"
+                                    : "border-border/30 bg-card/25 text-muted-foreground/35",
+                                )}
+                              >
+                                {stage.label}
+                              </span>
+                            );
+                          })}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div ref={messagesEndRef} />

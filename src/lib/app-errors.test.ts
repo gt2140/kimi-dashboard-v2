@@ -54,4 +54,15 @@ describe("formatRuntimeError", () => {
       "Runtime error: the chat backend timed out before finishing. Check the deployed API, database connectivity, or model provider."
     );
   });
+
+  it("surfaces provider failures as runtime errors instead of generic network failures", () => {
+    expect(
+      formatRuntimeError(
+        new Error("Kimi request failed (502): upstream error"),
+        "Kimi chat"
+      )
+    ).toBe(
+      "Runtime error: the model provider failed to complete the chat turn. Check the local API logs for provider or stream details."
+    );
+  });
 });

@@ -15,6 +15,8 @@ export async function loadKimiTurnContext(params: {
   conversationId: number;
   agentSlug: string;
   latestUserMessage: string;
+  runtimeVersion?: "classic" | "aura-medical-v1";
+  medicalMode?: "personal-health" | "research";
 }) {
   const agent = await getAgentDefinitionBySlug(params.agentSlug);
   if (!agent) {
@@ -104,7 +106,11 @@ export async function loadKimiTurnContext(params: {
     selectedVaultChunks,
     relatedVaultFiles: files.map(file => file.filename),
     enabledFormulaTools,
-    thinkingMode: userSetting?.kimiThinkingMode ?? "enabled",
+    thinkingMode: resolveDefaultKimiThinkingMode({
+      agentSlug: params.agentSlug,
+      medicalMode: params.medicalMode,
+      explicitThinkingMode: userSetting?.kimiThinkingMode ?? null,
+    }),
     promptCacheKey: `kimi:v1:conversation:${params.conversationId}`,
     safetyIdentifier: `user-${params.userId}`,
   };
@@ -167,4 +173,20 @@ function buildEnabledFormulaTools(input: {
   return Array.from(new Set([...defaults, ...input.enabledFormulaTools]));
 }
 
-export { buildEnabledFormulaTools };
+function resolveDefaultKimiThinkingMode(input: {
+  agentSlug: string;
+  medicalMode?: "personal-health" | "research";
+  explicitThinkingMode?: "enabled" | "disabled" | null;
+}) {
+  if (input.explicitThinkingMode) {
+    return input.explicitThinkingMode;
+  }
+
+  if (input.medicalMode === "research" || input.agentSlug === "research-synthesizer") {
+    return "enabled" as const;
+  }
+
+  return "disabled" as const;
+}
+
+export { buildEnabledFormulaTools, resolveDefaultKimiThinkingMode };

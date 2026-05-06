@@ -92,6 +92,10 @@ export async function sendChatMessage(params: {
   streamPrimary?: boolean;
   onStage?: (stage: ChatTurnStage) => void | Promise<void>;
   onTextDelta?: (delta: string) => void | Promise<void>;
+  traceContext?: {
+    requestId: string;
+    route: string;
+  };
 }) {
   return conversationTurnService.executeTurn(params);
 }

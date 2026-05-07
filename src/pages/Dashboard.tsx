@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   ArrowUpRight,
@@ -19,6 +20,7 @@ import { useChatStore } from "@/hooks/useStore";
 import { BUILT_IN_AGENTS } from "@/lib/data";
 import { getMobileOverviewAgents } from "@/lib/dashboard-agents";
 import { cn } from "@/lib/utils";
+import { listVaultDocuments } from "@/lib/vault-client";
 
 const iconMap: Record<string, React.ReactNode> = {
   Brain: <Brain className="h-5 w-5" />,
@@ -36,7 +38,10 @@ export default function Dashboard() {
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
   const { favoriteAgents, favoriteAgentIds } = useAgentCatalog();
   const conversationsQuery = trpc.chat.listConversations.useQuery();
-  const vaultQuery = trpc.vault.list.useQuery();
+  const vaultQuery = useQuery({
+    queryKey: ["vault-documents"],
+    queryFn: listVaultDocuments,
+  });
 
   const recentFiles = useMemo(
     () => (vaultQuery.data ?? []).slice(0, 5),

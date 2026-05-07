@@ -85,12 +85,17 @@ type ContextLoaderResult = {
     value: string;
     confidence?: number | null;
   }>;
+  clinicalProfileSummary: string | null;
   selectedVaultChunks: Array<{
-    vaultFileId: number;
+    documentId: number;
     chunkIndex: number;
     content: string;
   }>;
-  relatedVaultFiles: string[];
+  relatedVaultDocuments: Array<{
+    id: number;
+    filename: string;
+    category: string;
+  }>;
   enabledFormulaTools: string[];
   thinkingMode: "enabled" | "disabled";
   promptCacheKey?: string | null;
@@ -158,9 +163,13 @@ type AgentRunRepositoryLike = {
     conversationId: number;
     messageId: number;
     agentRunId: number;
-    relatedVaultFiles: string[];
+    relatedVaultDocuments: Array<{
+      id: number;
+      filename: string;
+      category: string;
+    }>;
     vaultChunks?: Array<{
-      vaultFileId: number;
+      documentId: number;
       chunkIndex: number;
       content: string;
     }>;
@@ -185,8 +194,24 @@ type ToolExecutorLike = {
 };
 
 export class KimiConversationTurnService {
+  private readonly dependencies: {
+    conversationRepository: ConversationRepositoryLike;
+    agentRunRepository: AgentRunRepositoryLike;
+    kimiClient: KimiClientLike;
+    toolExecutor: ToolExecutorLike;
+    contextLoader: (params: {
+      userId: number;
+      conversationId: number;
+      agentSlug: string;
+      latestUserMessage: string;
+      runtimeVersion?: "classic" | "aura-medical-v1";
+      medicalMode?: "personal-health" | "research";
+      policyLevel?: "interpretive-on-request";
+    }) => Promise<ContextLoaderResult>;
+  };
+
   constructor(
-    private readonly dependencies: {
+    dependencies: {
       conversationRepository: ConversationRepositoryLike;
       agentRunRepository: AgentRunRepositoryLike;
       kimiClient: KimiClientLike;
@@ -201,7 +226,9 @@ export class KimiConversationTurnService {
         policyLevel?: "interpretive-on-request";
       }) => Promise<ContextLoaderResult>;
     },
-  ) {}
+  ) {
+    this.dependencies = dependencies;
+  }
 
   async executeTurn(params: {
     input: ConversationTurnInput;
@@ -264,7 +291,7 @@ export class KimiConversationTurnService {
         policyLevel: params.input.policyLevel,
       });
 
-      const userMessage = await conversationRepository.createUserMessage({
+      await conversationRepository.createUserMessage({
         conversationId: params.input.conversationId,
         content: params.input.content,
         agentId: params.input.agentId,
@@ -289,6 +316,7 @@ export class KimiConversationTurnService {
         recentMessages: context.recentMessages,
         summary: context.conversationSummary,
         longTermMemories: context.longTermMemories,
+        clinicalProfileSummary: context.clinicalProfileSummary,
         selectedVaultChunks: context.selectedVaultChunks,
       });
       const resolvedSystemPrompt = [
@@ -510,7 +538,9 @@ export class KimiConversationTurnService {
           buildKimiPromptCacheKey(params.input.conversationId),
         thinkingMode: effectiveThinkingMode,
         requestedThinkingMode: context.thinkingMode,
-        relatedVaultFiles: context.relatedVaultFiles,
+        relatedVaultFiles: context.relatedVaultDocuments.map(
+          document => document.filename,
+        ),
         contextSummary: context.conversationSummary ?? undefined,
         memoryApplied: context.longTermMemories.length > 0,
         toolCalls: toolCalls.map(toolCall => toolCall.function.name),
@@ -549,7 +579,7 @@ export class KimiConversationTurnService {
         conversationId: params.input.conversationId,
         messageId: assistantMessage.id,
         agentRunId: primaryRun.id,
-        relatedVaultFiles: context.relatedVaultFiles,
+        relatedVaultDocuments: context.relatedVaultDocuments,
         vaultChunks: context.selectedVaultChunks,
         toolResults,
       });
@@ -632,8 +662,9 @@ function buildContextPayload(input: {
     value: string;
     confidence?: number | null;
   }>;
+  clinicalProfileSummary: string | null;
   selectedVaultChunks: Array<{
-    vaultFileId: number;
+    documentId: number;
     chunkIndex: number;
     content: string;
   }>;
@@ -644,15 +675,26 @@ function buildContextPayload(input: {
     maxRecentMessages: 6,
   });
   const longTermSnippet = buildLongTermMemorySnippet(input.longTermMemories);
+  const clinicalProfileSnippet = input.clinicalProfileSummary?.trim()
+    ? `Clinical profile summary:\n${input.clinicalProfileSummary.trim()}`
+    : "";
   const vaultContext =
     input.selectedVaultChunks.length > 0
-      ? `Vault context:\n${input.selectedVaultChunks
-          .map(chunk => `- [file ${chunk.vaultFileId} chunk ${chunk.chunkIndex}] ${chunk.content}`)
+      ? `Relevant vault excerpts:\n${input.selectedVaultChunks
+          .map(
+            chunk =>
+              `- [document ${chunk.documentId} chunk ${chunk.chunkIndex}] ${chunk.content}`,
+          )
           .join("\n")}`
       : "";
 
   return {
-    systemContext: [shortTerm.summaryBlock, longTermSnippet, vaultContext]
+    systemContext: [
+      shortTerm.summaryBlock,
+      longTermSnippet,
+      clinicalProfileSnippet,
+      vaultContext,
+    ]
       .filter(Boolean)
       .join("\n\n"),
     messages: [
@@ -739,11 +781,24 @@ function buildResponseStyleInstruction(
       return [
         "Response style: keep answers compact, direct, and easy to scan.",
         "Lead with `Direct answer` and keep paragraphs short.",
+        ...(input.agentId === "bloodwork"
+          ? [
+              "When vault bloodwork context is present, treat the parsed bloodwork summary as the primary source of truth and use vault excerpts as secondary evidence.",
+              "Do not claim that pages are missing unless the provided context explicitly says extraction confidence is low or that pages were unavailable.",
+              "Separate unavailable data from unparsed or low-confidence data clearly.",
+            ]
+          : []),
       ].join(" ");
     case "academic":
       return [
         "Response style: use a technical tone, distinguish evidence from inference, and surface uncertainty clearly.",
         "Use structured markdown with short sections and short paragraphs.",
+        ...(input.agentId === "bloodwork"
+          ? [
+              "Use the parsed bloodwork summary as the primary context layer when it is available.",
+              "Do not infer missing pages unless the vault context explicitly marks extraction gaps.",
+            ]
+          : []),
       ].join(" ");
     case "detailed":
     default:
@@ -751,6 +806,13 @@ function buildResponseStyleInstruction(
         "Response style: be structured, practical, and sufficiently detailed without drifting into filler.",
         "Lead with `Direct answer`, then use short sections for `What stands out`, `What this may mean`, and `Best next step` when helpful.",
         "Prefer bullets over dense blocks of prose.",
+        ...(input.agentId === "bloodwork"
+          ? [
+              "For bloodwork review, prioritize the parsed bloodwork summary and panel coverage over isolated vault chunks.",
+              "Only say that pages or values are missing when the context explicitly signals low extraction confidence or absent measurements.",
+              "If a marker is not present, say it is not available in the parsed context rather than assuming the PDF pages are missing.",
+            ]
+          : []),
       ].join(" ");
   }
 }

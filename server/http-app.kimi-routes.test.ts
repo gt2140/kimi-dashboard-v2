@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { app } from "./http-app.js";
 
-describe("Kimi HTTP routes", () => {
+describe("Vault V2 HTTP routes", () => {
   it("protects kimi chat stream with auth", async () => {
     const response = await app.fetch(
       new Request("http://localhost/api/kimi/chat/stream", {
@@ -16,7 +16,7 @@ describe("Kimi HTTP routes", () => {
     expect(response.status).toBe(401);
   });
 
-  it("protects kimi vault upload with auth", async () => {
+  it("protects vault v2 upload with auth", async () => {
     const formData = new FormData();
     formData.append("category", "bloodwork");
     formData.append(
@@ -25,7 +25,7 @@ describe("Kimi HTTP routes", () => {
     );
 
     const response = await app.fetch(
-      new Request("http://localhost/api/kimi/vault/upload", {
+      new Request("http://localhost/api/vault/documents", {
         method: "POST",
         body: formData,
       }),
@@ -34,9 +34,9 @@ describe("Kimi HTTP routes", () => {
     expect(response.status).toBe(401);
   });
 
-  it("protects kimi vault file preview with auth", async () => {
+  it("protects vault v2 list with auth", async () => {
     const response = await app.fetch(
-      new Request("http://localhost/api/kimi/vault/file/42"),
+      new Request("http://localhost/api/vault/documents"),
     );
 
     expect(response.status).toBe(401);

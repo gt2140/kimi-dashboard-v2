@@ -124,8 +124,10 @@ describe("KimiConversationTurnService", () => {
       recentMessages: [],
       conversationSummary: "Prior turns discussed lipids.",
       longTermMemories: [{ key: "goal", value: "Lower ApoB" }],
+      clinicalProfileSummary:
+        "Clinical profile summary:\n- bloodwork | apob-panel.pdf: ApoB 72 mg/dL.",
       selectedVaultChunks: [],
-      relatedVaultFiles: [],
+      relatedVaultDocuments: [],
       enabledFormulaTools: ["moonshot/memory:latest"],
       thinkingMode: "enabled",
       promptCacheKey: "kimi:v1:conversation:12",
@@ -261,8 +263,9 @@ describe("KimiConversationTurnService", () => {
       recentMessages: [],
       conversationSummary: null,
       longTermMemories: [],
+      clinicalProfileSummary: null,
       selectedVaultChunks: [],
-      relatedVaultFiles: [],
+      relatedVaultDocuments: [],
       enabledFormulaTools: [
         "moonshot/memory:latest",
         "moonshot/web-search:latest",
@@ -368,8 +371,9 @@ describe("KimiConversationTurnService", () => {
       recentMessages: [],
       conversationSummary: null,
       longTermMemories: [],
+      clinicalProfileSummary: null,
       selectedVaultChunks: [],
-      relatedVaultFiles: [],
+      relatedVaultDocuments: [],
       enabledFormulaTools: [],
       thinkingMode: "enabled",
     });
@@ -501,8 +505,16 @@ describe("KimiConversationTurnService", () => {
       recentMessages: [],
       conversationSummary: "The user is comparing ApoB evidence.",
       longTermMemories: [],
+      clinicalProfileSummary:
+        "Clinical profile summary:\n- bloodwork | apob-panel.pdf: ApoB 72 mg/dL.",
       selectedVaultChunks: [],
-      relatedVaultFiles: ["apob-panel.pdf"],
+      relatedVaultDocuments: [
+        {
+          id: 41,
+          filename: "apob-panel.pdf",
+          category: "bloodwork",
+        },
+      ],
       enabledFormulaTools: [
         "moonshot/memory:latest",
         "moonshot/web-search:latest",
@@ -619,8 +631,9 @@ describe("KimiConversationTurnService", () => {
       recentMessages: [],
       conversationSummary: null,
       longTermMemories: [],
+      clinicalProfileSummary: null,
       selectedVaultChunks: [],
-      relatedVaultFiles: [],
+      relatedVaultDocuments: [],
       enabledFormulaTools: ["moonshot/web-search:latest"],
       thinkingMode: "enabled",
       runtimeMetadata: {
@@ -720,8 +733,9 @@ describe("KimiConversationTurnService", () => {
       recentMessages: [],
       conversationSummary: null,
       longTermMemories: [],
+      clinicalProfileSummary: null,
       selectedVaultChunks: [],
-      relatedVaultFiles: [],
+      relatedVaultDocuments: [],
       enabledFormulaTools: [],
       thinkingMode: "enabled",
     });

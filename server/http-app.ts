@@ -4,24 +4,17 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { createContext } from "./trpc/context.js";
 import { appRouter } from "./trpc/router.js";
 import { authenticateRequest } from "./trpc/auth.js";
-import {
-  chatSendMessageInputSchema,
-  sendChatMessage,
-} from "./trpc/chat-router.js";
-import { and, eq } from "drizzle-orm";
-import { vaultFiles } from "../db/schema.js";
+import { chatSendMessageInputSchema } from "./trpc/chat-router.js";
 import { TurnStreamController } from "./services/turn-stream-controller.js";
 import { withTimeout } from "./services/async-guard.js";
 import {
   auraMedicalConversationTurnService,
-  kimiConversationTurnService,
 } from "./services/kimi-runtime.js";
-import { ingestKimiVaultFile } from "./services/kimi-vault-ingestion.js";
-import { getDb } from "./queries/connection.js";
-import { readOriginalVaultFile } from "./services/vault-original-file.js";
 import { logServerDebug } from "./lib/debug.js";
+import { vaultV2Service } from "./services/vault-v2-service.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
+vaultV2Service.startWorker();
 
 const CHAT_ROUTE_TIMEOUT_MS = 120_000;
 
@@ -107,8 +100,13 @@ app.post("/api/chat/stream", async (c) => {
       agentId: parsed.data.agentId,
       userId: user.id,
     });
-    const result = await sendChatMessage({
-      input: parsed.data,
+    const result = await auraMedicalConversationTurnService.executeTurn({
+      input: {
+        ...parsed.data,
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: parsed.data.medicalMode ?? "personal-health",
+        policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
+      },
       userId: user.id,
       streamPrimary: true,
       traceContext: {
@@ -138,7 +136,7 @@ app.post("/api/chat/stream", async (c) => {
     streamController.fail(
       "Chat turn finished without a persisted assistant message.",
     );
-  }, "Classic chat turn");
+  }, "Unified Aura chat turn");
 });
 app.post("/api/kimi/chat/stream", async (c) => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
@@ -171,13 +169,18 @@ app.post("/api/kimi/chat/stream", async (c) => {
       agentId: parsed.data.agentId,
       userId: user.id,
     });
-    const result = await kimiConversationTurnService.executeTurn({
-      input: parsed.data,
+    const result = await auraMedicalConversationTurnService.executeTurn({
+      input: {
+        ...parsed.data,
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: parsed.data.medicalMode ?? "personal-health",
+        policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
+      },
       userId: user.id,
       streamPrimary: true,
       traceContext: {
         requestId,
-        route: "/api/kimi/chat/stream",
+      route: "/api/kimi/chat/stream",
       },
       onStage: async stage => {
         streamController.emitStage(stage);
@@ -189,7 +192,7 @@ app.post("/api/kimi/chat/stream", async (c) => {
 
     if (!result.assistantMessage) {
       streamController.fail(
-        "Kimi V1 finished without a persisted assistant message.",
+        "Unified Aura runtime finished without a persisted assistant message.",
       );
       return;
     }
@@ -202,7 +205,7 @@ app.post("/api/kimi/chat/stream", async (c) => {
       createdAt: result.assistantMessage.createdAt.toISOString(),
       metadata: result.assistantMessage.metadata,
     });
-  }, "Kimi chat turn");
+  }, "Unified Kimi alias chat turn");
 });
 app.post("/api/aura-medical/chat/stream", async (c) => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
@@ -272,7 +275,7 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
     });
   }, "Aura Medical chat turn");
 });
-app.post("/api/kimi/vault/upload", async c => {
+app.post("/api/vault/documents", async c => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -290,19 +293,34 @@ app.post("/api/kimi/vault/upload", async c => {
   }
 
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const uploaded = await ingestKimiVaultFile({
-      headers: c.req.raw.headers,
+    logServerDebug("vault-v2.upload.start", {
       userId: user.id,
       filename: file.name,
-      fileType: inferFileType(file.name),
+      size: file.size,
+      type: file.type || "application/octet-stream",
+      category,
+    });
+    const arrayBuffer = await file.arrayBuffer();
+    const created = await vaultV2Service.createDocument({
+      userId: user.id,
+      filename: file.name,
+      mimeType: file.type || "application/octet-stream",
       category: normalizeVaultCategory(category),
-      contentType: file.type || "application/octet-stream",
       bytes: new Uint8Array(arrayBuffer),
     });
+    logServerDebug("vault-v2.upload.success", {
+      userId: user.id,
+      vaultDocumentId: created.document.id,
+      filename: file.name,
+    });
 
-    return c.json({ file: uploaded });
+    return c.json(created, 201);
   } catch (error) {
+    logServerDebug("vault-v2.upload.failed", {
+      userId: user.id,
+      filename: file.name,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return c.json(
       {
         error:
@@ -314,7 +332,7 @@ app.post("/api/kimi/vault/upload", async c => {
     );
   }
 });
-app.get("/api/kimi/vault/file/:id", async c => {
+app.get("/api/vault/documents", async c => {
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -323,37 +341,101 @@ app.get("/api/kimi/vault/file/:id", async c => {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
-  const fileId = Number(c.req.param("id"));
-  if (!Number.isFinite(fileId) || fileId <= 0) {
-    return c.json({ error: "Invalid file id." }, 400);
+  try {
+    const documents = await vaultV2Service.listDocuments(user.id);
+    return c.json({ documents });
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Vault V2 list failed unexpectedly.",
+      },
+      500,
+    );
+  }
+});
+app.get("/api/vault/documents/:id", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
   }
 
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(vaultFiles)
-    .where(and(eq(vaultFiles.id, fileId), eq(vaultFiles.userId, user.id)))
-    .limit(1);
-
-  const file = rows[0];
-  if (!file) {
-    return c.json({ error: "File not found." }, 404);
-  }
-
-  if (!file.encryptedUrl) {
-    return c.json({ error: "Original file preview is not available yet." }, 404);
+  const documentId = Number(c.req.param("id"));
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return c.json({ error: "Invalid document id." }, 400);
   }
 
   try {
-    const original = await readOriginalVaultFile({
-      headers: c.req.raw.headers,
-      reference: file.encryptedUrl,
-    });
+    const document = await vaultV2Service.getDocument(user.id, documentId);
+    return c.json({ document });
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Vault V2 document load failed unexpectedly.",
+      },
+      404,
+    );
+  }
+});
+app.get("/api/vault/documents/:id/events", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const documentId = Number(c.req.param("id"));
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return c.json({ error: "Invalid document id." }, 400);
+  }
+
+  try {
+    const events = await vaultV2Service.getDocumentEvents(user.id, documentId);
+    return c.json({ events });
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Vault V2 events failed unexpectedly.",
+      },
+      404,
+    );
+  }
+});
+app.get("/api/vault/documents/:id/original", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const documentId = Number(c.req.param("id"));
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return c.json({ error: "Invalid document id." }, 400);
+  }
+
+  try {
+    const document = await vaultV2Service.getDocument(user.id, documentId);
+    const original = await vaultV2Service.readDocumentOriginal(user.id, documentId);
 
     return new Response(original.bytes, {
       headers: {
         "content-type": original.contentType,
-        "content-disposition": `inline; filename="${file.filename}"`,
+        "content-disposition": `inline; filename="${document.filename}"`,
         "cache-control": "private, max-age=60",
       },
     });
@@ -363,20 +445,117 @@ app.get("/api/kimi/vault/file/:id", async c => {
         error:
           error instanceof Error
             ? error.message
-            : "Vault preview failed unexpectedly.",
+            : "Vault V2 preview failed unexpectedly.",
       },
-      500,
+      404,
+    );
+  }
+});
+app.post("/api/vault/documents/:id/reprocess", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const documentId = Number(c.req.param("id"));
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return c.json({ error: "Invalid document id." }, 400);
+  }
+
+  try {
+    const result = await vaultV2Service.reprocessDocument(user.id, documentId);
+    return c.json(result);
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Vault V2 reprocess failed unexpectedly.",
+      },
+      404,
+    );
+  }
+});
+app.post("/api/vault/documents/:id/reclassify", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const documentId = Number(c.req.param("id"));
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return c.json({ error: "Invalid document id." }, 400);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const category =
+    body && typeof body.category === "string"
+      ? normalizeVaultCategory(body.category)
+      : null;
+
+  if (!category) {
+    return c.json({ error: "A valid category is required." }, 400);
+  }
+
+  try {
+    const result = await vaultV2Service.reclassifyDocument({
+      userId: user.id,
+      documentId,
+      category,
+      reprocess: body?.reprocess !== false,
+    });
+    return c.json(result);
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Vault V2 reclassify failed unexpectedly.",
+      },
+      404,
+    );
+  }
+});
+app.delete("/api/vault/documents/:id", async c => {
+  let user: Awaited<ReturnType<typeof authenticateRequest>>;
+
+  try {
+    user = await authenticateRequest(c.req.raw.headers);
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const documentId = Number(c.req.param("id"));
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return c.json({ error: "Invalid document id." }, 400);
+  }
+
+  try {
+    const result = await vaultV2Service.deleteDocument(user.id, documentId);
+    return c.json(result);
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Vault V2 delete failed unexpectedly.",
+      },
+      404,
     );
   }
 });
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 export default app;
-
-function inferFileType(fileName: string) {
-  const ext = fileName.split(".").pop()?.toLowerCase();
-  return ext ? ext.toUpperCase() : "FILE";
-}
 
 function normalizeVaultCategory(value: string) {
   switch (value) {

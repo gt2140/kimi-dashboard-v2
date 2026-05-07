@@ -6,14 +6,13 @@ import type {
 } from "@contracts/aura-runtime";
 
 const DEFAULT_AURA_RUNTIME_OPTIONS: AuraRuntimeOptions = {
-  runtimeVersion: "classic",
+  runtimeVersion: "aura-medical-v1",
   medicalMode: "personal-health",
   policyLevel: "interpretive-on-request",
 };
 
 export function resolveAuraRuntimeOptions(input: Partial<AuraRuntimeOptions>) {
-  const runtimeVersion: AuraRuntimeVersion =
-    input.runtimeVersion === "aura-medical-v1" ? "aura-medical-v1" : "classic";
+  const runtimeVersion: AuraRuntimeVersion = "aura-medical-v1";
   const medicalMode: AuraMedicalMode =
     input.medicalMode === "research" ? "research" : "personal-health";
   const policyLevel: AuraPolicyLevel = "interpretive-on-request";

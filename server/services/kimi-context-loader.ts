@@ -1,14 +1,17 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import {
   conversationMemories,
   messages,
   userMemories,
-  vaultChunks,
-  vaultFiles,
 } from "../../db/schema.js";
 import { getDb } from "../queries/connection.js";
-import { getActiveSystemPrompt, getAgentDefinitionBySlug, getUserAgentSetting } from "../queries/agents.js";
-import { buildVaultChunks, selectVaultChunksForPrompt } from "./kimi-vault.js";
+import {
+  getActiveSystemPrompt,
+  getAgentDefinitionBySlug,
+  getUserAgentSetting,
+} from "../queries/agents.js";
+import { vaultV2Service } from "./vault-v2-service.js";
+import type { VaultDocumentCategory } from "./vault-v2.js";
 
 export async function loadKimiTurnContext(params: {
   userId: number;
@@ -52,29 +55,12 @@ export async function loadKimiTurnContext(params: {
 
   const allowVaultContext = userSetting?.allowVaultContext ?? true;
   const allowedCategories = allowVaultContext
-    ? (agent.allowedVaultCategories as Array<(typeof vaultFiles.$inferSelect)["category"]>)
+    ? (agent.allowedVaultCategories as VaultDocumentCategory[])
     : [];
-
-  const files =
-    allowedCategories.length === 0
-      ? []
-      : await getDb()
-          .select()
-          .from(vaultFiles)
-          .where(
-            and(
-              eq(vaultFiles.userId, params.userId),
-              inArray(vaultFiles.category, allowedCategories),
-              eq(vaultFiles.extractionStatus, "ready"),
-            ),
-          )
-          .orderBy(desc(vaultFiles.updatedAt))
-          .limit(6);
-
-  const fileChunks = await loadVaultChunks(files);
-  const selectedVaultChunks = selectVaultChunksForPrompt({
+  const vaultContext = await vaultV2Service.loadContext({
+    userId: params.userId,
+    allowedCategories,
     query: params.latestUserMessage,
-    chunks: fileChunks,
     maxChunks: 4,
   });
 
@@ -103,53 +89,18 @@ export async function loadKimiTurnContext(params: {
           ? null
           : Number(memory.confidence),
     })),
-    selectedVaultChunks,
-    relatedVaultFiles: files.map(file => file.filename),
+    clinicalProfileSummary: vaultContext.clinicalProfileSummary,
+    selectedVaultChunks: vaultContext.selectedVaultChunks,
+    relatedVaultDocuments: vaultContext.relatedVaultDocuments,
     enabledFormulaTools,
     thinkingMode: resolveDefaultKimiThinkingMode({
       agentSlug: params.agentSlug,
       medicalMode: params.medicalMode,
       explicitThinkingMode: userSetting?.kimiThinkingMode ?? null,
     }),
-    promptCacheKey: `kimi:v1:conversation:${params.conversationId}`,
+    promptCacheKey: `kimi:v2:conversation:${params.conversationId}`,
     safetyIdentifier: `user-${params.userId}`,
   };
-}
-
-async function loadVaultChunks(
-  files: Array<{
-    id: number;
-    extractedText: string | null;
-  }>,
-) {
-  if (files.length === 0) {
-    return [];
-  }
-
-  const storedChunks = await getDb()
-    .select()
-    .from(vaultChunks)
-    .where(
-      inArray(
-        vaultChunks.vaultFileId,
-        files.map(file => file.id),
-      ),
-    );
-
-  if (storedChunks.length > 0) {
-    return storedChunks.map(chunk => ({
-      vaultFileId: chunk.vaultFileId,
-      chunkIndex: chunk.chunkIndex,
-      content: chunk.content,
-    }));
-  }
-
-  return files.flatMap(file =>
-    buildVaultChunks({
-      vaultFileId: file.id,
-      content: file.extractedText ?? "",
-    }),
-  );
 }
 
 function buildEnabledFormulaTools(input: {
@@ -182,7 +133,10 @@ function resolveDefaultKimiThinkingMode(input: {
     return input.explicitThinkingMode;
   }
 
-  if (input.medicalMode === "research" || input.agentSlug === "research-synthesizer") {
+  if (
+    input.medicalMode === "research" ||
+    input.agentSlug === "research-synthesizer"
+  ) {
     return "enabled" as const;
   }
 

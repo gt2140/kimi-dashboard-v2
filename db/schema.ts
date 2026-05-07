@@ -328,27 +328,23 @@ export const messages = pgTable("messages", {
     .notNull(),
 });
 
-export const vaultFiles = pgTable("vault_files", {
+export const vaultDocuments = pgTable("vault_documents", {
   id: serial("id").primaryKey(),
   userId: integer("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   filename: varchar("filename", { length: 255 }).notNull(),
-  fileType: varchar("file_type", { length: 64 }).notNull(),
+  mimeType: varchar("mime_type", { length: 120 }).notNull(),
   category: vaultCategoryEnum("category").default("other").notNull(),
-  size: integer("size").notNull(),
-  status: vaultStatusEnum("status").default("ready").notNull(),
-  extractionStatus: varchar("extraction_status", { length: 32 })
-    .default("pending")
-    .notNull(),
-  encryptedUrl: text("encrypted_url"),
-  iv: varchar("iv", { length: 255 }),
-  remoteFileId: varchar("remote_file_id", { length: 255 }),
+  sizeBytes: integer("size_bytes").notNull(),
+  status: varchar("status", { length: 32 }).default("uploaded").notNull(),
+  originalRef: text("original_ref"),
   extractedText: text("extracted_text"),
   contentHash: varchar("content_hash", { length: 128 }),
-  extractionError: text("extraction_error"),
-  extractedAt: timestamp("extracted_at", { withTimezone: true }),
-  uploadedAt: timestamp("uploaded_at", { withTimezone: true })
+  errorCode: varchar("error_code", { length: 64 }),
+  errorMessage: text("error_message"),
+  readyAt: timestamp("ready_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -356,14 +352,77 @@ export const vaultFiles = pgTable("vault_files", {
     .notNull(),
 });
 
-export const vaultChunks = pgTable("vault_chunks", {
+export const vaultDocumentRuns = pgTable("vault_document_runs", {
   id: serial("id").primaryKey(),
-  vaultFileId: integer("vault_file_id")
+  documentId: integer("document_id")
     .notNull()
-    .references(() => vaultFiles.id, { onDelete: "cascade" }),
+    .references(() => vaultDocuments.id, { onDelete: "cascade" }),
+  attempt: integer("attempt").default(1).notNull(),
+  status: varchar("status", { length: 32 }).default("queued").notNull(),
+  currentStage: varchar("current_stage", { length: 64 })
+    .default("store_original")
+    .notNull(),
+  errorCode: varchar("error_code", { length: 64 }),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const vaultDocumentEvents = pgTable("vault_document_events", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id")
+    .notNull()
+    .references(() => vaultDocuments.id, { onDelete: "cascade" }),
+  runId: integer("run_id").references(() => vaultDocumentRuns.id, {
+    onDelete: "cascade",
+  }),
+  stage: varchar("stage", { length: 64 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  message: text("message"),
+  metadata: jsonb("metadata")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const vaultDocumentChunks = pgTable("vault_document_chunks", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id")
+    .notNull()
+    .references(() => vaultDocuments.id, { onDelete: "cascade" }),
   chunkIndex: integer("chunk_index").notNull(),
   content: text("content").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const userClinicalProfiles = pgTable("user_clinical_profiles", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  summaryText: text("summary_text"),
+  structuredData: jsonb("structured_data")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  sourceDocumentIds: jsonb("source_document_ids")
+    .$type<number[]>()
+    .default([])
+    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
 });
@@ -538,8 +597,11 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
-export type VaultFile = typeof vaultFiles.$inferSelect;
-export type VaultChunk = typeof vaultChunks.$inferSelect;
+export type VaultDocument = typeof vaultDocuments.$inferSelect;
+export type VaultDocumentRun = typeof vaultDocumentRuns.$inferSelect;
+export type VaultDocumentEvent = typeof vaultDocumentEvents.$inferSelect;
+export type VaultDocumentChunkRow = typeof vaultDocumentChunks.$inferSelect;
+export type UserClinicalProfile = typeof userClinicalProfiles.$inferSelect;
 export type AgentDefinition = typeof agentDefinitions.$inferSelect;
 export type InsertAgentDefinition = typeof agentDefinitions.$inferInsert;
 export type UserAgentSetting = typeof userAgentSettings.$inferSelect;

@@ -53,4 +53,7 @@ export const env = {
   kimiModel: process.env.KIMI_MODEL?.trim() || "kimi-k2.6",
   supabaseUrl: optionalUrl("SUPABASE_URL", "VITE_SUPABASE_URL"),
   supabaseAnonKey: requiredOneOf("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"),
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || "",
+  supabaseStorageBucket:
+    process.env.SUPABASE_STORAGE_BUCKET?.trim() || "vault-files",
 };

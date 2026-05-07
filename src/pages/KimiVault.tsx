@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -8,9 +9,9 @@ import {
   FileSearch,
   FileSpreadsheet,
   FileText,
-  ImageIcon,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Search,
   Trash2,
   Upload,
@@ -24,31 +25,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { formatRuntimeError } from "@/lib/app-errors";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ensureBackendSession, trpc } from "@/providers/trpc";
-import { buildAuthenticatedHeaders } from "@/lib/request-auth";
-import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
-
-type KimiVaultFile = {
-  id: number;
-  filename: string;
-  fileType: string;
-  category: string;
-  size: number;
-  status: "ready" | "processing" | "failed";
-  uploadedAt: string | Date;
-  updatedAt: string | Date;
-  extractionStatus?: "pending" | "ready" | "failed" | null;
-  remoteFileId?: string | null;
-  extractedText?: string | null;
-  extractedAt?: string | Date | null;
-  extractionError?: string | null;
-  contentHash?: string | null;
-  encryptedUrl?: string | null;
-};
-
-type DerivedVaultState = "ready" | "processing" | "failed" | "needs-reupload";
+import { inferVaultCategoryFromUpload } from "@/lib/vault-classification";
+import {
+  deleteVaultDocument,
+  fetchVaultDocumentOriginal,
+  getVaultDocumentEvents,
+  listVaultDocuments,
+  reclassifyVaultDocument,
+  reprocessVaultDocument,
+  type VaultDocument,
+  type VaultDocumentEvent,
+  uploadVaultDocument,
+} from "@/lib/vault-client";
 
 const categoryOptions = [
   "bloodwork",
@@ -58,19 +54,6 @@ const categoryOptions = [
   "notes",
   "other",
 ] as const;
-
-function inferCategory(file: File): (typeof categoryOptions)[number] {
-  const ext = file.name.split(".").pop()?.toLowerCase();
-  if (ext === "pdf") return "bloodwork";
-  if (ext === "csv") return "wearables";
-  if (["png", "jpg", "jpeg", "webp"].includes(ext || "")) {
-    return "body-composition";
-  }
-  if (["md", "txt"].includes(ext || "")) {
-    return "notes";
-  }
-  return "other";
-}
 
 function getFileIcon(fileName: string) {
   const ext = fileName.split(".").pop()?.toLowerCase();
@@ -93,231 +76,137 @@ function formatBytes(bytes: number) {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-function normalizePreview(text: string | null | undefined) {
-  if (!text) {
-    return "Kimi todavia no devolvio texto extraido para este archivo.";
-  }
-
-  return text.trim().slice(0, 2200) || "Kimi devolvio un payload vacio.";
-}
-
-function deriveVaultState(file: KimiVaultFile): DerivedVaultState {
-  if (file.status === "failed") {
-    return "failed";
-  }
-
-  if (file.status === "processing") {
-    return "processing";
-  }
-
-  if (file.extractionStatus === "failed") {
-    return "failed";
-  }
-
-  if (file.extractionStatus === "ready" || Boolean(file.extractedText?.trim())) {
-    return "ready";
-  }
-
-  if (file.remoteFileId) {
-    return "processing";
-  }
-
-  return "needs-reupload";
-}
-
-function describeVaultLinkState(file: KimiVaultFile) {
-  if (file.remoteFileId) {
-    return "linked";
-  }
-
-  if (file.extractionStatus === "ready" && file.encryptedUrl) {
-    return "saved local";
-  }
-
-  if (file.encryptedUrl) {
-    return "saved local";
-  }
-
-  return "local only";
+function isTerminalStatus(status: VaultDocument["status"]) {
+  return status === "ready" || status === "failed";
 }
 
 export default function KimiVault() {
-  const utils = trpc.useUtils();
-  const filesQuery = trpc.vault.list.useQuery();
-  const deleteMutation = trpc.vault.delete.useMutation();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [previewFile, setPreviewFile] = useState<KimiVaultFile | null>(null);
-  const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<VaultDocument | null>(null);
+  const [previewCategoryDraft, setPreviewCategoryDraft] = useState<string>("other");
+  const [pendingUploads, setPendingUploads] = useState<
+    Array<{
+      id: string;
+      file: File;
+      category: (typeof categoryOptions)[number];
+      suggestedReason: string;
+    }>
+  >([]);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [previewMimeType, setPreviewMimeType] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
-  const files = (filesQuery.data ?? []) as KimiVaultFile[];
-  const filteredFiles = useMemo(
-    () =>
-      files.filter(file =>
-        file.filename.toLowerCase().includes(search.toLowerCase()),
-      ),
-    [files, search],
-  );
-  const readyFiles = files.filter(file => deriveVaultState(file) === "ready").length;
-  const pendingFiles = files.filter(file => deriveVaultState(file) === "processing")
-    .length;
-  const legacyFiles = files.filter(file => deriveVaultState(file) === "needs-reupload")
-    .length;
-  const error = uploadError || filesQuery.error || deleteMutation.error || null;
+  const documentsQuery = useQuery({
+    queryKey: ["vault-documents"],
+    queryFn: listVaultDocuments,
+    refetchInterval: query => {
+      const documents = query.state.data ?? [];
+      return documents.some(document => !isTerminalStatus(document.status))
+        ? 3_000
+        : false;
+    },
+  });
 
-  const refreshVault = useCallback(async () => {
-    await utils.vault.list.invalidate();
-  }, [utils.vault.list]);
+  const previewEventsQuery = useQuery({
+    queryKey: ["vault-document-events", previewDocument?.id],
+    queryFn: () => getVaultDocumentEvents(previewDocument!.id),
+    enabled: Boolean(previewDocument?.id),
+  });
 
-  useEffect(() => {
-    if (pendingFiles === 0) {
-      return;
-    }
+  const uploadMutation = useMutation({
+    mutationFn: uploadVaultDocument,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["vault-documents"] });
+    },
+  });
 
-    const timer = window.setInterval(() => {
-      void refreshVault();
-    }, 3000);
+  const deleteMutation = useMutation({
+    mutationFn: deleteVaultDocument,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["vault-documents"] });
+    },
+  });
 
-    return () => window.clearInterval(timer);
-  }, [pendingFiles, refreshVault]);
-
-  useEffect(() => {
-    return () => {
-      if (previewObjectUrl) {
-        URL.revokeObjectURL(previewObjectUrl);
-      }
-    };
-  }, [previewObjectUrl]);
-
-  async function readAccessToken() {
-    if (!isSupabaseConfigured) {
-      return null;
-    }
-
-    const { data } = await getSupabaseBrowserClient().auth.getSession();
-    return data.session?.access_token ?? null;
-  }
-
-  const handleUpload = useCallback(
-    async (fileList: FileList | null) => {
-      if (!fileList?.length) {
-        return;
-      }
-
-      setUploadError(null);
-      setIsUploading(true);
-
-      try {
-        const synced = await ensureBackendSession();
-        if (!synced) {
-          throw new Error(
-            "Your browser session exists, but the backend session is not ready yet.",
-          );
-        }
-
-        for (const file of Array.from(fileList)) {
-          const formData = new FormData();
-          formData.append("file", file);
-          formData.append("category", inferCategory(file));
-
-          const headers = await buildAuthenticatedHeaders(readAccessToken);
-          const response = await fetch("/api/kimi/vault/upload", {
-            method: "POST",
-            credentials: "include",
-            headers,
-            body: formData,
-          });
-
-          if (!response.ok) {
-            const payload = (await response.json().catch(() => null)) as
-              | { error?: string }
-              | null;
-            throw new Error(
-              payload?.error || `Kimi vault upload failed with HTTP ${response.status}.`,
-            );
-          }
-        }
-
-        await refreshVault();
-      } catch (uploadIssue) {
-        setUploadError(
-          uploadIssue instanceof Error
-            ? uploadIssue.message
-            : "Kimi vault upload failed unexpectedly.",
-        );
-      } finally {
-        setIsUploading(false);
+  const reprocessMutation = useMutation({
+    mutationFn: reprocessVaultDocument,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["vault-documents"] });
+      if (previewDocument?.id) {
+        await queryClient.invalidateQueries({
+          queryKey: ["vault-document-events", previewDocument.id],
+        });
       }
     },
-    [refreshVault],
-  );
+  });
 
-  async function handleDelete(fileId: number) {
-    await deleteMutation.mutateAsync({ id: fileId });
-    if (previewFile?.id === fileId) {
-      setPreviewFile(null);
-    }
-    await refreshVault();
-  }
+  const reclassifyMutation = useMutation({
+    mutationFn: reclassifyVaultDocument,
+    onSuccess: async result => {
+      setPreviewDocument(current =>
+        current && current.id === result.document.id ? result.document : current,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["vault-documents"] });
+      if (previewDocument?.id) {
+        await queryClient.invalidateQueries({
+          queryKey: ["vault-document-events", previewDocument.id],
+        });
+      }
+    },
+  });
+
+  const documents = documentsQuery.data ?? [];
+  const filteredDocuments = useMemo(
+    () =>
+      documents.filter(document =>
+        document.filename.toLowerCase().includes(search.toLowerCase()),
+      ),
+    [documents, search],
+  );
+  const readyCount = documents.filter(document => document.status === "ready").length;
+  const processingCount = documents.filter(
+    document => !isTerminalStatus(document.status),
+  ).length;
+  const failedCount = documents.filter(document => document.status === "failed").length;
+  const error =
+    uploadMutation.error?.message ||
+    deleteMutation.error?.message ||
+    reprocessMutation.error?.message ||
+    reclassifyMutation.error?.message ||
+    documentsQuery.error?.message ||
+    previewEventsQuery.error?.message ||
+    null;
+
+  useEffect(() => {
+    setPreviewCategoryDraft(previewDocument?.category ?? "other");
+  }, [previewDocument?.id, previewDocument?.category]);
 
   useEffect(() => {
     let active = true;
 
     async function loadPreview() {
-      if (!previewFile) {
+      if (!previewDocument) {
         setPreviewText(null);
         setPreviewMimeType(null);
-        setPreviewError(null);
-        setIsPreviewLoading(false);
-        if (previewObjectUrl) {
-          URL.revokeObjectURL(previewObjectUrl);
-          setPreviewObjectUrl(null);
+        if (previewBlobUrl) {
+          URL.revokeObjectURL(previewBlobUrl);
+          setPreviewBlobUrl(null);
         }
         return;
       }
 
-      if (previewObjectUrl) {
-        URL.revokeObjectURL(previewObjectUrl);
-        setPreviewObjectUrl(null);
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+        setPreviewBlobUrl(null);
       }
-
-      setPreviewError(null);
-      setPreviewText(null);
-      setPreviewMimeType(null);
-
-      if (!previewFile.encryptedUrl) {
-        return;
-      }
-
-      setIsPreviewLoading(true);
 
       try {
-        const headers = await buildAuthenticatedHeaders(readAccessToken);
-        const response = await fetch(`/api/kimi/vault/file/${previewFile.id}`, {
-          credentials: "include",
-          headers,
-        });
-
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as
-            | { error?: string }
-            | null;
-          throw new Error(
-            payload?.error || `Vault preview failed with HTTP ${response.status}.`,
-          );
-        }
-
-        const blob = await response.blob();
+        const blob = await fetchVaultDocumentOriginal(previewDocument.id);
         if (!active) {
           return;
         }
 
-        const mimeType = blob.type || "application/octet-stream";
+        const mimeType = blob.type || previewDocument.mimeType || "application/octet-stream";
         setPreviewMimeType(mimeType);
 
         if (
@@ -335,21 +224,15 @@ export default function KimiVault() {
           return;
         }
 
-        setPreviewObjectUrl(objectUrl);
-      } catch (error) {
+        setPreviewText(null);
+        setPreviewBlobUrl(objectUrl);
+      } catch {
         if (!active) {
           return;
         }
 
-        setPreviewError(
-          error instanceof Error
-            ? error.message
-            : "Vault preview failed unexpectedly.",
-        );
-      } finally {
-        if (active) {
-          setIsPreviewLoading(false);
-        }
+        setPreviewText(null);
+        setPreviewMimeType(null);
       }
     }
 
@@ -358,22 +241,61 @@ export default function KimiVault() {
     return () => {
       active = false;
     };
-  }, [previewFile]);
+  }, [previewDocument]);
+
+  useEffect(() => {
+    return () => {
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+      }
+    };
+  }, [previewBlobUrl]);
+
+  function handleUpload(fileList: FileList | null) {
+    if (!fileList?.length) {
+      return;
+    }
+
+    setPendingUploads(
+      Array.from(fileList).map(file => {
+        const suggestion = inferVaultCategoryFromUpload({
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+        });
+        return {
+          id: `${file.name}-${file.size}-${file.lastModified}`,
+          file,
+          category: suggestion.category,
+          suggestedReason: suggestion.reason,
+        };
+      }),
+    );
+  }
+
+  async function confirmUploads() {
+    for (const upload of pendingUploads) {
+      await uploadMutation.mutateAsync({
+        file: upload.file,
+        category: upload.category,
+      });
+    }
+    setPendingUploads([]);
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1500px] min-w-0 p-3 sm:p-4 lg:p-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
-            Kimi vault
+            Vault V2
           </p>
           <h1 className="mt-1 text-[22px] font-medium tracking-tight text-foreground">
-            Archivos listos para retrieval
+            Historial clinico persistente y trazable
           </h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
-            Cada archivo se guarda primero y despues intentamos extraer texto
-            para que el chat lo pueda usar. Si la extraccion falla, el archivo
-            igual queda persistido.
+            El vault nuevo separa original, ingestion, perfil clinico y retrieval.
+            Cada archivo queda visible desde el upload y solo entra al chat cuando
+            llega a `ready`.
           </p>
         </div>
 
@@ -383,22 +305,23 @@ export default function KimiVault() {
             size="sm"
             className="h-9 rounded-full border-border/30 bg-card/30 px-3 text-[11px]"
             onClick={() => {
-              void refreshVault();
+              void queryClient.invalidateQueries({ queryKey: ["vault-documents"] });
             }}
           >
             <RefreshCw className="mr-2 h-3.5 w-3.5" />
             Refresh
           </Button>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-100/85">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-[11px] text-emerald-100/85">
             <Upload className="h-3.5 w-3.5" />
-            {isUploading ? "Uploading..." : "Upload to Kimi"}
+            {uploadMutation.isPending ? "Uploading..." : "Upload to Vault V2"}
             <input
               type="file"
               multiple
               accept=".pdf,.csv,.png,.jpg,.jpeg,.webp,.txt,.md"
               className="hidden"
+              disabled={uploadMutation.isPending}
               onChange={event => {
-                void handleUpload(event.target.files);
+                handleUpload(event.target.files);
                 event.target.value = "";
               }}
             />
@@ -411,19 +334,19 @@ export default function KimiVault() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-[16px] font-medium text-foreground">
-                File ingestion
+                Document pipeline
               </h2>
               <p className="mt-1 text-[12px] text-muted-foreground/40">
-                {files.length} archivos, {readyFiles} listos, {pendingFiles} en proceso.
+                {documents.length} documentos, {readyCount} listos, {processingCount} en curso, {failedCount} con error.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground/45">
-              <StatusChip label={`${readyFiles} ready`} tone="ready" />
-              {pendingFiles > 0 && (
-                <StatusChip label={`${pendingFiles} processing`} tone="processing" />
+              <StatusChip label={`${readyCount} ready`} tone="ready" />
+              {processingCount > 0 && (
+                <StatusChip label={`${processingCount} processing`} tone="processing" />
               )}
-              {legacyFiles > 0 && (
-                <StatusChip label={`${legacyFiles} reupload`} tone="warning" />
+              {failedCount > 0 && (
+                <StatusChip label={`${failedCount} failed`} tone="failed" />
               )}
             </div>
           </div>
@@ -433,155 +356,207 @@ export default function KimiVault() {
             <Input
               value={search}
               onChange={event => setSearch(event.target.value)}
-              placeholder="Search extracted files..."
+              placeholder="Search vault documents..."
               className="h-9 border-border/30 bg-card/30 pl-9 text-[12px]"
             />
           </div>
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-border/25">
-            <div className="grid grid-cols-[minmax(0,1fr)_140px_120px_80px] gap-3 border-b border-border/20 bg-background/40 px-4 py-2 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
-              <span>File</span>
-              <span>Extraction</span>
-              <span>Remote</span>
+            <div className="grid grid-cols-[minmax(0,1fr)_120px_140px_100px] gap-3 border-b border-border/20 bg-background/40 px-4 py-2 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
+              <span>Document</span>
+              <span>Status</span>
+              <span>Pipeline</span>
               <span />
             </div>
             <div className="divide-y divide-border/15">
-              {filteredFiles.map(file => {
-                const derivedState = deriveVaultState(file);
-
-                return (
-                  <div
-                    key={file.id}
-                    className="grid grid-cols-[minmax(0,1fr)_140px_120px_80px] gap-3 px-4 py-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground/30">
-                          {getFileIcon(file.filename)}
-                        </span>
-                        <p className="truncate text-[12px] text-foreground">
-                          {file.filename}
-                        </p>
-                      </div>
-                      <p className="mt-1 text-[10px] text-muted-foreground/30">
-                        {file.category} | {formatBytes(file.size)}
+              {filteredDocuments.map(document => (
+                <div
+                  key={document.id}
+                  className="grid grid-cols-[minmax(0,1fr)_120px_140px_100px] gap-3 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground/30">
+                        {getFileIcon(document.filename)}
+                      </span>
+                      <p className="truncate text-[12px] text-foreground">
+                        {document.filename}
                       </p>
                     </div>
-                    <div className="flex items-center">
-                      <StatusPill status={derivedState} />
-                    </div>
-                    <div className="flex items-center text-[10px] text-muted-foreground/35">
-                      {describeVaultLinkState(file)}
-                    </div>
-                    <div className="flex items-center justify-end gap-1">
+                    <p className="mt-1 text-[10px] text-muted-foreground/30">
+                      {document.category} | {formatBytes(document.sizeBytes)}
+                    </p>
+                    {document.categoryMismatch && document.categorySuggested && (
+                      <p className="mt-1 text-[10px] text-amber-200/75">
+                        Suggested category: {document.categorySuggested}
+                      </p>
+                    )}
+                    {document.errorMessage && (
+                      <p className="mt-1 line-clamp-2 text-[10px] text-destructive/75">
+                        {document.errorMessage}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center">
+                    <StatusPill status={document.status} />
+                  </div>
+                  <div className="flex items-center text-[10px] text-muted-foreground/35">
+                    {document.latestRun?.currentStage ?? "uploaded"}
+                  </div>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground/35 hover:text-foreground"
+                      onClick={() => setPreviewDocument(document)}
+                    >
+                      <FileSearch className="h-3.5 w-3.5" />
+                    </Button>
+                    {document.status === "failed" && (
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-muted-foreground/35 hover:text-foreground"
-                        onClick={() => setPreviewFile(file)}
-                      >
-                        <FileSearch className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground/35 hover:text-destructive/70"
                         onClick={() => {
-                          void handleDelete(file.id);
+                          void reprocessMutation.mutateAsync(document.id);
                         }}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
-                    </div>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground/35 hover:text-destructive/70"
+                      onClick={() => {
+                        void deleteMutation.mutateAsync(document.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
-                );
-              })}
-              {filteredFiles.length === 0 && (
+                </div>
+              ))}
+              {filteredDocuments.length === 0 && (
                 <div className="px-4 py-10 text-center text-[12px] text-muted-foreground/35">
-                  No files found.
+                  {documentsQuery.isLoading ? "Loading vault..." : "No documents found."}
                 </div>
               )}
             </div>
           </div>
 
           {error && (
-            <p className="mt-3 text-[12px] text-destructive/80">
-              {typeof error === "string"
-                ? error
-                : formatRuntimeError(error, "Kimi vault")}
-            </p>
+            <p className="mt-3 text-[12px] text-destructive/80">{error}</p>
           )}
         </section>
       </div>
 
-      <Dialog open={!!previewFile} onOpenChange={() => setPreviewFile(null)}>
-        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto border-border/50 bg-card">
+      <Dialog open={!!previewDocument} onOpenChange={() => setPreviewDocument(null)}>
+        <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto border-border/50 bg-card">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-[14px]">
               <Database className="h-4 w-4" />
-              {previewFile?.filename}
+              {previewDocument?.filename}
             </DialogTitle>
           </DialogHeader>
-          {previewFile && (
+          {previewDocument && (
             <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <PreviewMetric label="Status" value={previewDocument.status} />
+                <PreviewMetric label="Category" value={previewDocument.category} />
                 <PreviewMetric
-                  label="Extraction status"
-                  value={deriveVaultState(previewFile)}
+                  label="Current stage"
+                  value={previewDocument.latestRun?.currentStage ?? "uploaded"}
                 />
                 <PreviewMetric
-                  label="Remote file id"
-                  value={previewFile.remoteFileId ?? "Not linked"}
+                  label="Attempt"
+                  value={String(previewDocument.latestRun?.attempt ?? 1)}
                 />
                 <PreviewMetric
-                  label="Content hash"
-                  value={previewFile.contentHash ?? "Pending"}
-                />
-                <PreviewMetric
-                  label="Extracted at"
+                  label="Ready at"
                   value={
-                    previewFile.extractedAt
-                      ? new Date(previewFile.extractedAt).toLocaleString()
+                    previewDocument.readyAt
+                      ? new Date(previewDocument.readyAt).toLocaleString()
                       : "Pending"
                   }
                 />
               </div>
 
-              {previewFile.extractionError && (
-                <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-[12px] text-destructive/90">
-                  {previewFile.extractionError}
+              <div className="rounded-2xl border border-border/25 bg-background/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
+                      Category
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground/45">
+                      Auto + editar: podes corregir la categoria y reprocesar el documento sin volver a subirlo.
+                    </p>
+                    {previewDocument.categoryMismatch && previewDocument.categorySuggested && (
+                      <p className="mt-2 text-[11px] text-amber-200/75">
+                        Suggested category from content: {previewDocument.categorySuggested}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={previewCategoryDraft}
+                      onValueChange={setPreviewCategoryDraft}
+                    >
+                      <SelectTrigger className="h-9 min-w-[180px] border-border/30 bg-card/30 text-[12px]">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categoryOptions.map(option => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 rounded-full border-border/30 bg-card/30 px-3 text-[11px]"
+                      disabled={
+                        reclassifyMutation.isPending ||
+                        previewCategoryDraft === previewDocument.category
+                      }
+                      onClick={() => {
+                        void reclassifyMutation.mutateAsync({
+                          documentId: previewDocument.id,
+                          category: previewCategoryDraft,
+                          reprocess: true,
+                        });
+                      }}
+                    >
+                      <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                      Save + reprocess
+                    </Button>
+                  </div>
                 </div>
-              )}
-
-              {previewError && (
-                <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-[12px] text-destructive/90">
-                  {previewError}
-                </div>
-              )}
+              </div>
 
               <div className="rounded-2xl border border-border/25 bg-background/40 p-4">
-                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
-                  <ImageIcon className="h-3.5 w-3.5" />
-                  Original file preview
-                </div>
-
+                <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
+                  Original preview
+                </p>
                 <div className="mt-3 overflow-hidden rounded-2xl border border-border/20 bg-card/20">
-                  {isPreviewLoading ? (
-                    <div className="flex h-[420px] items-center justify-center text-[12px] text-muted-foreground/45">
+                  {!previewMimeType && !previewBlobUrl && !previewText ? (
+                    <div className="flex h-[180px] items-center justify-center text-[12px] text-muted-foreground/45">
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Loading preview...
                     </div>
-                  ) : previewMimeType === "application/pdf" && previewObjectUrl ? (
+                  ) : previewMimeType === "application/pdf" && previewBlobUrl ? (
                     <iframe
-                      title={previewFile.filename}
-                      src={previewObjectUrl}
+                      title={previewDocument.filename}
+                      src={previewBlobUrl}
                       className="h-[420px] w-full"
                     />
-                  ) : previewMimeType?.startsWith("image/") && previewObjectUrl ? (
+                  ) : previewMimeType?.startsWith("image/") && previewBlobUrl ? (
                     <div className="flex max-h-[420px] items-center justify-center bg-black/20 p-4">
                       <img
-                        src={previewObjectUrl}
-                        alt={previewFile.filename}
+                        src={previewBlobUrl}
+                        alt={previewDocument.filename}
                         className="max-h-[388px] w-auto rounded-xl object-contain"
                       />
                     </div>
@@ -591,24 +566,113 @@ export default function KimiVault() {
                     </pre>
                   ) : (
                     <div className="flex h-[180px] items-center justify-center px-6 text-center text-[12px] text-muted-foreground/45">
-                      {previewFile.encryptedUrl
-                        ? "No pudimos renderizar un preview nativo, pero el archivo sigue guardado."
-                        : "Este archivo todavia no tiene original persistido para preview."}
+                      No pudimos renderizar un preview nativo para este archivo.
                     </div>
                   )}
                 </div>
               </div>
 
               <div className="rounded-2xl border border-border/25 bg-background/40 p-4">
-                <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
-                  Extracted text snapshot
-                </p>
-                <pre className="mt-3 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
-                  {normalizePreview(previewFile.extractedText)}
-                </pre>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
+                    Ingestion events
+                  </p>
+                  {previewDocument.status === "failed" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-full border-border/30 bg-card/30 px-3 text-[11px]"
+                      onClick={() => {
+                        void reprocessMutation.mutateAsync(previewDocument.id);
+                      }}
+                    >
+                      <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                      Reprocess
+                    </Button>
+                  )}
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(previewEventsQuery.data ?? []).map(event => (
+                    <EventRow key={event.id} event={event} />
+                  ))}
+                  {!previewEventsQuery.isLoading &&
+                    (previewEventsQuery.data?.length ?? 0) === 0 && (
+                      <p className="text-[12px] text-muted-foreground/40">
+                        Todavia no hay eventos para este documento.
+                      </p>
+                    )}
+                </div>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pendingUploads.length > 0} onOpenChange={open => !open && setPendingUploads([])}>
+        <DialogContent className="max-w-3xl border-border/50 bg-card">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">
+              Review categories before upload
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {pendingUploads.map(upload => (
+              <div
+                key={upload.id}
+                className="flex flex-col gap-3 rounded-2xl border border-border/25 bg-background/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[12px] text-foreground">{upload.file.name}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground/40">
+                    {formatBytes(upload.file.size)} | {upload.suggestedReason}
+                  </p>
+                </div>
+                <Select
+                  value={upload.category}
+                  onValueChange={value => {
+                    setPendingUploads(current =>
+                      current.map(item =>
+                        item.id === upload.id
+                          ? {
+                              ...item,
+                              category: value as (typeof categoryOptions)[number],
+                            }
+                          : item,
+                      ),
+                    );
+                  }}
+                >
+                  <SelectTrigger className="h-9 min-w-[180px] border-border/30 bg-card/30 text-[12px]">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categoryOptions.map(option => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setPendingUploads([])}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="rounded-full px-4 text-[12px]"
+              disabled={uploadMutation.isPending}
+              onClick={() => {
+                void confirmUploads();
+              }}
+            >
+              {uploadMutation.isPending ? "Uploading..." : "Upload files"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
@@ -620,27 +684,19 @@ function StatusChip({
   tone,
 }: {
   label: string;
-  tone: "ready" | "processing" | "warning";
+  tone: "ready" | "processing" | "failed";
 }) {
   const classes =
     tone === "ready"
       ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200/80"
       : tone === "processing"
         ? "border-sky-500/25 bg-sky-500/10 text-sky-200/80"
-        : "border-amber-500/25 bg-amber-500/10 text-amber-200/80";
+        : "border-destructive/25 bg-destructive/10 text-destructive/85";
 
-  return (
-    <span className={cn("rounded-full border px-2 py-1", classes)}>
-      {label}
-    </span>
-  );
+  return <span className={cn("rounded-full border px-2 py-1", classes)}>{label}</span>;
 }
 
-function StatusPill({
-  status,
-}: {
-  status: DerivedVaultState;
-}) {
+function StatusPill({ status }: { status: VaultDocument["status"] }) {
   if (status === "ready") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200/80">
@@ -659,11 +715,11 @@ function StatusPill({
     );
   }
 
-  if (status === "needs-reupload") {
+  if (status === "profiling") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200/80">
         <AlertTriangle className="h-3 w-3" />
-        needs reupload
+        profiling
       </span>
     );
   }
@@ -671,7 +727,7 @@ function StatusPill({
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-[10px] text-sky-200/80">
       <Loader2 className="h-3 w-3 animate-spin" />
-      processing
+      {status}
     </span>
   );
 }
@@ -685,6 +741,26 @@ function PreviewMetric({ label, value }: { label: string; value: string }) {
       <p className={cn("mt-2 text-[12px] text-foreground/85", value.length > 40 && "break-all")}>
         {value}
       </p>
+    </div>
+  );
+}
+
+function EventRow({ event }: { event: VaultDocumentEvent }) {
+  return (
+    <div className="rounded-2xl border border-border/20 bg-card/20 px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[12px] text-foreground/85">
+            {event.stage} · {event.status}
+          </p>
+          {event.message && (
+            <p className="mt-1 text-[11px] text-muted-foreground/45">{event.message}</p>
+          )}
+        </div>
+        <p className="shrink-0 text-[10px] text-muted-foreground/35">
+          {new Date(event.createdAt).toLocaleString()}
+        </p>
+      </div>
     </div>
   );
 }

@@ -6,13 +6,13 @@ This stabilized MVP supports:
 - Google login through Supabase
 - backend session synchronization with an app cookie
 - persisted user conversations
-- persisted vault metadata per authenticated user
+- unified Kimi/Aura Medical chat turns through `KimiConversationTurnService`
+- persisted vault files, extracted text, chunk indexing, and per-file ingestion traces
 
 Out of scope for the stable MVP:
 
 - predictions / token economy
 - persistent per-agent settings
-- real vault file upload, parsing, or retrieval beyond metadata
 
 ## Local development
 
@@ -103,6 +103,8 @@ The MVP schema is:
 - `conversations`
 - `messages`
 - `vault_files`
+- `vault_chunks`
+- `vault_ingestion_events`
 
 Auth, chat, and vault rely on this schema being present and reachable from the backend.
 
@@ -115,7 +117,7 @@ Auth, chat, and vault rely on this schema being present and reachable from the b
 - Login returns to the app but protected routes fail
   Check the browser session, backend `auth.status`, and whether `auth.syncSession` can upsert the user.
 - Vault works but file contents are not available
-  Expected in this MVP. Only metadata is persisted.
+  Check the file lifecycle fields and `vault_ingestion_events` to see whether the file is only uploaded, already extracted, indexed, or context-eligible.
 
 ## Tooling
 

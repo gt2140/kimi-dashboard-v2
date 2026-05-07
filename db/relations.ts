@@ -13,15 +13,22 @@ import {
   userAgentSettings,
   users,
   userMemories,
-  vaultChunks,
-  vaultFiles,
+  userClinicalProfiles,
+  vaultDocumentChunks,
+  vaultDocumentEvents,
+  vaultDocumentRuns,
+  vaultDocuments,
 } from "./schema.js";
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ many, one }) => ({
   conversations: many(conversations),
-  vaultFiles: many(vaultFiles),
+  vaultDocuments: many(vaultDocuments),
   agentSettings: many(userAgentSettings),
   memories: many(userMemories),
+  clinicalProfile: one(userClinicalProfiles, {
+    fields: [users.id],
+    references: [userClinicalProfiles.userId],
+  }),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
@@ -45,20 +52,53 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
   contextBlocks: many(messageContextBlocks),
 }));
 
-export const vaultFilesRelations = relations(vaultFiles, ({ one, many }) => ({
-  user: one(users, {
-    fields: [vaultFiles.userId],
-    references: [users.id],
+export const vaultDocumentsRelations = relations(
+  vaultDocuments,
+  ({ one, many }) => ({
+    user: one(users, {
+      fields: [vaultDocuments.userId],
+      references: [users.id],
+    }),
+    runs: many(vaultDocumentRuns),
+    events: many(vaultDocumentEvents),
+    chunks: many(vaultDocumentChunks),
   }),
-  chunks: many(vaultChunks),
-}));
+);
 
-export const vaultChunksRelations = relations(vaultChunks, ({ one }) => ({
-  vaultFile: one(vaultFiles, {
-    fields: [vaultChunks.vaultFileId],
-    references: [vaultFiles.id],
+export const vaultDocumentRunsRelations = relations(
+  vaultDocumentRuns,
+  ({ one, many }) => ({
+    document: one(vaultDocuments, {
+      fields: [vaultDocumentRuns.documentId],
+      references: [vaultDocuments.id],
+    }),
+    events: many(vaultDocumentEvents),
   }),
-}));
+);
+
+export const vaultDocumentEventsRelations = relations(
+  vaultDocumentEvents,
+  ({ one }) => ({
+    document: one(vaultDocuments, {
+      fields: [vaultDocumentEvents.documentId],
+      references: [vaultDocuments.id],
+    }),
+    run: one(vaultDocumentRuns, {
+      fields: [vaultDocumentEvents.runId],
+      references: [vaultDocumentRuns.id],
+    }),
+  }),
+);
+
+export const vaultDocumentChunksRelations = relations(
+  vaultDocumentChunks,
+  ({ one }) => ({
+    document: one(vaultDocuments, {
+      fields: [vaultDocumentChunks.documentId],
+      references: [vaultDocuments.id],
+    }),
+  }),
+);
 
 export const modelProvidersRelations = relations(modelProviders, ({ many }) => ({
   endpoints: many(modelEndpoints),
@@ -211,3 +251,13 @@ export const userMemoriesRelations = relations(userMemories, ({ one }) => ({
     references: [agentRuns.id],
   }),
 }));
+
+export const userClinicalProfilesRelations = relations(
+  userClinicalProfiles,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userClinicalProfiles.userId],
+      references: [users.id],
+    }),
+  }),
+);

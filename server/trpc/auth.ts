@@ -143,12 +143,19 @@ async function authenticateLegacyCookie(headers: Headers) {
 
   const claim = await verifySessionToken(token);
   if (!claim) {
-    throw Errors.forbidden("Invalid authentication token.");
+    logServerDebug("auth.legacy-cookie.ignored", {
+      reason: "invalid-session-cookie",
+    });
+    return null;
   }
 
   const user = await findUserByUnionId(claim.unionId);
   if (!user) {
-    throw Errors.forbidden("User not found. Please re-login.");
+    logServerDebug("auth.legacy-cookie.ignored", {
+      reason: "missing-user",
+      unionId: claim.unionId,
+    });
+    return null;
   }
 
   return user;

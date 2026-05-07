@@ -31,7 +31,7 @@ export function createChatTurnTrace(input: {
       conversationId: input.conversationId,
       userId: input.userId,
       agentId: input.agentId,
-      runtimeVersion: input.runtimeVersion ?? "classic",
+  runtimeVersion: input.runtimeVersion ?? "aura-medical-v1",
       medicalMode: input.medicalMode ?? "personal-health",
       lastStageId,
       elapsedMs: Date.now() - startedAt,

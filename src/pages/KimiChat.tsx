@@ -239,13 +239,6 @@ export default function KimiChat() {
                 Aura Medical V1
               </RuntimeChip>
               <RuntimeChip
-                active={runtime.runtimeVersion === "classic"}
-                onClick={() => setRuntimeVersion("classic")}
-              >
-                Classic Kimi
-              </RuntimeChip>
-              <div className="mx-1 hidden h-4 w-px bg-border/40 sm:block" />
-              <RuntimeChip
                 active={runtime.medicalMode === "personal-health"}
                 onClick={() => setMedicalMode("personal-health")}
               >

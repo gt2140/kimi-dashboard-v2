@@ -278,43 +278,68 @@ alter table public.messages
   add column if not exists finalized boolean not null default true,
   add column if not exists visible_to_user boolean not null default true;
 
-create table if not exists public.vault_files (
+drop table if exists public.vault_ingestion_events cascade;
+drop table if exists public.vault_chunks cascade;
+drop table if exists public.vault_files cascade;
+
+create table if not exists public.vault_documents (
   id serial primary key,
   user_id integer not null references public.users(id) on delete cascade,
   filename varchar(255) not null,
-  file_type varchar(64) not null,
+  mime_type varchar(120) not null,
   category vault_category not null default 'other',
-  size integer not null,
-  status vault_status not null default 'ready',
-  extraction_status varchar(32) not null default 'pending',
-  encrypted_url text,
-  iv varchar(255),
-  remote_file_id varchar(255),
+  size_bytes integer not null,
+  status varchar(32) not null default 'uploaded',
+  original_ref text,
   extracted_text text,
   content_hash varchar(128),
-  extraction_error text,
-  extracted_at timestamptz,
-  uploaded_at timestamptz not null default now(),
+  error_code varchar(64),
+  error_message text,
+  ready_at timestamptz,
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-alter table public.vault_files
-  add column if not exists file_type varchar(64) not null default 'FILE',
-  add column if not exists status vault_status not null default 'ready',
-  add column if not exists extraction_status varchar(32) not null default 'pending',
-  add column if not exists remote_file_id varchar(255),
-  add column if not exists extracted_text text,
-  add column if not exists content_hash varchar(128),
-  add column if not exists extraction_error text,
-  add column if not exists extracted_at timestamptz,
-  add column if not exists updated_at timestamptz not null default now();
-
-create table if not exists public.vault_chunks (
+create table if not exists public.vault_document_runs (
   id serial primary key,
-  vault_file_id integer not null references public.vault_files(id) on delete cascade,
+  document_id integer not null references public.vault_documents(id) on delete cascade,
+  attempt integer not null default 1,
+  status varchar(32) not null default 'queued',
+  current_stage varchar(64) not null default 'store_original',
+  error_code varchar(64),
+  error_message text,
+  started_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.vault_document_events (
+  id serial primary key,
+  document_id integer not null references public.vault_documents(id) on delete cascade,
+  run_id integer references public.vault_document_runs(id) on delete cascade,
+  stage varchar(64) not null,
+  status varchar(32) not null,
+  message text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.vault_document_chunks (
+  id serial primary key,
+  document_id integer not null references public.vault_documents(id) on delete cascade,
   chunk_index integer not null,
   content text not null,
   created_at timestamptz not null default now()
+);
+
+create table if not exists public.user_clinical_profiles (
+  user_id integer primary key references public.users(id) on delete cascade,
+  summary_text text,
+  structured_data jsonb not null default '{}'::jsonb,
+  source_document_ids jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.user_agent_settings (
@@ -421,10 +446,14 @@ create index if not exists conversations_user_id_idx
   on public.conversations(user_id);
 create index if not exists messages_conversation_id_idx
   on public.messages(conversation_id);
-create index if not exists vault_files_user_id_idx
-  on public.vault_files(user_id);
-create index if not exists vault_chunks_vault_file_id_idx
-  on public.vault_chunks(vault_file_id);
+create index if not exists vault_documents_user_id_idx
+  on public.vault_documents(user_id);
+create index if not exists vault_document_runs_document_id_idx
+  on public.vault_document_runs(document_id);
+create index if not exists vault_document_events_document_id_idx
+  on public.vault_document_events(document_id);
+create index if not exists vault_document_chunks_document_id_idx
+  on public.vault_document_chunks(document_id);
 create index if not exists conversation_agents_conversation_id_idx
   on public.conversation_agents(conversation_id);
 create index if not exists prompt_templates_agent_definition_id_idx

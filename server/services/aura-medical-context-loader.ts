@@ -1,4 +1,9 @@
-import type { AuraRuntimeOptions } from "../../contracts/aura-runtime.js";
+import type {
+  AuraMedicalMode,
+  AuraPolicyLevel,
+  AuraRuntimeOptions,
+  AuraRuntimeVersion,
+} from "../../contracts/aura-runtime.js";
 import {
   buildAuraMedicalMetadata,
   buildAuraMedicalPromptAddendum,
@@ -13,10 +18,18 @@ export async function loadAuraMedicalTurnContext(params: {
   conversationId: number;
   agentSlug: string;
   latestUserMessage: string;
+  runtimeVersion?: AuraRuntimeVersion;
+  medicalMode?: AuraMedicalMode;
+  policyLevel?: AuraPolicyLevel;
   runtimeOptions?: Partial<AuraRuntimeOptions>;
 }) {
   const base = await loadKimiTurnContext(params);
-  const runtimeOptions = resolveAuraRuntimeOptions(params.runtimeOptions ?? {});
+  const runtimeOptions = resolveAuraRuntimeOptions({
+    runtimeVersion: params.runtimeVersion,
+    medicalMode: params.medicalMode,
+    policyLevel: params.policyLevel,
+    ...(params.runtimeOptions ?? {}),
+  });
 
   return {
     ...base,

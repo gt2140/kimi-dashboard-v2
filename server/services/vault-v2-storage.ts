@@ -1,22 +1,8 @@
 import { env } from "../lib/env.js";
 
-const DEFAULT_STORAGE_BUCKET = "vault-files";
 const INLINE_FALLBACK_MAX_BYTES = 5 * 1024 * 1024;
 
-type StoreParams = {
-  headers: Headers;
-  userId: number;
-  filename: string;
-  contentType: string;
-  bytes: Uint8Array;
-};
-
-type ReadParams = {
-  headers: Headers;
-  reference: string;
-};
-
-export function buildInlineVaultFileReference(params: {
+export function buildInlineVaultDocumentReference(params: {
   contentType: string;
   bytes: Uint8Array;
 }) {
@@ -24,21 +10,10 @@ export function buildInlineVaultFileReference(params: {
   return `data:${params.contentType};base64,${base64}`;
 }
 
-export function decodeInlineVaultFileReference(reference: string) {
-  const match = reference.match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) {
-    throw new Error("Invalid inline vault file reference.");
-  }
-
-  return {
-    contentType: match[1],
-    bytes: new Uint8Array(Buffer.from(match[2], "base64")),
-  };
-}
-
-export function parseVaultFileReference(reference: string) {
+export function parseVaultDocumentReference(reference: string) {
   if (reference.startsWith("data:")) {
     const match = reference.match(/^data:([^;]+);base64,/);
+
     return {
       kind: "inline" as const,
       contentType: match?.[1] || "application/octet-stream",
@@ -59,97 +34,79 @@ export function parseVaultFileReference(reference: string) {
   };
 }
 
-export async function storeOriginalVaultFile(params: StoreParams) {
-  const accessToken = readBearerToken(params.headers);
-  const objectPath = buildObjectPath(params.userId, params.filename);
+export function decodeInlineVaultDocumentReference(reference: string) {
+  const match = reference.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error("Invalid inline vault document reference.");
+  }
 
-  if (accessToken) {
-    try {
-      await uploadToSupabaseStorage({
-        accessToken,
-        bucket: readStorageBucket(),
-        objectPath,
-        contentType: params.contentType,
-        bytes: params.bytes,
-      });
+  return {
+    contentType: match[1],
+    bytes: new Uint8Array(Buffer.from(match[2], "base64")),
+  };
+}
 
-      return `supabase://${readStorageBucket()}/${objectPath}`;
-    } catch {
-      // Fall through to the inline persistence fallback.
-    }
+export async function storeVaultDocumentOriginal(params: {
+  userId: number;
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
+}) {
+  if (env.supabaseUrl && env.supabaseServiceRoleKey) {
+    const objectPath = buildObjectPath(params.userId, params.filename);
+    await uploadToSupabaseStorage({
+      bucket: env.supabaseStorageBucket,
+      objectPath,
+      contentType: params.contentType,
+      bytes: params.bytes,
+    });
+
+    return `supabase://${env.supabaseStorageBucket}/${objectPath}`;
   }
 
   if (params.bytes.byteLength > INLINE_FALLBACK_MAX_BYTES) {
     throw new Error(
-      "Vault original file storage is not configured for large uploads yet. Configure Supabase Storage or use a smaller file.",
+      "Vault V2 needs SUPABASE_SERVICE_ROLE_KEY for uploads larger than 5 MB.",
     );
   }
 
-  return buildInlineVaultFileReference({
+  return buildInlineVaultDocumentReference({
     contentType: params.contentType,
     bytes: params.bytes,
   });
 }
 
-export async function readOriginalVaultFile(params: ReadParams) {
-  const parsed = parseVaultFileReference(params.reference);
+export async function readVaultDocumentOriginal(reference: string) {
+  const parsed = parseVaultDocumentReference(reference);
 
   if (parsed.kind === "inline") {
-    return decodeInlineVaultFileReference(params.reference);
+    return decodeInlineVaultDocumentReference(reference);
   }
 
   if (parsed.kind === "storage") {
-    const accessToken = readBearerToken(params.headers);
-    if (!accessToken) {
-      throw new Error("Supabase access token is required to preview this file.");
-    }
-
     return downloadFromSupabaseStorage({
-      accessToken,
       bucket: parsed.bucket,
       objectPath: parsed.objectPath,
     });
   }
 
-  throw new Error("Unsupported vault file reference.");
+  throw new Error("Unsupported vault document reference.");
 }
 
-export async function deleteOriginalVaultFile(params: {
-  headers: Headers;
-  reference: string | null | undefined;
-}) {
-  if (!params.reference) {
+export async function deleteVaultDocumentOriginal(reference: string | null | undefined) {
+  if (!reference) {
     return;
   }
 
-  const parsed = parseVaultFileReference(params.reference);
+  const parsed = parseVaultDocumentReference(reference);
   if (parsed.kind !== "storage") {
     return;
   }
 
-  const accessToken = readBearerToken(params.headers);
-  if (!accessToken) {
-    return;
-  }
-
   await deleteFromSupabaseStorage({
-    accessToken,
     bucket: parsed.bucket,
     objectPath: parsed.objectPath,
   }).catch(() => undefined);
-}
-
-function readStorageBucket() {
-  return process.env.SUPABASE_STORAGE_BUCKET?.trim() || DEFAULT_STORAGE_BUCKET;
-}
-
-function readBearerToken(headers: Headers) {
-  const authHeader = headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return null;
-  }
-
-  return authHeader.slice("Bearer ".length).trim();
 }
 
 function buildObjectPath(userId: number, filename: string) {
@@ -165,21 +122,20 @@ function encodeObjectPath(path: string) {
 }
 
 async function uploadToSupabaseStorage(params: {
-  accessToken: string;
   bucket: string;
   objectPath: string;
   contentType: string;
   bytes: Uint8Array;
 }) {
-  ensureSupabaseStorageConfigured();
+  ensureServiceRoleStorageConfigured();
 
   const response = await fetch(
     `${env.supabaseUrl}/storage/v1/object/${encodeURIComponent(params.bucket)}/${encodeObjectPath(params.objectPath)}`,
     {
       method: "POST",
       headers: {
-        authorization: `Bearer ${params.accessToken}`,
-        apikey: env.supabaseAnonKey,
+        authorization: `Bearer ${env.supabaseServiceRoleKey}`,
+        apikey: env.supabaseServiceRoleKey,
         "content-type": params.contentType,
         "x-upsert": "true",
       },
@@ -193,18 +149,17 @@ async function uploadToSupabaseStorage(params: {
 }
 
 async function downloadFromSupabaseStorage(params: {
-  accessToken: string;
   bucket: string;
   objectPath: string;
 }) {
-  ensureSupabaseStorageConfigured();
+  ensureServiceRoleStorageConfigured();
 
   const response = await fetch(
     `${env.supabaseUrl}/storage/v1/object/authenticated/${encodeURIComponent(params.bucket)}/${encodeObjectPath(params.objectPath)}`,
     {
       headers: {
-        authorization: `Bearer ${params.accessToken}`,
-        apikey: env.supabaseAnonKey,
+        authorization: `Bearer ${env.supabaseServiceRoleKey}`,
+        apikey: env.supabaseServiceRoleKey,
       },
     },
   );
@@ -221,19 +176,18 @@ async function downloadFromSupabaseStorage(params: {
 }
 
 async function deleteFromSupabaseStorage(params: {
-  accessToken: string;
   bucket: string;
   objectPath: string;
 }) {
-  ensureSupabaseStorageConfigured();
+  ensureServiceRoleStorageConfigured();
 
   const response = await fetch(
     `${env.supabaseUrl}/storage/v1/object/${encodeURIComponent(params.bucket)}/${encodeObjectPath(params.objectPath)}`,
     {
       method: "DELETE",
       headers: {
-        authorization: `Bearer ${params.accessToken}`,
-        apikey: env.supabaseAnonKey,
+        authorization: `Bearer ${env.supabaseServiceRoleKey}`,
+        apikey: env.supabaseServiceRoleKey,
       },
     },
   );
@@ -243,8 +197,10 @@ async function deleteFromSupabaseStorage(params: {
   }
 }
 
-function ensureSupabaseStorageConfigured() {
-  if (!env.supabaseUrl || !env.supabaseAnonKey) {
-    throw new Error("Supabase Storage is not configured.");
+function ensureServiceRoleStorageConfigured() {
+  if (!env.supabaseUrl || !env.supabaseServiceRoleKey) {
+    throw new Error(
+      "Vault V2 storage requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+    );
   }
 }

@@ -5,7 +5,7 @@ import {
 } from "./aura-runtime";
 
 describe("aura runtime client helpers", () => {
-  it("routes classic chat to the existing Kimi stream endpoint", () => {
+  it("routes classic chat through the unified aura medical runtime endpoint", () => {
     expect(
       resolveAuraRuntimeEndpoint({
         runtimeVersion: "classic",
@@ -23,7 +23,7 @@ describe("aura runtime client helpers", () => {
 
   it("normalizes missing runtime settings to the classic defaults", () => {
     expect(resolveAuraRuntimeOptions({})).toEqual({
-      runtimeVersion: "classic",
+      runtimeVersion: "aura-medical-v1",
       medicalMode: "personal-health",
       policyLevel: "interpretive-on-request",
     });

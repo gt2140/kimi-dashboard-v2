@@ -1,8 +1,8 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { conversations, messages, vaultFiles } from "../../db/schema.js";
-import { logServerError } from "../lib/debug.js";
+import { and, desc, eq } from "drizzle-orm";
+import { conversations, messages } from "../../db/schema.js";
 import { getDb } from "../queries/connection.js";
 import { resolveAgentExecutionProfile } from "./agent-registry.js";
+import { vaultV2Service } from "./vault-v2-service.js";
 
 export async function assembleConversationContext(params: {
   userId: number;
@@ -35,42 +35,31 @@ export async function assembleConversationContext(params: {
     .limit(6);
 
   const allowedCategories = profile.resolved.allowVaultContext
-    ? (profile.resolved.allowedVaultCategories as Array<
-        (typeof vaultFiles.$inferSelect)["category"]
-      >)
+    ? profile.resolved.allowedVaultCategories
     : [];
 
   let accessibleFiles: Array<{
     id: number;
     filename: string;
-    category: (typeof vaultFiles.$inferSelect)["category"];
-    status: (typeof vaultFiles.$inferSelect)["status"];
+    category: string;
+    status: string;
   }> = [];
 
   if (allowedCategories.length > 0) {
     try {
-      accessibleFiles = await db
-        .select({
-          id: vaultFiles.id,
-          filename: vaultFiles.filename,
-          category: vaultFiles.category,
-          status: vaultFiles.status,
-        })
-        .from(vaultFiles)
-        .where(
-          and(
-            eq(vaultFiles.userId, params.userId),
-            inArray(vaultFiles.category, allowedCategories)
-          )
-        )
-        .orderBy(desc(vaultFiles.updatedAt))
-        .limit(4);
-    } catch (error) {
-      logServerError("context-assembler.vault-query.failed", error, {
+      const context = await vaultV2Service.loadContext({
         userId: params.userId,
-        conversationId: params.conversationId,
-        agentSlug: params.agentSlug,
+        allowedCategories: allowedCategories as any,
+        query: params.latestUserMessage,
+        maxChunks: 4,
       });
+      accessibleFiles = context.relatedVaultDocuments.map(document => ({
+        id: document.id,
+        filename: document.filename,
+        category: document.category,
+        status: "ready",
+      }));
+    } catch (error) {
       accessibleFiles = [];
     }
   }

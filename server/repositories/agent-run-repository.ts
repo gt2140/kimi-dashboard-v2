@@ -213,9 +213,15 @@ export class AgentRunRepository {
     conversationId: number;
     messageId: number;
     agentRunId: number;
-    relatedVaultFiles: string[];
+    relatedVaultDocuments?: Array<{
+      id: number;
+      filename: string;
+      category: string;
+    }>;
+    relatedVaultFiles?: string[];
     vaultChunks?: Array<{
-      vaultFileId: number;
+      documentId?: number;
+      vaultFileId?: number;
       chunkIndex: number;
       content: string;
     }>;
@@ -227,17 +233,28 @@ export class AgentRunRepository {
   }) {
     const db = getDb();
 
-    for (const filename of params.relatedVaultFiles) {
+    const relatedDocuments =
+      params.relatedVaultDocuments ??
+      params.relatedVaultFiles?.map(filename => ({
+        id: 0,
+        filename,
+        category: "legacy",
+      })) ??
+      [];
+
+    for (const document of relatedDocuments) {
       await db.insert(messageContextBlocks).values({
         conversationId: params.conversationId,
         messageId: params.messageId,
         agentRunId: params.agentRunId,
         sourceType: "vault_file",
-        sourceId: filename,
-        title: filename,
-        content: `Vault file available to the run: ${filename}`,
+        sourceId: document.id > 0 ? String(document.id) : document.filename,
+        title: document.filename,
+        content: `Vault document available to the run: ${document.filename}`,
         metadata: {
-          relation: "accessible_vault_file",
+          relation: "accessible_vault_document",
+          documentId: document.id || null,
+          category: document.category,
         },
       });
     }
@@ -248,12 +265,12 @@ export class AgentRunRepository {
         messageId: params.messageId,
         agentRunId: params.agentRunId,
         sourceType: "vault_chunk",
-        sourceId: `${chunk.vaultFileId}:${chunk.chunkIndex}`,
+        sourceId: `${chunk.documentId ?? chunk.vaultFileId ?? "legacy"}:${chunk.chunkIndex}`,
         title: `Vault chunk ${chunk.chunkIndex}`,
         content: chunk.content,
         metadata: {
           relation: "selected_vault_chunk",
-          vaultFileId: chunk.vaultFileId,
+          documentId: chunk.documentId ?? chunk.vaultFileId ?? null,
           chunkIndex: chunk.chunkIndex,
         },
       });

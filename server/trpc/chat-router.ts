@@ -13,10 +13,7 @@ import { getDb } from "../queries/connection.js";
 import { ConversationRepository } from "../repositories/conversation-repository.js";
 import { type ChatTurnStage, generatePrimaryReply } from "../services/chat-reply-builder.js";
 import { syncConversationParticipants } from "../services/conversation-participants.js";
-import {
-  ConversationTurnService,
-  type ConversationTurnInput,
-} from "../services/conversation-turn-service.js";
+import { auraMedicalConversationTurnService } from "../services/kimi-runtime.js";
 import { createRouter, authedQuery } from "./middleware.js";
 
 export { generatePrimaryReply };
@@ -70,9 +67,6 @@ const chatMetadataSchema = z
   .optional();
 
 const conversationRepository = new ConversationRepository();
-const conversationTurnService = new ConversationTurnService({
-  conversationRepository,
-});
 
 function parseMetadata(metadata: string | null) {
   if (!metadata) {
@@ -87,7 +81,7 @@ function parseMetadata(metadata: string | null) {
 }
 
 export async function sendChatMessage(params: {
-  input: ConversationTurnInput;
+  input: ChatSendMessageInput;
   userId: number;
   streamPrimary?: boolean;
   onStage?: (stage: ChatTurnStage) => void | Promise<void>;
@@ -97,7 +91,15 @@ export async function sendChatMessage(params: {
     route: string;
   };
 }) {
-  return conversationTurnService.executeTurn(params);
+  return auraMedicalConversationTurnService.executeTurn({
+    ...params,
+    input: {
+      ...params.input,
+      runtimeVersion: "aura-medical-v1",
+      medicalMode: params.input.medicalMode ?? "personal-health",
+      policyLevel: params.input.policyLevel ?? "interpretive-on-request",
+    },
+  });
 }
 
 export const chatRouter = createRouter({

@@ -289,6 +289,17 @@ export function useKimiChatData() {
         utils.chat.getConversation.invalidate({ id: conversationId }),
       ]);
 
+      if (!completedMessage) {
+        const recoveredMessage = await readPersistedCompletion();
+        if (recoveredMessage) {
+          return recoveredMessage;
+        }
+
+        throw new Error(
+          "Kimi chat stream finished without emitting a completed assistant message.",
+        );
+      }
+
       return completedMessage;
     } catch (error) {
       if (isRecoverableChatStreamError(error)) {

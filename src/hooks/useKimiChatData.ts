@@ -19,11 +19,41 @@ import {
 } from "@/lib/chat-stream";
 import { mapConversationSummary, mapMessage } from "@/hooks/kimi-chat-mappers";
 import { createPersistedCompletionReader } from "@/hooks/kimi-chat-recovery";
+import type { Message } from "@/types";
 
 const CHAT_STREAM_INITIAL_TIMEOUT_MS = 90_000;
 const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 const STREAM_RECOVERY_POLL_ATTEMPTS = 6;
 const STREAM_RECOVERY_POLL_DELAY_MS = 750;
+
+function shouldUseDirectChatStreamingTransport() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+}
+
+function mapCompletedAssistantMessage(message: {
+  id: number | string;
+  role?: "assistant";
+  content: string;
+  agentId: string | null;
+  createdAt: Date | string;
+  metadata?: Message["metadata"];
+}) {
+  return {
+    id: String(message.id),
+    role: "assistant" as const,
+    content: message.content,
+    agentId: message.agentId ?? "generalist",
+    createdAt:
+      message.createdAt instanceof Date
+        ? message.createdAt.toISOString()
+        : new Date(message.createdAt).toISOString(),
+    metadata: message.metadata,
+  };
+}
 
 export function useKimiChatData() {
   const navigate = useNavigate();
@@ -60,6 +90,7 @@ export function useKimiChatData() {
     },
   );
   const createConversation = trpc.chat.createConversation.useMutation();
+  const sendMessageMutation = trpc.chat.sendMessage.useMutation();
   const deleteConversationMutation = trpc.chat.deleteConversation.useMutation();
 
   const sessions = useMemo(
@@ -180,6 +211,50 @@ export function useKimiChatData() {
     });
 
     try {
+      if (!shouldUseDirectChatStreamingTransport()) {
+        handlers.onStage?.({
+          type: "stage",
+          stageId: "analyze",
+          label: "Routing production chat through stable request mode",
+        });
+        handlers.onStage?.({
+          type: "stage",
+          stageId: "draft",
+          label: "Waiting for final answer from Kimi",
+        });
+
+        const result = await sendMessageMutation.mutateAsync({
+          conversationId,
+          content,
+          agentId: activeAgentId,
+          calledAgentIds,
+          runtimeVersion,
+          medicalMode,
+          policyLevel,
+        });
+
+        await Promise.all([
+          utils.chat.listConversations.invalidate(),
+          utils.chat.getConversation.invalidate({ id: conversationId }),
+        ]);
+
+        const assistantMessage = result.assistantMessage
+          ? mapCompletedAssistantMessage(result.assistantMessage)
+          : await readPersistedCompletion();
+
+        if (!assistantMessage) {
+          throw new Error(
+            "Kimi chat completed without a persisted assistant message.",
+          );
+        }
+
+        handlers.onMessageComplete?.({
+          type: "message-complete",
+          message: assistantMessage,
+        });
+        return assistantMessage;
+      }
+
       async function openStream(forceSessionRefresh = false) {
         if (forceSessionRefresh) {
           const refreshed = await ensureBackendSession({ force: true });
@@ -360,6 +435,7 @@ export function useKimiChatData() {
   const error =
     streamError ??
     createConversation.error ??
+    sendMessageMutation.error ??
     deleteConversationMutation.error ??
     conversationsQuery.error ??
     conversationQuery.error ??
@@ -370,7 +446,8 @@ export function useKimiChatData() {
     messages,
     activeConversationId,
     isConversationLoading: conversationQuery.isLoading,
-    isSending: isStreaming || createConversation.isPending,
+    isSending:
+      isStreaming || createConversation.isPending || sendMessageMutation.isPending,
     error:
       typeof error === "string"
         ? formatRuntimeError(new Error(error), "Kimi chat")

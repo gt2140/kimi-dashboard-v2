@@ -512,11 +512,20 @@ export class KimiConversationTurnService {
       );
 
       failureKind = params.streamPrimary ? "provider-stream" : "provider-response";
+      let firstProviderDeltaSeen = false;
       const finalCompletion = directCompletionFromFallback
         ? firstCompletion
         : params.streamPrimary
           ? await kimiClient.streamChatCompletion(request, {
-              onTextDelta: params.onTextDelta,
+              onTextDelta: async delta => {
+                if (!firstProviderDeltaSeen) {
+                  firstProviderDeltaSeen = true;
+                  trace.debug("provider.stream.first-delta", {
+                    deltaLength: delta.length,
+                  });
+                }
+                await params.onTextDelta?.(delta);
+              },
             })
           : await kimiClient.createChatCompletion(request);
       trace.debug("provider.response.completed", {

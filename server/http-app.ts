@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { stream } from "hono/streaming";
 import type { HttpBindings } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { createContext } from "./trpc/context.js";
@@ -11,56 +12,89 @@ import {
   auraMedicalConversationTurnService,
 } from "./services/kimi-runtime.js";
 import { logServerDebug } from "./lib/debug.js";
-import { env } from "./lib/env.js";
 import { vaultV2Service } from "./services/vault-v2-service.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 vaultV2Service.startWorker();
 
 const CHAT_ROUTE_TIMEOUT_MS = 120_000;
-const SHOULD_STREAM_PROVIDER_DIRECTLY = !env.isProduction;
 
 function createNdjsonStreamResponse(
+  c: Parameters<typeof stream>[0],
   run: (streamController: TurnStreamController) => Promise<void>,
+  details: {
+    requestId: string;
+    route: string;
+    conversationId: number;
+    userId: number;
+    agentId: string;
+  },
   label = "Chat stream",
 ) {
-  const encoder = new TextEncoder();
+  c.header("Content-Type", "application/x-ndjson; charset=utf-8");
+  c.header("Cache-Control", "no-cache, no-transform");
+  c.header("Connection", "keep-alive");
+  c.header("X-Accel-Buffering", "no");
+
   let streamController: TurnStreamController | null = null;
-  const stream = new ReadableStream({
-    start(controller) {
+  let firstChunkSent = false;
+
+  return stream(
+    c,
+    async honoStream => {
+      honoStream.onAbort(() => {
+        logServerDebug("chat.turn.stream.aborted", {
+          ...details,
+          firstChunkSent,
+        });
+        streamController?.disconnect();
+      });
+
       streamController = new TurnStreamController({
         write: payload => {
-          controller.enqueue(encoder.encode(payload));
+          if (!firstChunkSent) {
+            firstChunkSent = true;
+            logServerDebug("chat.turn.stream.first-chunk", {
+              ...details,
+              payloadBytes: payload.length,
+            });
+          }
+
+          void honoStream.write(payload);
         },
         close: () => {
-          controller.close();
+          logServerDebug("chat.turn.stream.close", {
+            ...details,
+            firstChunkSent,
+          });
+          void honoStream.close();
         },
       });
 
-      void withTimeout(run(streamController), {
-        label,
-        timeoutMs: CHAT_ROUTE_TIMEOUT_MS,
-      }).catch(error => {
-        streamController?.fail(
+      try {
+        await withTimeout(run(streamController), {
+          label,
+          timeoutMs: CHAT_ROUTE_TIMEOUT_MS,
+        });
+      } catch (error) {
+        streamController.fail(
           error instanceof Error
             ? error.message
             : "Chat streaming failed unexpectedly.",
         );
+      }
+    },
+    async (error, honoStream) => {
+      logServerDebug("chat.turn.stream.error", {
+        ...details,
+        firstChunkSent,
+        error: error.message,
       });
+      await honoStream.write(
+        `${JSON.stringify({ type: "error", message: error.message })}\n`,
+      );
     },
-    cancel() {
-      streamController?.disconnect();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  );
 }
 
 app.use("/api/trpc/*", async (c) => {
@@ -93,8 +127,8 @@ app.post("/api/chat/stream", async (c) => {
     );
   }
 
-  return createNdjsonStreamResponse(async streamController => {
-    const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+  const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+  return createNdjsonStreamResponse(c, async streamController => {
     logServerDebug("chat.turn.route.start", {
       requestId,
       route: "/api/chat/stream",
@@ -110,7 +144,7 @@ app.post("/api/chat/stream", async (c) => {
         policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
       },
       userId: user.id,
-      streamPrimary: SHOULD_STREAM_PROVIDER_DIRECTLY,
+      streamPrimary: true,
       traceContext: {
         requestId,
         route: "/api/chat/stream",
@@ -138,6 +172,12 @@ app.post("/api/chat/stream", async (c) => {
     streamController.fail(
       "Chat turn finished without a persisted assistant message.",
     );
+  }, {
+    requestId,
+    route: "/api/chat/stream",
+    conversationId: parsed.data.conversationId,
+    userId: user.id,
+    agentId: parsed.data.agentId,
   }, "Unified Aura chat turn");
 });
 app.post("/api/kimi/chat/stream", async (c) => {
@@ -162,8 +202,8 @@ app.post("/api/kimi/chat/stream", async (c) => {
     );
   }
 
-  return createNdjsonStreamResponse(async streamController => {
-    const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+  const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+  return createNdjsonStreamResponse(c, async streamController => {
     logServerDebug("chat.turn.route.start", {
       requestId,
       route: "/api/kimi/chat/stream",
@@ -179,10 +219,10 @@ app.post("/api/kimi/chat/stream", async (c) => {
         policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
       },
       userId: user.id,
-      streamPrimary: SHOULD_STREAM_PROVIDER_DIRECTLY,
+      streamPrimary: true,
       traceContext: {
         requestId,
-      route: "/api/kimi/chat/stream",
+        route: "/api/kimi/chat/stream",
       },
       onStage: async stage => {
         streamController.emitStage(stage);
@@ -207,6 +247,12 @@ app.post("/api/kimi/chat/stream", async (c) => {
       createdAt: result.assistantMessage.createdAt.toISOString(),
       metadata: result.assistantMessage.metadata,
     });
+  }, {
+    requestId,
+    route: "/api/kimi/chat/stream",
+    conversationId: parsed.data.conversationId,
+    userId: user.id,
+    agentId: parsed.data.agentId,
   }, "Unified Kimi alias chat turn");
 });
 app.post("/api/aura-medical/chat/stream", async (c) => {
@@ -231,8 +277,8 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
     );
   }
 
-  return createNdjsonStreamResponse(async streamController => {
-    const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+  const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+  return createNdjsonStreamResponse(c, async streamController => {
     logServerDebug("chat.turn.route.start", {
       requestId,
       route: "/api/aura-medical/chat/stream",
@@ -247,7 +293,7 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
         runtimeVersion: "aura-medical-v1",
       },
       userId: user.id,
-      streamPrimary: SHOULD_STREAM_PROVIDER_DIRECTLY,
+      streamPrimary: true,
       traceContext: {
         requestId,
         route: "/api/aura-medical/chat/stream",
@@ -275,6 +321,12 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
       createdAt: result.assistantMessage.createdAt.toISOString(),
       metadata: result.assistantMessage.metadata,
     });
+  }, {
+    requestId,
+    route: "/api/aura-medical/chat/stream",
+    conversationId: parsed.data.conversationId,
+    userId: user.id,
+    agentId: parsed.data.agentId,
   }, "Aura Medical chat turn");
 });
 app.post("/api/vault/documents", async c => {

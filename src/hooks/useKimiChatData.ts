@@ -8,6 +8,7 @@ import {
 import { useChatStore } from "@/hooks/useStore";
 import { resolveAuraRuntimeEndpoint } from "@/lib/aura-runtime";
 import { formatRuntimeError } from "@/lib/app-errors";
+import { logClientDebug } from "@/lib/debug";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
@@ -21,18 +22,10 @@ import { mapConversationSummary, mapMessage } from "@/hooks/kimi-chat-mappers";
 import { createPersistedCompletionReader } from "@/hooks/kimi-chat-recovery";
 import type { Message } from "@/types";
 
-const CHAT_STREAM_INITIAL_TIMEOUT_MS = 90_000;
 const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 const STREAM_RECOVERY_POLL_ATTEMPTS = 6;
 const STREAM_RECOVERY_POLL_DELAY_MS = 750;
-
-function shouldUseDirectChatStreamingTransport() {
-  if (typeof window === "undefined") {
-    return true;
-  }
-
-  return /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
-}
+const CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS = 15_000;
 
 function mapCompletedAssistantMessage(message: {
   id: number | string;
@@ -186,11 +179,15 @@ export function useKimiChatData() {
     setIsStreaming(true);
     let streamStarted = false;
     let receivedAssistantText = false;
+    let fallbackTriggered = false;
+    let firstEventAt: number | null = null;
+    let firstDeltaAt: number | null = null;
+    const requestStartedAt = Date.now();
     const streamWatchdog = createChatStreamWatchdog(
       CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
       "Kimi chat stream",
       {
-        initialTimeoutMs: CHAT_STREAM_INITIAL_TIMEOUT_MS,
+        initialTimeoutMs: CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS,
       },
     );
 
@@ -210,51 +207,53 @@ export function useKimiChatData() {
       },
     });
 
-    try {
-      if (!shouldUseDirectChatStreamingTransport()) {
-        handlers.onStage?.({
-          type: "stage",
-          stageId: "analyze",
-          label: "Routing production chat through stable request mode",
-        });
-        handlers.onStage?.({
-          type: "stage",
-          stageId: "draft",
-          label: "Waiting for final answer from Kimi",
-        });
+    async function recoverWithoutStream() {
+      fallbackTriggered = true;
+      logClientDebug("kimi.chat.fallback.start", {
+        conversationId,
+        elapsedMs: Date.now() - requestStartedAt,
+        streamStarted,
+        receivedAssistantText,
+      });
 
-        const result = await sendMessageMutation.mutateAsync({
-          conversationId,
-          content,
-          agentId: activeAgentId,
-          calledAgentIds,
-          runtimeVersion,
-          medicalMode,
-          policyLevel,
-        });
-
-        await Promise.all([
-          utils.chat.listConversations.invalidate(),
-          utils.chat.getConversation.invalidate({ id: conversationId }),
-        ]);
-
-        const assistantMessage = result.assistantMessage
-          ? mapCompletedAssistantMessage(result.assistantMessage)
-          : await readPersistedCompletion();
-
-        if (!assistantMessage) {
-          throw new Error(
-            "Kimi chat completed without a persisted assistant message.",
-          );
-        }
-
-        handlers.onMessageComplete?.({
-          type: "message-complete",
-          message: assistantMessage,
-        });
-        return assistantMessage;
+      const recoveredMessage = await readPersistedCompletion();
+      if (recoveredMessage) {
+        return recoveredMessage;
       }
 
+      const result = await sendMessageMutation.mutateAsync({
+        conversationId,
+        content,
+        agentId: activeAgentId,
+        calledAgentIds,
+        runtimeVersion,
+        medicalMode,
+        policyLevel,
+      });
+
+      await Promise.all([
+        utils.chat.listConversations.invalidate(),
+        utils.chat.getConversation.invalidate({ id: conversationId }),
+      ]);
+
+      const assistantMessage = result.assistantMessage
+        ? mapCompletedAssistantMessage(result.assistantMessage)
+        : await readPersistedCompletion();
+
+      if (!assistantMessage) {
+        throw new Error(
+          "Kimi chat completed without a persisted assistant message.",
+        );
+      }
+
+      handlers.onMessageComplete?.({
+        type: "message-complete",
+        message: assistantMessage,
+      });
+      return assistantMessage;
+    }
+
+    try {
       async function openStream(forceSessionRefresh = false) {
         if (forceSessionRefresh) {
           const refreshed = await ensureBackendSession({ force: true });
@@ -330,6 +329,14 @@ export function useKimiChatData() {
 
         for (const event of parsed.events) {
           streamStarted = true;
+          if (firstEventAt === null) {
+            firstEventAt = Date.now();
+            logClientDebug("kimi.chat.first-event", {
+              conversationId,
+              elapsedMs: firstEventAt - requestStartedAt,
+              eventType: event.type,
+            });
+          }
           handlers.onEvent?.(event);
 
           if (event.type === "stage") {
@@ -339,6 +346,13 @@ export function useKimiChatData() {
 
           if (event.type === "text-delta") {
             receivedAssistantText = true;
+            if (firstDeltaAt === null) {
+              firstDeltaAt = Date.now();
+              logClientDebug("kimi.chat.first-delta", {
+                conversationId,
+                elapsedMs: firstDeltaAt - requestStartedAt,
+              });
+            }
             handlers.onTextDelta?.(event);
             continue;
           }
@@ -364,35 +378,30 @@ export function useKimiChatData() {
         utils.chat.getConversation.invalidate({ id: conversationId }),
       ]);
 
-      if (!completedMessage) {
-        const recoveredMessage = await readPersistedCompletion();
-        if (recoveredMessage) {
-          return recoveredMessage;
-        }
+      logClientDebug("kimi.chat.stream.completed", {
+        conversationId,
+        elapsedMs: Date.now() - requestStartedAt,
+        fallbackTriggered,
+      });
 
-        throw new Error(
-          "Kimi chat stream finished without emitting a completed assistant message.",
-        );
+      if (!completedMessage) {
+        return recoverWithoutStream();
       }
 
       return completedMessage;
     } catch (error) {
       if (isRecoverableChatStreamError(error)) {
-        const recoveredMessage = await readPersistedCompletion();
-        if (recoveredMessage) {
-          return recoveredMessage;
-        }
+        logClientDebug("kimi.chat.stream.recoverable", {
+          conversationId,
+          elapsedMs: Date.now() - requestStartedAt,
+          streamStarted,
+          receivedAssistantText,
+          fallbackTriggered,
+          error: error instanceof Error ? error.message : "recoverable-error",
+        });
 
-        if (!receivedAssistantText && !streamStarted) {
-          setStreamError(
-            formatRuntimeError(
-              error instanceof Error
-                ? error
-                : new Error("Kimi streaming failed unexpectedly."),
-              "Kimi chat",
-            ),
-          );
-          throw error;
+        if (!receivedAssistantText) {
+          return recoverWithoutStream();
         }
       }
 

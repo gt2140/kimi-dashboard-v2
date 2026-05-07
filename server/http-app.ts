@@ -51,7 +51,7 @@ function createNdjsonStreamResponse(
       });
 
       streamController = new TurnStreamController({
-        write: payload => {
+        write: async payload => {
           if (!firstChunkSent) {
             firstChunkSent = true;
             logServerDebug("chat.turn.stream.first-chunk", {
@@ -60,14 +60,14 @@ function createNdjsonStreamResponse(
             });
           }
 
-          void honoStream.write(payload);
+          await honoStream.write(payload);
         },
-        close: () => {
+        close: async () => {
           logServerDebug("chat.turn.stream.close", {
             ...details,
             firstChunkSent,
           });
-          void honoStream.close();
+          await honoStream.close();
         },
       });
 
@@ -77,7 +77,7 @@ function createNdjsonStreamResponse(
           timeoutMs: CHAT_ROUTE_TIMEOUT_MS,
         });
       } catch (error) {
-        streamController.fail(
+        await streamController.fail(
           error instanceof Error
             ? error.message
             : "Chat streaming failed unexpectedly.",
@@ -136,6 +136,10 @@ app.post("/api/chat/stream", async (c) => {
       agentId: parsed.data.agentId,
       userId: user.id,
     });
+    await streamController.emitStage({
+      id: "memory",
+      label: "Loading Kimi memory and Aura context",
+    });
     const result = await auraMedicalConversationTurnService.executeTurn({
       input: {
         ...parsed.data,
@@ -150,15 +154,15 @@ app.post("/api/chat/stream", async (c) => {
         route: "/api/chat/stream",
       },
       onStage: async stage => {
-        streamController.emitStage(stage);
+        await streamController.emitStage(stage);
       },
       onTextDelta: async delta => {
-        streamController.emitDelta(delta);
+        await streamController.emitDelta(delta);
       },
     });
 
     if (result.assistantMessage) {
-      streamController.complete({
+      await streamController.complete({
         id: String(result.assistantMessage.id),
         role: "assistant",
         content: result.assistantMessage.content,
@@ -169,7 +173,7 @@ app.post("/api/chat/stream", async (c) => {
       return;
     }
 
-    streamController.fail(
+    await streamController.fail(
       "Chat turn finished without a persisted assistant message.",
     );
   }, {
@@ -211,6 +215,10 @@ app.post("/api/kimi/chat/stream", async (c) => {
       agentId: parsed.data.agentId,
       userId: user.id,
     });
+    await streamController.emitStage({
+      id: "memory",
+      label: "Loading Kimi memory and Aura context",
+    });
     const result = await auraMedicalConversationTurnService.executeTurn({
       input: {
         ...parsed.data,
@@ -225,21 +233,21 @@ app.post("/api/kimi/chat/stream", async (c) => {
         route: "/api/kimi/chat/stream",
       },
       onStage: async stage => {
-        streamController.emitStage(stage);
+        await streamController.emitStage(stage);
       },
       onTextDelta: async delta => {
-        streamController.emitDelta(delta);
+        await streamController.emitDelta(delta);
       },
     });
 
     if (!result.assistantMessage) {
-      streamController.fail(
+      await streamController.fail(
         "Unified Aura runtime finished without a persisted assistant message.",
       );
       return;
     }
 
-    streamController.complete({
+    await streamController.complete({
       id: String(result.assistantMessage.id),
       role: "assistant",
       content: result.assistantMessage.content,
@@ -287,6 +295,10 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
       userId: user.id,
       medicalMode: parsed.data.medicalMode ?? "personal-health",
     });
+    await streamController.emitStage({
+      id: "memory",
+      label: "Loading Kimi memory and Aura context",
+    });
     const result = await auraMedicalConversationTurnService.executeTurn({
       input: {
         ...parsed.data,
@@ -299,21 +311,21 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
         route: "/api/aura-medical/chat/stream",
       },
       onStage: async stage => {
-        streamController.emitStage(stage);
+        await streamController.emitStage(stage);
       },
       onTextDelta: async delta => {
-        streamController.emitDelta(delta);
+        await streamController.emitDelta(delta);
       },
     });
 
     if (!result.assistantMessage) {
-      streamController.fail(
+      await streamController.fail(
         "Aura Medical Runtime V1 finished without a persisted assistant message.",
       );
       return;
     }
 
-    streamController.complete({
+    await streamController.complete({
       id: String(result.assistantMessage.id),
       role: "assistant",
       content: result.assistantMessage.content,

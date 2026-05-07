@@ -1,8 +1,8 @@
 import { encodeChatStreamEvent } from "../../src/lib/chat-stream.js";
 
 type StreamWriter = {
-  write: (payload: string) => void;
-  close: () => void;
+  write: (payload: string) => Promise<void>;
+  close: () => Promise<void>;
 };
 
 type StreamMessage = {
@@ -20,17 +20,17 @@ export class TurnStreamController {
 
   constructor(private readonly writer: StreamWriter) {}
 
-  disconnect() {
+  async disconnect() {
     this.terminal = true;
-    this.closeSafely();
+    await this.closeSafely();
   }
 
-  emitStage(stage: { id: string; label: string }) {
+  async emitStage(stage: { id: string; label: string }) {
     if (this.terminal) {
       return;
     }
 
-    this.writeSafely(
+    await this.writeSafely(
       encodeChatStreamEvent({
         type: "stage",
         stageId: stage.id,
@@ -39,12 +39,12 @@ export class TurnStreamController {
     );
   }
 
-  emitDelta(delta: string) {
+  async emitDelta(delta: string) {
     if (this.terminal) {
       return;
     }
 
-    this.writeSafely(
+    await this.writeSafely(
       encodeChatStreamEvent({
         type: "text-delta",
         delta,
@@ -52,49 +52,49 @@ export class TurnStreamController {
     );
   }
 
-  complete(message: StreamMessage) {
+  async complete(message: StreamMessage) {
     if (this.terminal) {
       return;
     }
 
     this.terminal = true;
-    this.writeSafely(
+    await this.writeSafely(
       encodeChatStreamEvent({
         type: "message-complete",
         message,
       })
     );
-    this.closeSafely();
+    await this.closeSafely();
   }
 
-  fail(message: string) {
+  async fail(message: string) {
     if (this.terminal) {
       return;
     }
 
     this.terminal = true;
-    this.writeSafely(
+    await this.writeSafely(
       encodeChatStreamEvent({
         type: "error",
         message,
       })
     );
-    this.closeSafely();
+    await this.closeSafely();
   }
 
-  private writeSafely(payload: string) {
+  private async writeSafely(payload: string) {
     if (this.writerClosed) {
       return;
     }
 
     try {
-      this.writer.write(payload);
+      await this.writer.write(payload);
     } catch {
       this.writerClosed = true;
     }
   }
 
-  private closeSafely() {
+  private async closeSafely() {
     if (this.writerClosed) {
       return;
     }
@@ -102,7 +102,7 @@ export class TurnStreamController {
     this.writerClosed = true;
 
     try {
-      this.writer.close();
+      await this.writer.close();
     } catch {
       // Ignore disconnect races from the HTTP body consumer.
     }

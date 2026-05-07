@@ -148,7 +148,13 @@ export default function KimiChat() {
 
     const content = input.trim();
     setPendingUserMessage(content);
-    setPendingStages(createInitialPendingStages());
+    setPendingStages(
+      createInitialPendingStages({
+        primaryAgentId: activeAgentId,
+        helperAgentIds: calledAgentIds,
+        userMessage: content,
+      }),
+    );
     setActiveStageIndex(0);
     setStreamingAssistant(null);
     setInput("");

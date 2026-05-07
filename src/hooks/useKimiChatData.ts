@@ -128,7 +128,18 @@ export function useKimiChatData() {
     setActiveAgent(nextAgentId);
     clearChatStore();
     setSearchParams({});
-    navigate("/kimi/chat");
+
+    const synced = await ensureBackendSession();
+    if (!synced) {
+      navigate("/kimi/chat");
+      return;
+    }
+
+    const created = await createConversation.mutateAsync({
+      agentId: nextAgentId,
+      title: "New conversation",
+    });
+    navigate(`/kimi/chat?conversation=${created.id}`);
   }
 
   async function ensureConversationId(firstMessage?: string) {
@@ -166,7 +177,6 @@ export function useKimiChatData() {
       ) => void;
     } = {},
   ) {
-    const conversationId = await ensureConversationId(content);
     const synced = await ensureBackendSession();
 
     if (!synced) {
@@ -174,6 +184,8 @@ export function useKimiChatData() {
         "Your browser session exists, but the backend session is not ready yet.",
       );
     }
+
+    const conversationId = await ensureConversationId(content);
 
     setStreamError(null);
     setIsStreaming(true);

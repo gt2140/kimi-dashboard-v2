@@ -1,12 +1,23 @@
-import type { PendingTurnStage } from "@/lib/chat-experience";
+import {
+  buildPendingTurnStages,
+  type PendingTurnStage,
+} from "@/lib/chat-experience";
 
 export const STARTING_TURN_STAGE: PendingTurnStage = {
   id: "starting",
   label: "Starting turn",
 };
 
-export function createInitialPendingStages() {
-  return [STARTING_TURN_STAGE];
+export function createInitialPendingStages(input?: {
+  primaryAgentId: string;
+  helperAgentIds: string[];
+  userMessage: string;
+}) {
+  if (!input) {
+    return [STARTING_TURN_STAGE];
+  }
+
+  return buildPendingTurnStages(input);
 }
 
 export function applyRuntimeStageUpdate(

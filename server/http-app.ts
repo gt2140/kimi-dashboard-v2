@@ -11,12 +11,14 @@ import {
   auraMedicalConversationTurnService,
 } from "./services/kimi-runtime.js";
 import { logServerDebug } from "./lib/debug.js";
+import { env } from "./lib/env.js";
 import { vaultV2Service } from "./services/vault-v2-service.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 vaultV2Service.startWorker();
 
 const CHAT_ROUTE_TIMEOUT_MS = 120_000;
+const SHOULD_STREAM_PROVIDER_DIRECTLY = !env.isProduction;
 
 function createNdjsonStreamResponse(
   run: (streamController: TurnStreamController) => Promise<void>,
@@ -108,7 +110,7 @@ app.post("/api/chat/stream", async (c) => {
         policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
       },
       userId: user.id,
-      streamPrimary: true,
+      streamPrimary: SHOULD_STREAM_PROVIDER_DIRECTLY,
       traceContext: {
         requestId,
         route: "/api/chat/stream",
@@ -177,7 +179,7 @@ app.post("/api/kimi/chat/stream", async (c) => {
         policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
       },
       userId: user.id,
-      streamPrimary: true,
+      streamPrimary: SHOULD_STREAM_PROVIDER_DIRECTLY,
       traceContext: {
         requestId,
       route: "/api/kimi/chat/stream",
@@ -245,7 +247,7 @@ app.post("/api/aura-medical/chat/stream", async (c) => {
         runtimeVersion: "aura-medical-v1",
       },
       userId: user.id,
-      streamPrimary: true,
+      streamPrimary: SHOULD_STREAM_PROVIDER_DIRECTLY,
       traceContext: {
         requestId,
         route: "/api/aura-medical/chat/stream",

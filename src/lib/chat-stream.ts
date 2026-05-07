@@ -29,6 +29,7 @@ type ChatStreamErrorEvent = {
 type ChatStreamWatchdog = {
   signal: AbortSignal;
   touch: () => void;
+  abort: (reason?: string) => void;
   cancel: () => void;
 };
 
@@ -133,6 +134,18 @@ export function createChatStreamWatchdog(
       }
 
       arm(timeoutMs);
+    },
+    abort(reason) {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      if (!controller.signal.aborted) {
+        controller.abort(
+          new Error(reason ?? `${label} aborted before completion.`),
+        );
+      }
     },
     cancel() {
       if (timeoutId) {

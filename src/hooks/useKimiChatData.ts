@@ -26,6 +26,7 @@ const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 const STREAM_RECOVERY_POLL_ATTEMPTS = 6;
 const STREAM_RECOVERY_POLL_DELAY_MS = 750;
 const CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS = 15_000;
+const CHAT_STREAM_FIRST_TEXT_TIMEOUT_MS = 12_000;
 
 function mapCompletedAssistantMessage(message: {
   id: number | string;
@@ -147,13 +148,6 @@ export function useKimiChatData() {
       return activeConversationId;
     }
 
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
-
     const created = await createConversation.mutateAsync({
       agentId: activeAgentId,
       title: firstMessage ? firstMessage.slice(0, 60) : undefined,
@@ -194,6 +188,7 @@ export function useKimiChatData() {
     let fallbackTriggered = false;
     let firstEventAt: number | null = null;
     let firstDeltaAt: number | null = null;
+    let firstTextTimeoutId: ReturnType<typeof setTimeout> | null = null;
     const requestStartedAt = Date.now();
     const streamWatchdog = createChatStreamWatchdog(
       CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
@@ -266,6 +261,29 @@ export function useKimiChatData() {
     }
 
     try {
+      const clearFirstTextTimeout = () => {
+        if (firstTextTimeoutId) {
+          clearTimeout(firstTextTimeoutId);
+          firstTextTimeoutId = null;
+        }
+      };
+
+      const armFirstTextTimeout = () => {
+        if (receivedAssistantText || firstTextTimeoutId) {
+          return;
+        }
+
+        firstTextTimeoutId = setTimeout(() => {
+          logClientDebug("kimi.chat.first-text-timeout", {
+            conversationId,
+            elapsedMs: Date.now() - requestStartedAt,
+          });
+          streamWatchdog.abort(
+            `Kimi chat did not produce assistant text within ${CHAT_STREAM_FIRST_TEXT_TIMEOUT_MS}ms after drafting started.`,
+          );
+        }, CHAT_STREAM_FIRST_TEXT_TIMEOUT_MS);
+      };
+
       async function openStream(forceSessionRefresh = false) {
         if (forceSessionRefresh) {
           const refreshed = await ensureBackendSession({ force: true });
@@ -352,12 +370,16 @@ export function useKimiChatData() {
           handlers.onEvent?.(event);
 
           if (event.type === "stage") {
+            if (event.stageId === "draft") {
+              armFirstTextTimeout();
+            }
             handlers.onStage?.(event);
             continue;
           }
 
           if (event.type === "text-delta") {
             receivedAssistantText = true;
+            clearFirstTextTimeout();
             if (firstDeltaAt === null) {
               firstDeltaAt = Date.now();
               logClientDebug("kimi.chat.first-delta", {
@@ -370,6 +392,7 @@ export function useKimiChatData() {
           }
 
           if (event.type === "message-complete") {
+            clearFirstTextTimeout();
             completedMessage = event.message;
             handlers.onMessageComplete?.(event);
             continue;
@@ -427,6 +450,9 @@ export function useKimiChatData() {
       setStreamError(message);
       throw error;
     } finally {
+      if (firstTextTimeoutId) {
+        clearTimeout(firstTextTimeoutId);
+      }
       streamWatchdog.cancel();
       setIsStreaming(false);
     }

@@ -17,7 +17,7 @@ import { vaultV2Service } from "./services/vault-v2-service.js";
 export const app = new Hono<{ Bindings: HttpBindings }>();
 vaultV2Service.startWorker();
 
-const CHAT_ROUTE_TIMEOUT_MS = 120_000;
+const CHAT_ROUTE_TIMEOUT_MS = 180_000;
 
 function createNdjsonStreamResponse(
   c: Parameters<typeof stream>[0],

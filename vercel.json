@@ -3,6 +3,11 @@
   "env": {
     "NODEJS_HELPERS": "0"
   },
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 300
+    }
+  },
   "outputDirectory": "dist/public",
   "rewrites": [
     {

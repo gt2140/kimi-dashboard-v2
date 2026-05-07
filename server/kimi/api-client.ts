@@ -60,7 +60,7 @@ async function kimiFetch(path: string, init?: RequestInit) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort(new Error(`Kimi request timed out while calling ${path}.`));
-  }, 30_000);
+  }, 90_000);
 
   try {
     const response = await fetch(`${getVersionedBaseUrl()}${path}`, {

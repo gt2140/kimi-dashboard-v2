@@ -7,6 +7,7 @@ import KimiChat from "./pages/KimiChat";
 import KimiAgents from "./pages/KimiAgents";
 import KimiAgentSettings from "./pages/KimiAgentSettings";
 import KimiVault from "./pages/KimiVault";
+import Bounties from "./pages/Bounties";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/kimi/agents" element={<KimiAgents />} />
         <Route path="/kimi/agents/:agentId" element={<KimiAgentSettings />} />
         <Route path="/kimi/vault" element={<KimiVault />} />
+        <Route path="/bounties" element={<Bounties />} />
         <Route path="/profile" element={<Profile />} />
       </Route>
       <Route path="*" element={<NotFound />} />

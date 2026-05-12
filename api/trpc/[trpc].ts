@@ -2,6 +2,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { incomingMessageToRequest } from "@trpc/server/adapters/node-http";
 import { appRouter } from "../../server/trpc/router.js";
 import { createContext } from "../../server/trpc/context.js";
+import { toJsonErrorResponse } from "../../server/lib/api-errors.js";
 
 function applyResponseHeaders(
   headers: Headers,
@@ -33,25 +34,32 @@ export default async function handler(
   req: Parameters<typeof incomingMessageToRequest>[0],
   res: Parameters<typeof incomingMessageToRequest>[1]
 ) {
-  const request = incomingMessageToRequest(req, res, {
-    maxBodySize: null,
-  });
+  try {
+    const request = incomingMessageToRequest(req, res, {
+      maxBodySize: null,
+    });
 
-  const response = await fetchRequestHandler({
-    endpoint: "/api/trpc",
-    req: request,
-    router: appRouter,
-    createContext,
-  });
+    const response = await fetchRequestHandler({
+      endpoint: "/api/trpc",
+      req: request,
+      router: appRouter,
+      createContext,
+    });
 
-  res.statusCode = response.status;
-  applyResponseHeaders(response.headers, res);
+    res.statusCode = response.status;
+    applyResponseHeaders(response.headers, res);
 
-  if (!response.body) {
-    res.end();
-    return;
+    if (!response.body) {
+      res.end();
+      return;
+    }
+
+    const body = Buffer.from(await response.arrayBuffer());
+    res.end(body);
+  } catch (error) {
+    const response = toJsonErrorResponse(error);
+    res.statusCode = response.status;
+    applyResponseHeaders(response.headers, res);
+    res.end(Buffer.from(await response.arrayBuffer()));
   }
-
-  const body = Buffer.from(await response.arrayBuffer());
-  res.end(body);
 }

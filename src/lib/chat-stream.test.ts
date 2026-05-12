@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createMalformedStreamError,
   createChatStreamWatchdog,
   encodeChatStreamEvent,
   isRecoverableChatStreamError,
   isRecoverableChatStreamStatus,
   parseChatStreamChunk,
+  readChatStreamResponseMetadata,
 } from "./chat-stream";
 
 describe("chat-stream", () => {
@@ -14,20 +16,18 @@ describe("chat-stream", () => {
 
   it("encodes events as newline-delimited json", () => {
     const payload = encodeChatStreamEvent({
-      type: "stage",
-      stageId: "analyze",
-      label: "Mapping the full picture",
+      type: "ack",
+      traceId: "trace-123",
     });
 
     expect(payload.endsWith("\n")).toBe(true);
-    expect(payload).toContain("\"type\":\"stage\"");
+    expect(payload).toContain("\"type\":\"ack\"");
   });
 
   it("parses multiple events from a chunk and keeps incomplete remainder", () => {
     const first = encodeChatStreamEvent({
-      type: "stage",
-      stageId: "context",
-      label: "Reviewing your context",
+      type: "ack",
+      traceId: "trace-1",
     });
     const second = encodeChatStreamEvent({
       type: "text-delta",
@@ -118,6 +118,70 @@ describe("chat-stream", () => {
     vi.advanceTimersByTime(1_100);
 
     expect(watchdog.signal.aborted).toBe(true);
+  });
+
+  it("parses structured backend errors with category and trace id", () => {
+    const payload = encodeChatStreamEvent({
+      type: "error",
+      message: "Primary response generation timed out after 25000ms.",
+      category: "provider-timeout",
+      traceId: "trace-789",
+    });
+
+    const parsed = parseChatStreamChunk(payload);
+
+    expect(parsed.events).toEqual([
+      {
+        type: "error",
+        message: "Primary response generation timed out after 25000ms.",
+        category: "provider-timeout",
+        traceId: "trace-789",
+      },
+    ]);
+  });
+
+  it("creates a structured error for malformed plain-text stream bodies", () => {
+    const error = createMalformedStreamError({
+      bodyPreview: "An error occurred",
+      status: 200,
+      contentType: "text/plain; charset=utf-8",
+      traceId: "trace-stream",
+    }) as Error & {
+      category?: string;
+      traceId?: string;
+      bodyPreview?: string;
+    };
+
+    expect(error.message).toContain("Chat stream returned malformed content");
+    expect(error.category).toBe("backend-timeout");
+    expect(error.traceId).toBe("trace-stream");
+    expect(error.bodyPreview).toBe("An error occurred");
+  });
+
+  it("creates a structured error for html stream bodies", () => {
+    const error = createMalformedStreamError({
+      bodyPreview: "<!doctype html><title>Error</title>",
+      status: 502,
+      contentType: "text/html",
+    }) as Error & { category?: string };
+
+    expect(error.category).toBe("backend-timeout");
+  });
+
+  it("reads stream response metadata without consuming the body", () => {
+    const response = new Response("", {
+      status: 200,
+      headers: {
+        "content-type": "text/plain",
+        "x-trace-id": "trace-header",
+      },
+    });
+
+    expect(readChatStreamResponseMetadata(response)).toEqual({
+      status: 200,
+      contentType: "text/plain",
+      traceId: "trace-header",
+    });
   });
 
   it("allows a longer wait for the first byte before using the regular inactivity timeout", () => {

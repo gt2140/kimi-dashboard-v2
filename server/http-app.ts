@@ -11,13 +11,18 @@ import { withTimeout } from "./services/async-guard.js";
 import {
   auraMedicalConversationTurnService,
 } from "./services/kimi-runtime.js";
+import { classifyApiError } from "./lib/api-errors.js";
 import { logServerDebug } from "./lib/debug.js";
 import { vaultV2Service } from "./services/vault-v2-service.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
-vaultV2Service.startWorker();
 
 const CHAT_ROUTE_TIMEOUT_MS = 180_000;
+const SHOULD_STREAM_PROVIDER_DIRECTLY = true;
+
+function ensureVaultWorkerStarted() {
+  vaultV2Service.startWorker();
+}
 
 function createNdjsonStreamResponse(
   c: Parameters<typeof stream>[0],
@@ -77,11 +82,8 @@ function createNdjsonStreamResponse(
           timeoutMs: CHAT_ROUTE_TIMEOUT_MS,
         });
       } catch (error) {
-        await streamController.fail(
-          error instanceof Error
-            ? error.message
-            : "Chat streaming failed unexpectedly.",
-        );
+        const failure = classifyApiError(error);
+        await streamController.fail(failure);
       }
     },
     async (error, honoStream) => {
@@ -91,7 +93,12 @@ function createNdjsonStreamResponse(
         error: error.message,
       });
       await honoStream.write(
-        `${JSON.stringify({ type: "error", message: error.message })}\n`,
+        `${JSON.stringify({
+          type: "error",
+          message: error.message,
+          category: classifyApiError(error).category,
+          traceId: details.requestId,
+        })}\n`,
       );
     },
   );
@@ -105,7 +112,35 @@ app.use("/api/trpc/*", async (c) => {
     createContext,
   });
 });
-app.post("/api/chat/stream", async (c) => {
+
+function buildAuraRouteInput(
+  parsed: typeof chatSendMessageInputSchema._output,
+  route: "/api/chat/stream" | "/api/kimi/chat/stream" | "/api/aura-medical/chat/stream",
+) {
+  if (route === "/api/aura-medical/chat/stream") {
+    return {
+      ...parsed,
+      runtimeVersion: "aura-medical-v1" as const,
+    };
+  }
+
+  return {
+    ...parsed,
+    runtimeVersion: "aura-medical-v1" as const,
+    medicalMode: parsed.medicalMode ?? "personal-health",
+    policyLevel: parsed.policyLevel ?? "interpretive-on-request",
+  };
+}
+
+export function shouldStreamProviderDirectlyInRoutes() {
+  return SHOULD_STREAM_PROVIDER_DIRECTLY;
+}
+
+async function handleAuraChatStreamRoute(
+  c: Parameters<typeof stream>[0],
+  route: "/api/chat/stream" | "/api/kimi/chat/stream" | "/api/aura-medical/chat/stream",
+) {
+  const authStartedAt = Date.now();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -128,30 +163,28 @@ app.post("/api/chat/stream", async (c) => {
   }
 
   const requestId = globalThis.crypto.randomUUID().slice(0, 8);
+  c.header("X-Trace-Id", requestId);
   return createNdjsonStreamResponse(c, async streamController => {
+    await streamController.emitAck({ traceId: requestId });
     logServerDebug("chat.turn.route.start", {
       requestId,
-      route: "/api/chat/stream",
+      route,
       conversationId: parsed.data.conversationId,
       agentId: parsed.data.agentId,
       userId: user.id,
+      authMs: Date.now() - authStartedAt,
     });
     await streamController.emitStage({
       id: "memory",
-      label: "Loading Kimi memory and Aura context",
+      label: "Loading chat context",
     });
     const result = await auraMedicalConversationTurnService.executeTurn({
-      input: {
-        ...parsed.data,
-        runtimeVersion: "aura-medical-v1",
-        medicalMode: parsed.data.medicalMode ?? "personal-health",
-        policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
-      },
+      input: buildAuraRouteInput(parsed.data, route),
       userId: user.id,
-      streamPrimary: true,
+      streamPrimary: shouldStreamProviderDirectlyInRoutes(),
       traceContext: {
         requestId,
-        route: "/api/chat/stream",
+        route,
       },
       onStage: async stage => {
         await streamController.emitStage(stage);
@@ -173,175 +206,42 @@ app.post("/api/chat/stream", async (c) => {
       return;
     }
 
-    await streamController.fail(
-      "Chat turn finished without a persisted assistant message.",
-    );
+    const missingMessage =
+      route === "/api/aura-medical/chat/stream"
+        ? "Aura Medical Runtime V1 finished without a persisted assistant message."
+        : route === "/api/kimi/chat/stream"
+          ? "Unified Aura runtime finished without a persisted assistant message."
+          : "Chat turn finished without a persisted assistant message.";
+
+    await streamController.fail({
+      message: missingMessage,
+      category: "backend-timeout",
+      traceId: requestId,
+    });
   }, {
     requestId,
-    route: "/api/chat/stream",
+    route,
     conversationId: parsed.data.conversationId,
     userId: user.id,
     agentId: parsed.data.agentId,
-  }, "Unified Aura chat turn");
+  }, route === "/api/aura-medical/chat/stream"
+    ? "Aura Medical chat turn"
+    : route === "/api/kimi/chat/stream"
+      ? "Unified Kimi alias chat turn"
+      : "Unified Aura chat turn");
+}
+
+app.post("/api/chat/stream", async (c) => {
+  return handleAuraChatStreamRoute(c, "/api/chat/stream");
 });
 app.post("/api/kimi/chat/stream", async (c) => {
-  let user: Awaited<ReturnType<typeof authenticateRequest>>;
-
-  try {
-    user = await authenticateRequest(c.req.raw.headers);
-  } catch {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-
-  const body = await c.req.json().catch(() => null);
-  const parsed = chatSendMessageInputSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: "Invalid request body.",
-        details: parsed.error.flatten(),
-      },
-      400,
-    );
-  }
-
-  const requestId = globalThis.crypto.randomUUID().slice(0, 8);
-  return createNdjsonStreamResponse(c, async streamController => {
-    logServerDebug("chat.turn.route.start", {
-      requestId,
-      route: "/api/kimi/chat/stream",
-      conversationId: parsed.data.conversationId,
-      agentId: parsed.data.agentId,
-      userId: user.id,
-    });
-    await streamController.emitStage({
-      id: "memory",
-      label: "Loading Kimi memory and Aura context",
-    });
-    const result = await auraMedicalConversationTurnService.executeTurn({
-      input: {
-        ...parsed.data,
-        runtimeVersion: "aura-medical-v1",
-        medicalMode: parsed.data.medicalMode ?? "personal-health",
-        policyLevel: parsed.data.policyLevel ?? "interpretive-on-request",
-      },
-      userId: user.id,
-      streamPrimary: true,
-      traceContext: {
-        requestId,
-        route: "/api/kimi/chat/stream",
-      },
-      onStage: async stage => {
-        await streamController.emitStage(stage);
-      },
-      onTextDelta: async delta => {
-        await streamController.emitDelta(delta);
-      },
-    });
-
-    if (!result.assistantMessage) {
-      await streamController.fail(
-        "Unified Aura runtime finished without a persisted assistant message.",
-      );
-      return;
-    }
-
-    await streamController.complete({
-      id: String(result.assistantMessage.id),
-      role: "assistant",
-      content: result.assistantMessage.content,
-      agentId: result.assistantMessage.agentId,
-      createdAt: result.assistantMessage.createdAt.toISOString(),
-      metadata: result.assistantMessage.metadata,
-    });
-  }, {
-    requestId,
-    route: "/api/kimi/chat/stream",
-    conversationId: parsed.data.conversationId,
-    userId: user.id,
-    agentId: parsed.data.agentId,
-  }, "Unified Kimi alias chat turn");
+  return handleAuraChatStreamRoute(c, "/api/kimi/chat/stream");
 });
 app.post("/api/aura-medical/chat/stream", async (c) => {
-  let user: Awaited<ReturnType<typeof authenticateRequest>>;
-
-  try {
-    user = await authenticateRequest(c.req.raw.headers);
-  } catch {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-
-  const body = await c.req.json().catch(() => null);
-  const parsed = chatSendMessageInputSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json(
-      {
-        error: "Invalid request body.",
-        details: parsed.error.flatten(),
-      },
-      400,
-    );
-  }
-
-  const requestId = globalThis.crypto.randomUUID().slice(0, 8);
-  return createNdjsonStreamResponse(c, async streamController => {
-    logServerDebug("chat.turn.route.start", {
-      requestId,
-      route: "/api/aura-medical/chat/stream",
-      conversationId: parsed.data.conversationId,
-      agentId: parsed.data.agentId,
-      userId: user.id,
-      medicalMode: parsed.data.medicalMode ?? "personal-health",
-    });
-    await streamController.emitStage({
-      id: "memory",
-      label: "Loading Kimi memory and Aura context",
-    });
-    const result = await auraMedicalConversationTurnService.executeTurn({
-      input: {
-        ...parsed.data,
-        runtimeVersion: "aura-medical-v1",
-      },
-      userId: user.id,
-      streamPrimary: true,
-      traceContext: {
-        requestId,
-        route: "/api/aura-medical/chat/stream",
-      },
-      onStage: async stage => {
-        await streamController.emitStage(stage);
-      },
-      onTextDelta: async delta => {
-        await streamController.emitDelta(delta);
-      },
-    });
-
-    if (!result.assistantMessage) {
-      await streamController.fail(
-        "Aura Medical Runtime V1 finished without a persisted assistant message.",
-      );
-      return;
-    }
-
-    await streamController.complete({
-      id: String(result.assistantMessage.id),
-      role: "assistant",
-      content: result.assistantMessage.content,
-      agentId: result.assistantMessage.agentId,
-      createdAt: result.assistantMessage.createdAt.toISOString(),
-      metadata: result.assistantMessage.metadata,
-    });
-  }, {
-    requestId,
-    route: "/api/aura-medical/chat/stream",
-    conversationId: parsed.data.conversationId,
-    userId: user.id,
-    agentId: parsed.data.agentId,
-  }, "Aura Medical chat turn");
+  return handleAuraChatStreamRoute(c, "/api/aura-medical/chat/stream");
 });
 app.post("/api/vault/documents", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -399,6 +299,7 @@ app.post("/api/vault/documents", async c => {
   }
 });
 app.get("/api/vault/documents", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -423,6 +324,7 @@ app.get("/api/vault/documents", async c => {
   }
 });
 app.get("/api/vault/documents/:id", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -452,6 +354,7 @@ app.get("/api/vault/documents/:id", async c => {
   }
 });
 app.get("/api/vault/documents/:id/events", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -481,6 +384,7 @@ app.get("/api/vault/documents/:id/events", async c => {
   }
 });
 app.get("/api/vault/documents/:id/original", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -518,6 +422,7 @@ app.get("/api/vault/documents/:id/original", async c => {
   }
 });
 app.post("/api/vault/documents/:id/reprocess", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -547,6 +452,7 @@ app.post("/api/vault/documents/:id/reprocess", async c => {
   }
 });
 app.post("/api/vault/documents/:id/reclassify", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {
@@ -591,6 +497,7 @@ app.post("/api/vault/documents/:id/reclassify", async c => {
   }
 });
 app.delete("/api/vault/documents/:id", async c => {
+  ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;
 
   try {

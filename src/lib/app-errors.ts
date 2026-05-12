@@ -1,5 +1,7 @@
 type ErrorWithData = {
   message?: string;
+  category?: string;
+  traceId?: string;
   data?: {
     code?: string;
   };
@@ -18,17 +20,37 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
   const message = error.message?.trim() || `${fallbackLabel} failed.`;
   const normalized = message.toLowerCase();
   const code = error.data?.code;
+  const traceSuffix = error.traceId ? ` (trace ${error.traceId})` : "";
+
+  switch (error.category) {
+    case "auth":
+      return `Auth error: sign in again to continue.${traceSuffix}`;
+    case "transport":
+      return `Transport error: the chat connection was interrupted. Try again.${traceSuffix}`;
+    case "backend-timeout":
+      return `Backend timeout: the chat backend took too long to finish. Check the deployed API, database connectivity, or upstream provider.${traceSuffix}`;
+    case "provider-timeout":
+      return `Provider timeout: the model provider took too long to answer. Retry in a moment.${traceSuffix}`;
+    case "provider-error":
+      return `Provider error: the model provider failed to complete the chat turn. Check the API logs for upstream details.${traceSuffix}`;
+    case "db-error":
+      return `Database error: ${message}${traceSuffix}`;
+    case "context-error":
+      return `Context error: ${message}${traceSuffix}`;
+    default:
+      break;
+  }
 
   if (code === "UNAUTHORIZED" || normalized.includes("unauth")) {
-    return "Auth error: sign in again to continue.";
+    return `Auth error: sign in again to continue.${traceSuffix}`;
   }
 
   if (normalized.includes("authentication provider took too long")) {
-    return "Auth error: Google sign-in took too long to finish. Try again.";
+    return `Auth error: Google sign-in took too long to finish. Try again.${traceSuffix}`;
   }
 
   if (normalized.includes("backend session is not ready yet")) {
-    return "Auth error: sign-in is still finishing in the background. Try again in a moment.";
+    return `Auth error: sign-in is still finishing in the background. Try again in a moment.${traceSuffix}`;
   }
 
   if (
@@ -38,7 +60,7 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     normalized.includes("aborterror") ||
     normalized.includes("request was interrupted")
   ) {
-    return "Network error: the request was interrupted. Try again.";
+    return `Network error: the request was interrupted. Try again.${traceSuffix}`;
   }
 
   if (
@@ -47,14 +69,14 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     normalized.includes("aura medical chat turn timed out") ||
     normalized.includes("kimi request timed out")
   ) {
-    return "Runtime error: the chat backend timed out before finishing. Check the deployed API, database connectivity, or model provider.";
+    return `Runtime error: the chat backend timed out before finishing. Check the deployed API, database connectivity, or model provider.${traceSuffix}`;
   }
 
   if (
     normalized.includes("kimi request failed") ||
     normalized.includes("did not return a readable stream")
   ) {
-    return "Runtime error: the model provider failed to complete the chat turn. Check the local API logs for provider or stream details.";
+    return `Runtime error: the model provider failed to complete the chat turn. Check the local API logs for provider or stream details.${traceSuffix}`;
   }
 
   if (
@@ -63,7 +85,7 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     normalized.includes("failed to fetch") ||
     normalized.includes("timed out")
   ) {
-    return "Network error: check the local API connection and try again.";
+    return `Network error: check the local API connection and try again.${traceSuffix}`;
   }
 
   if (
@@ -71,14 +93,14 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     normalized.includes("precondition") ||
     normalized.includes("backend setup")
   ) {
-    return `Setup error: ${message}`;
+    return `Setup error: ${message}${traceSuffix}`;
   }
 
   if (
     normalized.includes("emaxconnsession") ||
     normalized.includes("max clients reached in session mode")
   ) {
-    return "Setup error: Supabase connection pool is exhausted. Confirm DATABASE_URL uses the pooled 6543 URL and restart the backend.";
+    return `Setup error: Supabase connection pool is exhausted. Confirm DATABASE_URL uses the pooled 6543 URL and restart the backend.${traceSuffix}`;
   }
 
   if (
@@ -86,7 +108,7 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     (normalized.includes("relation") && normalized.includes("does not exist")) ||
     normalized.includes("conversational schema is not fully installed")
   ) {
-    return "Setup error: database schema is out of date. Re-run app/supabase/init.sql in Supabase and restart the backend.";
+    return `Setup error: database schema is out of date. Re-run app/supabase/init.sql in Supabase and restart the backend.${traceSuffix}`;
   }
 
   if (
@@ -96,7 +118,7 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     normalized.includes("conversation not found") ||
     normalized.includes("file not found")
   ) {
-    return `Database error: ${message}`;
+    return `Database error: ${message}${traceSuffix}`;
   }
 
   if (
@@ -104,8 +126,8 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     normalized.includes("router") ||
     normalized.includes("not found")
   ) {
-    return `Router error: ${message}`;
+    return `Router error: ${message}${traceSuffix}`;
   }
 
-  return `${fallbackLabel} error: ${message}`;
+  return `${fallbackLabel} error: ${message}${traceSuffix}`;
 }

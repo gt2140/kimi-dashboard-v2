@@ -1,3 +1,8 @@
+type ChatStreamAckEvent = {
+  type: "ack";
+  traceId: string;
+};
+
 type ChatStreamStageEvent = {
   type: "stage";
   stageId: string;
@@ -24,6 +29,15 @@ type ChatStreamMessageCompleteEvent = {
 type ChatStreamErrorEvent = {
   type: "error";
   message: string;
+  category?:
+    | "auth"
+    | "transport"
+    | "backend-timeout"
+    | "provider-timeout"
+    | "provider-error"
+    | "db-error"
+    | "context-error";
+  traceId?: string;
 };
 
 type ChatStreamWatchdog = {
@@ -37,7 +51,14 @@ type ChatStreamWatchdogOptions = {
   initialTimeoutMs?: number;
 };
 
+type ChatStreamResponseMetadata = {
+  status: number;
+  contentType: string | null;
+  traceId: string | null;
+};
+
 type ChatStreamEvent =
+  | ChatStreamAckEvent
   | ChatStreamStageEvent
   | ChatStreamTextDeltaEvent
   | ChatStreamMessageCompleteEvent
@@ -50,6 +71,7 @@ function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
 
   const candidate = value as { type?: string };
   return (
+    candidate.type === "ack" ||
     candidate.type === "stage" ||
     candidate.type === "text-delta" ||
     candidate.type === "message-complete" ||
@@ -183,11 +205,59 @@ export function parseChatStreamChunk(buffer: string) {
   };
 }
 
+export function readChatStreamResponseMetadata(
+  response: Response,
+): ChatStreamResponseMetadata {
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    traceId: response.headers.get("x-trace-id"),
+  };
+}
+
+export function createMalformedStreamError(input: {
+  bodyPreview: string;
+  status: number;
+  contentType?: string | null;
+  traceId?: string | null;
+}) {
+  const bodyPreview = input.bodyPreview.trim().slice(0, 300);
+  const normalizedPreview = bodyPreview.toLowerCase();
+  const normalizedContentType = input.contentType?.toLowerCase() ?? "";
+  const category =
+    input.status >= 500 ||
+    normalizedPreview.includes("an error occurred") ||
+    normalizedPreview.includes("<!doctype html") ||
+    normalizedPreview.includes("<html")
+      ? "backend-timeout"
+      : "transport";
+  const error = new Error(
+    `Chat stream returned malformed content (${input.status}, ${
+      input.contentType || "unknown content-type"
+    }).`,
+  ) as Error & {
+    category?: ChatStreamErrorEvent["category"];
+    traceId?: string;
+    bodyPreview?: string;
+    contentType?: string | null;
+  };
+
+  error.category = normalizedContentType.includes("text/html")
+    ? "backend-timeout"
+    : category;
+  error.traceId = input.traceId ?? undefined;
+  error.bodyPreview = bodyPreview;
+  error.contentType = input.contentType ?? null;
+  return error;
+}
+
 export type {
+  ChatStreamAckEvent,
   ChatStreamEvent,
   ChatStreamErrorEvent,
   ChatStreamMessageCompleteEvent,
   ChatStreamStageEvent,
   ChatStreamTextDeltaEvent,
+  ChatStreamResponseMetadata,
   ChatStreamWatchdogOptions,
 };

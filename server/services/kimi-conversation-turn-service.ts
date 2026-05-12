@@ -245,6 +245,16 @@ export class KimiConversationTurnService {
       this.dependencies;
     let primaryRunId: number | null = null;
     let failureKind: ChatTurnFailureKind = "unknown";
+    const startedAt = Date.now();
+    const metrics = {
+      contextStartedAt: 0,
+      contextMs: 0,
+      providerStartedAt: 0,
+      providerFirstTokenMs: null as number | null,
+      providerTotalMs: 0,
+      persistStartedAt: 0,
+      persistMs: 0,
+    };
     const trace = createChatTurnTrace({
       requestId:
         params.traceContext?.requestId ?? globalThis.crypto.randomUUID().slice(0, 8),
@@ -270,6 +280,7 @@ export class KimiConversationTurnService {
       trace.markStage("memory", "Loading Kimi memory and Aura context");
 
       failureKind = "context-load";
+      metrics.contextStartedAt = Date.now();
       const context = await contextLoader({
         userId: params.userId,
         conversationId: params.input.conversationId,
@@ -279,11 +290,14 @@ export class KimiConversationTurnService {
         medicalMode: params.input.medicalMode,
         policyLevel: params.input.policyLevel,
       });
+      metrics.contextMs = Date.now() - metrics.contextStartedAt;
       trace.debug("context.loaded", {
         hasSummary: Boolean(context.conversationSummary),
         longTermMemoryCount: context.longTermMemories.length,
         vaultChunkCount: context.selectedVaultChunks.length,
         enabledToolCount: context.enabledFormulaTools.length,
+        contextMs: metrics.contextMs,
+        fastPath: context.runtimeMetadata?.fastPath ?? false,
       });
       const runtimeOptions = resolveAuraRuntimeOptions({
         runtimeVersion: params.input.runtimeVersion,
@@ -513,6 +527,7 @@ export class KimiConversationTurnService {
 
       failureKind = params.streamPrimary ? "provider-stream" : "provider-response";
       let firstProviderDeltaSeen = false;
+      metrics.providerStartedAt = Date.now();
       const finalCompletion = directCompletionFromFallback
         ? firstCompletion
         : params.streamPrimary
@@ -520,17 +535,23 @@ export class KimiConversationTurnService {
               onTextDelta: async delta => {
                 if (!firstProviderDeltaSeen) {
                   firstProviderDeltaSeen = true;
+                  metrics.providerFirstTokenMs =
+                    Date.now() - metrics.providerStartedAt;
                   trace.debug("provider.stream.first-delta", {
                     deltaLength: delta.length,
+                    providerFirstTokenMs: metrics.providerFirstTokenMs,
                   });
                 }
                 await params.onTextDelta?.(delta);
               },
             })
           : await kimiClient.createChatCompletion(request);
+      metrics.providerTotalMs = Date.now() - metrics.providerStartedAt;
       trace.debug("provider.response.completed", {
         streamed: Boolean(params.streamPrimary && !directCompletionFromFallback),
         finishReason: finalCompletion?.choices?.[0]?.finish_reason ?? null,
+        providerFirstTokenMs: metrics.providerFirstTokenMs,
+        providerTotalMs: metrics.providerTotalMs,
       });
 
       if (!finalCompletion) {
@@ -565,15 +586,18 @@ export class KimiConversationTurnService {
       };
 
       failureKind = "assistant-persist";
+      metrics.persistStartedAt = Date.now();
       const assistantMessage = await conversationRepository.createAssistantMessage({
         conversationId: params.input.conversationId,
         content: outputText,
         agentId: params.input.agentId,
         metadata: assistantMetadata,
       });
+      metrics.persistMs = Date.now() - metrics.persistStartedAt;
       trace.debug("assistant.persisted", {
         assistantMessageId: assistantMessage.id,
         outputLength: outputText.length,
+        persistMs: metrics.persistMs,
       });
 
       await conversationRepository.updateConversationAfterTurn({
@@ -612,6 +636,11 @@ export class KimiConversationTurnService {
       });
       trace.debug("completed", {
         assistantMessageId: assistantMessage.id,
+        totalMs: Date.now() - startedAt,
+        contextMs: metrics.contextMs,
+        providerFirstTokenMs: metrics.providerFirstTokenMs,
+        providerTotalMs: metrics.providerTotalMs,
+        persistMs: metrics.persistMs,
       });
 
       void persistKimiTurnMemory({

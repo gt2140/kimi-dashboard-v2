@@ -39,7 +39,7 @@ describe("TurnStreamController", () => {
 
     controller.disconnect();
     controller.emitDelta("hola");
-    controller.fail("should stay quiet");
+    controller.fail({ message: "should stay quiet" });
 
     expect(write).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);

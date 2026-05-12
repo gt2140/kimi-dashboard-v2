@@ -16,6 +16,34 @@ describe("Vault V2 HTTP routes", () => {
     expect(response.status).toBe(401);
   });
 
+  it("protects the canonical chat stream alias with auth", async () => {
+    const response = await app.fetch(
+      new Request("http://localhost/api/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("protects aura medical chat stream with auth", async () => {
+    const response = await app.fetch(
+      new Request("http://localhost/api/aura-medical/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
   it("protects vault v2 upload with auth", async () => {
     const formData = new FormData();
     formData.append("category", "bloodwork");

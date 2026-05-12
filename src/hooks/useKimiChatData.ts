@@ -12,42 +12,21 @@ import { logClientDebug } from "@/lib/debug";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
+  createMalformedStreamError,
   createChatStreamWatchdog,
   isRecoverableChatStreamError,
   isRecoverableChatStreamStatus,
   parseChatStreamChunk,
+  readChatStreamResponseMetadata,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
 import { mapConversationSummary, mapMessage } from "@/hooks/kimi-chat-mappers";
 import { createPersistedCompletionReader } from "@/hooks/kimi-chat-recovery";
-import type { Message } from "@/types";
 
 const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 const STREAM_RECOVERY_POLL_ATTEMPTS = 6;
 const STREAM_RECOVERY_POLL_DELAY_MS = 750;
 const CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS = 15_000;
-const CHAT_STREAM_FIRST_TEXT_TIMEOUT_MS = 12_000;
-
-function mapCompletedAssistantMessage(message: {
-  id: number | string;
-  role?: "assistant";
-  content: string;
-  agentId: string | null;
-  createdAt: Date | string;
-  metadata?: Message["metadata"];
-}) {
-  return {
-    id: String(message.id),
-    role: "assistant" as const,
-    content: message.content,
-    agentId: message.agentId ?? "generalist",
-    createdAt:
-      message.createdAt instanceof Date
-        ? message.createdAt.toISOString()
-        : new Date(message.createdAt).toISOString(),
-    metadata: message.metadata,
-  };
-}
 
 export function useKimiChatData() {
   const navigate = useNavigate();
@@ -84,7 +63,6 @@ export function useKimiChatData() {
     },
   );
   const createConversation = trpc.chat.createConversation.useMutation();
-  const sendMessageMutation = trpc.chat.sendMessage.useMutation();
   const deleteConversationMutation = trpc.chat.deleteConversation.useMutation();
 
   const sessions = useMemo(
@@ -130,11 +108,7 @@ export function useKimiChatData() {
     clearChatStore();
     setSearchParams({});
 
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      navigate("/kimi/chat");
-      return;
-    }
+    void ensureBackendSession().catch(() => null);
 
     const created = await createConversation.mutateAsync({
       agentId: nextAgentId,
@@ -162,6 +136,7 @@ export function useKimiChatData() {
     content: string,
     handlers: {
       onEvent?: (event: ChatStreamEvent) => void;
+      onAck?: (event: Extract<ChatStreamEvent, { type: "ack" }>) => void;
       onStage?: (stage: Extract<ChatStreamEvent, { type: "stage" }>) => void;
       onTextDelta?: (
         event: Extract<ChatStreamEvent, { type: "text-delta" }>,
@@ -171,24 +146,15 @@ export function useKimiChatData() {
       ) => void;
     } = {},
   ) {
-    const synced = await ensureBackendSession();
-
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
+    void ensureBackendSession().catch(() => null);
 
     const conversationId = await ensureConversationId(content);
 
     setStreamError(null);
     setIsStreaming(true);
     let streamStarted = false;
-    let receivedAssistantText = false;
-    let fallbackTriggered = false;
     let firstEventAt: number | null = null;
     let firstDeltaAt: number | null = null;
-    let firstTextTimeoutId: ReturnType<typeof setTimeout> | null = null;
     const requestStartedAt = Date.now();
     const streamWatchdog = createChatStreamWatchdog(
       CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
@@ -214,83 +180,26 @@ export function useKimiChatData() {
       },
     });
 
-    async function recoverWithoutStream() {
-      fallbackTriggered = true;
+    async function recoverPersistedCompletion() {
       logClientDebug("kimi.chat.fallback.start", {
         conversationId,
         elapsedMs: Date.now() - requestStartedAt,
         streamStarted,
-        receivedAssistantText,
+        recoveryMode: "persisted-completion-only",
       });
 
-      const recoveredMessage = await readPersistedCompletion();
-      if (recoveredMessage) {
-        return recoveredMessage;
-      }
-
-      const result = await sendMessageMutation.mutateAsync({
-        conversationId,
-        content,
-        agentId: activeAgentId,
-        calledAgentIds,
-        runtimeVersion,
-        medicalMode,
-        policyLevel,
-      });
-
-      await Promise.all([
-        utils.chat.listConversations.invalidate(),
-        utils.chat.getConversation.invalidate({ id: conversationId }),
-      ]);
-
-      const assistantMessage = result.assistantMessage
-        ? mapCompletedAssistantMessage(result.assistantMessage)
-        : await readPersistedCompletion();
-
-      if (!assistantMessage) {
-        throw new Error(
-          "Kimi chat completed without a persisted assistant message.",
-        );
-      }
-
-      handlers.onMessageComplete?.({
-        type: "message-complete",
-        message: assistantMessage,
-      });
-      return assistantMessage;
+      return readPersistedCompletion();
     }
 
     try {
-      const clearFirstTextTimeout = () => {
-        if (firstTextTimeoutId) {
-          clearTimeout(firstTextTimeoutId);
-          firstTextTimeoutId = null;
-        }
-      };
-
-      const armFirstTextTimeout = () => {
-        if (receivedAssistantText || firstTextTimeoutId) {
-          return;
-        }
-
-        firstTextTimeoutId = setTimeout(() => {
-          logClientDebug("kimi.chat.first-text-timeout", {
-            conversationId,
-            elapsedMs: Date.now() - requestStartedAt,
-          });
-          streamWatchdog.abort(
-            `Kimi chat did not produce assistant text within ${CHAT_STREAM_FIRST_TEXT_TIMEOUT_MS}ms after drafting started.`,
-          );
-        }, CHAT_STREAM_FIRST_TEXT_TIMEOUT_MS);
-      };
-
       async function openStream(forceSessionRefresh = false) {
         if (forceSessionRefresh) {
           const refreshed = await ensureBackendSession({ force: true });
           if (!refreshed) {
-            throw new Error(
-              "Your browser session exists, but the backend session is not ready yet.",
-            );
+            logClientDebug("kimi.chat.auth.retry-skipped", {
+              conversationId,
+              reason: "backend-session-refresh-unavailable",
+            });
           }
         }
 
@@ -328,23 +237,49 @@ export function useKimiChatData() {
       }
 
       if (!response.ok) {
+        let responseMessage = `Kimi chat failed with HTTP ${response.status}.`;
+        try {
+          const payload = (await response.clone().json()) as {
+            error?: string;
+            message?: string;
+            traceId?: string;
+          };
+          responseMessage =
+            payload.error?.trim() ||
+            payload.message?.trim() ||
+            responseMessage;
+        } catch {
+          // Fall back to the HTTP status message when the response is not JSON.
+        }
+
         if (isRecoverableChatStreamStatus(response.status)) {
-          const recoveredMessage = await readPersistedCompletion();
+          const recoveredMessage = await recoverPersistedCompletion();
           if (recoveredMessage) {
             return recoveredMessage;
           }
         }
 
-        throw new Error(`Kimi chat failed with HTTP ${response.status}.`);
+        const httpError = new Error(responseMessage) as Error & {
+          category?: string;
+        };
+        httpError.category =
+          response.status === 401
+            ? "auth"
+            : response.status >= 500
+              ? "backend-timeout"
+              : "transport";
+        throw httpError;
       }
 
       if (!response.body) {
         throw new Error("Kimi chat did not return a readable stream.");
       }
 
+      const responseMetadata = readChatStreamResponseMetadata(response);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let rawBodyPreview = "";
       let completedMessage:
         | Extract<ChatStreamEvent, { type: "message-complete" }>["message"]
         | null = null;
@@ -352,7 +287,13 @@ export function useKimiChatData() {
       while (true) {
         const { done, value } = await reader.read();
         streamWatchdog.touch();
-        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const decoded = decoder.decode(value ?? new Uint8Array(), {
+          stream: !done,
+        });
+        buffer += decoded;
+        if (rawBodyPreview.length < 300) {
+          rawBodyPreview = `${rawBodyPreview}${decoded}`.slice(0, 300);
+        }
 
         const parsed = parseChatStreamChunk(buffer);
         buffer = parsed.remainder;
@@ -369,17 +310,22 @@ export function useKimiChatData() {
           }
           handlers.onEvent?.(event);
 
+          if (event.type === "ack") {
+            handlers.onAck?.(event);
+            logClientDebug("kimi.chat.ack", {
+              conversationId,
+              traceId: event.traceId,
+              elapsedMs: Date.now() - requestStartedAt,
+            });
+            continue;
+          }
+
           if (event.type === "stage") {
-            if (event.stageId === "draft") {
-              armFirstTextTimeout();
-            }
             handlers.onStage?.(event);
             continue;
           }
 
           if (event.type === "text-delta") {
-            receivedAssistantText = true;
-            clearFirstTextTimeout();
             if (firstDeltaAt === null) {
               firstDeltaAt = Date.now();
               logClientDebug("kimi.chat.first-delta", {
@@ -392,14 +338,19 @@ export function useKimiChatData() {
           }
 
           if (event.type === "message-complete") {
-            clearFirstTextTimeout();
             completedMessage = event.message;
             handlers.onMessageComplete?.(event);
             continue;
           }
 
           if (event.type === "error") {
-            throw new Error(event.message);
+            const structuredError = new Error(event.message) as Error & {
+              category?: string;
+              traceId?: string;
+            };
+            structuredError.category = event.category;
+            structuredError.traceId = event.traceId;
+            throw structuredError;
           }
         }
 
@@ -416,11 +367,26 @@ export function useKimiChatData() {
       logClientDebug("kimi.chat.stream.completed", {
         conversationId,
         elapsedMs: Date.now() - requestStartedAt,
-        fallbackTriggered,
       });
 
+      if (!streamStarted && (buffer.trim() || rawBodyPreview.trim())) {
+        throw createMalformedStreamError({
+          bodyPreview: buffer.trim() || rawBodyPreview,
+          status: responseMetadata.status,
+          contentType: responseMetadata.contentType,
+          traceId: responseMetadata.traceId,
+        });
+      }
+
       if (!completedMessage) {
-        return recoverWithoutStream();
+        const recoveredMessage = await recoverPersistedCompletion();
+        if (recoveredMessage) {
+          return recoveredMessage;
+        }
+
+        throw new Error(
+          "Kimi chat completed without a terminal assistant message.",
+        );
       }
 
       return completedMessage;
@@ -430,13 +396,12 @@ export function useKimiChatData() {
           conversationId,
           elapsedMs: Date.now() - requestStartedAt,
           streamStarted,
-          receivedAssistantText,
-          fallbackTriggered,
           error: error instanceof Error ? error.message : "recoverable-error",
         });
 
-        if (!receivedAssistantText) {
-          return recoverWithoutStream();
+        const recoveredMessage = await recoverPersistedCompletion();
+        if (recoveredMessage) {
+          return recoveredMessage;
         }
       }
 
@@ -450,21 +415,13 @@ export function useKimiChatData() {
       setStreamError(message);
       throw error;
     } finally {
-      if (firstTextTimeoutId) {
-        clearTimeout(firstTextTimeoutId);
-      }
       streamWatchdog.cancel();
       setIsStreaming(false);
     }
   }
 
   async function removeConversation(sessionId: string) {
-    const synced = await ensureBackendSession();
-    if (!synced) {
-      throw new Error(
-        "Your browser session exists, but the backend session is not ready yet.",
-      );
-    }
+    void ensureBackendSession().catch(() => null);
 
     const numericId = Number(sessionId);
     await deleteConversationMutation.mutateAsync({ id: numericId });
@@ -482,7 +439,6 @@ export function useKimiChatData() {
   const error =
     streamError ??
     createConversation.error ??
-    sendMessageMutation.error ??
     deleteConversationMutation.error ??
     conversationsQuery.error ??
     conversationQuery.error ??
@@ -493,8 +449,7 @@ export function useKimiChatData() {
     messages,
     activeConversationId,
     isConversationLoading: conversationQuery.isLoading,
-    isSending:
-      isStreaming || createConversation.isPending || sendMessageMutation.isPending,
+    isSending: isStreaming || createConversation.isPending,
     error:
       typeof error === "string"
         ? formatRuntimeError(new Error(error), "Kimi chat")

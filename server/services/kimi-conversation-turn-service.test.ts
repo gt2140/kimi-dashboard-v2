@@ -772,4 +772,119 @@ describe("KimiConversationTurnService", () => {
     expect(systemPrompt).toContain("Evidence quality");
     expect(systemPrompt).toContain("Practical takeaway");
   });
+
+  it("keeps vault context attached when production uses the non-stream provider path", async () => {
+    const conversationRepository = {
+      requireConversationOwner: vi.fn().mockResolvedValue({
+        id: 61,
+        title: "Vault production conversation",
+      }),
+      createUserMessage: vi.fn().mockResolvedValue({ id: 801 }),
+      createAssistantMessage: vi.fn().mockResolvedValue({
+        id: 802,
+        createdAt: new Date("2026-05-07T13:00:00.000Z"),
+      }),
+      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const agentRunRepository = {
+      createPrimaryRun: vi.fn().mockResolvedValue({ id: 803 }),
+      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
+      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
+      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const kimiClient = {
+      createChatCompletion: vi.fn().mockResolvedValue({
+        id: "chatcmpl-vault-production",
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              role: "assistant",
+              content: "I used your vault context without direct streaming.",
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 88,
+          completion_tokens: 18,
+          total_tokens: 106,
+        },
+      }),
+      streamChatCompletion: vi.fn(),
+    };
+
+    const toolExecutor = {
+      getEnabledTools: vi.fn().mockResolvedValue([]),
+      executeToolCalls: vi.fn(),
+    };
+
+    const contextLoader = vi.fn().mockResolvedValue({
+      systemPrompt: "You are Generalist.",
+      responseStyle: "detailed",
+      recentMessages: [],
+      conversationSummary: "The user wants a fast production-safe answer.",
+      longTermMemories: [],
+      clinicalProfileSummary: "Clinical profile summary:\n- ApoB 72 mg/dL.",
+      selectedVaultChunks: [
+        {
+          documentId: 91,
+          chunkIndex: 0,
+          content: "ApoB 72 mg/dL from April panel.",
+        },
+      ],
+      relatedVaultDocuments: [
+        {
+          id: 91,
+          filename: "apob-panel.pdf",
+          category: "bloodwork",
+        },
+      ],
+      enabledFormulaTools: [],
+      thinkingMode: "disabled",
+      promptCacheKey: "kimi:v2:conversation:61",
+      safetyIdentifier: "user-61",
+    });
+
+    const service = new KimiConversationTurnService({
+      conversationRepository,
+      agentRunRepository,
+      kimiClient,
+      toolExecutor,
+      contextLoader,
+    });
+
+    const result = await service.executeTurn({
+      input: {
+        conversationId: 61,
+        content: "Summarize my ApoB using the vault.",
+        agentId: "generalist",
+        calledAgentIds: [],
+      },
+      userId: 61,
+      streamPrimary: false,
+    });
+
+    expect(kimiClient.streamChatCompletion).not.toHaveBeenCalled();
+    expect(kimiClient.createChatCompletion).toHaveBeenCalled();
+    expect(agentRunRepository.createMessageContextBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relatedVaultDocuments: [
+          expect.objectContaining({
+            filename: "apob-panel.pdf",
+          }),
+        ],
+        vaultChunks: [
+          expect.objectContaining({
+            documentId: 91,
+            chunkIndex: 0,
+          }),
+        ],
+      }),
+    );
+    expect(result.assistantMessage?.content).toContain("vault context");
+  });
 });

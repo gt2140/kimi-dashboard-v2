@@ -25,6 +25,19 @@ export class TurnStreamController {
     await this.closeSafely();
   }
 
+  async emitAck(input: { traceId: string }) {
+    if (this.terminal) {
+      return;
+    }
+
+    await this.writeSafely(
+      encodeChatStreamEvent({
+        type: "ack",
+        traceId: input.traceId,
+      }),
+    );
+  }
+
   async emitStage(stage: { id: string; label: string }) {
     if (this.terminal) {
       return;
@@ -67,7 +80,18 @@ export class TurnStreamController {
     await this.closeSafely();
   }
 
-  async fail(message: string) {
+  async fail(input: {
+    message: string;
+    category?:
+      | "auth"
+      | "transport"
+      | "backend-timeout"
+      | "provider-timeout"
+      | "provider-error"
+      | "db-error"
+      | "context-error";
+    traceId?: string;
+  }) {
     if (this.terminal) {
       return;
     }
@@ -76,7 +100,9 @@ export class TurnStreamController {
     await this.writeSafely(
       encodeChatStreamEvent({
         type: "error",
-        message,
+        message: input.message,
+        category: input.category,
+        traceId: input.traceId,
       })
     );
     await this.closeSafely();

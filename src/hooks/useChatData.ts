@@ -7,10 +7,12 @@ import { logClientDebug, logClientError } from "@/lib/debug";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
+  createMalformedStreamError,
   createChatStreamWatchdog,
   isRecoverableChatStreamError,
   isRecoverableChatStreamStatus,
   parseChatStreamChunk,
+  readChatStreamResponseMetadata,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
 import type { ChatSession, Message } from "@/types";
@@ -321,9 +323,11 @@ export function useChatData() {
         throw new Error("Streaming response did not include a readable body.");
       }
 
+      const responseMetadata = readChatStreamResponseMetadata(response);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let rawBodyPreview = "";
       let completedMessage:
         | Extract<ChatStreamEvent, { type: "message-complete" }>["message"]
         | null = null;
@@ -331,7 +335,13 @@ export function useChatData() {
       while (true) {
         const { done, value } = await reader.read();
         streamWatchdog.touch();
-        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const decoded = decoder.decode(value ?? new Uint8Array(), {
+          stream: !done,
+        });
+        buffer += decoded;
+        if (rawBodyPreview.length < 300) {
+          rawBodyPreview = `${rawBodyPreview}${decoded}`.slice(0, 300);
+        }
 
         const parsed = parseChatStreamChunk(buffer);
         buffer = parsed.remainder;
@@ -339,6 +349,10 @@ export function useChatData() {
         for (const event of parsed.events) {
           streamStarted = true;
           handlers.onEvent?.(event);
+
+          if (event.type === "ack") {
+            continue;
+          }
 
           if (event.type === "stage") {
             handlers.onStage?.(event);
@@ -358,7 +372,13 @@ export function useChatData() {
           }
 
           if (event.type === "error") {
-            throw new Error(event.message);
+            const structuredError = new Error(event.message) as Error & {
+              category?: string;
+              traceId?: string;
+            };
+            structuredError.category = event.category;
+            structuredError.traceId = event.traceId;
+            throw structuredError;
           }
         }
 
@@ -371,6 +391,15 @@ export function useChatData() {
         utils.chat.listConversations.invalidate(),
         utils.chat.getConversation.invalidate({ id: conversationId }),
       ]);
+
+      if (!streamStarted && (buffer.trim() || rawBodyPreview.trim())) {
+        throw createMalformedStreamError({
+          bodyPreview: buffer.trim() || rawBodyPreview,
+          status: responseMetadata.status,
+          contentType: responseMetadata.contentType,
+          traceId: responseMetadata.traceId,
+        });
+      }
 
       return completedMessage;
     } catch (error) {

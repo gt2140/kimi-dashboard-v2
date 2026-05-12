@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import {
   conversationMemories,
   messages,
+  userClinicalProfiles,
   userMemories,
 } from "../../db/schema.js";
 import { getDb } from "../queries/connection.js";
@@ -12,6 +13,18 @@ import {
 } from "../queries/agents.js";
 import { vaultV2Service } from "./vault-v2-service.js";
 import type { VaultDocumentCategory } from "./vault-v2.js";
+
+const FAST_PATH_RECENT_MESSAGE_LIMIT = 6;
+
+export function shouldUseProductionFastPath(params: {
+  runtimeVersion?: "classic" | "aura-medical-v1";
+  medicalMode?: "personal-health" | "research";
+}) {
+  return (
+    params.runtimeVersion === "aura-medical-v1" &&
+    params.medicalMode !== "research"
+  );
+}
 
 export async function loadKimiTurnContext(params: {
   userId: number;
@@ -26,50 +39,74 @@ export async function loadKimiTurnContext(params: {
     throw new Error(`Agent ${params.agentSlug} not found.`);
   }
 
-  const [promptTemplate, userSetting, recentMessages, latestSummary, memories] =
-    await Promise.all([
-      getActiveSystemPrompt(agent.id),
-      getUserAgentSetting(params.userId, agent.id),
-      getDb()
-        .select({
-          role: messages.role,
-          content: messages.content,
-        })
-        .from(messages)
-        .where(eq(messages.conversationId, params.conversationId))
-        .orderBy(desc(messages.createdAt))
-        .limit(12),
-      getDb()
-        .select()
-        .from(conversationMemories)
-        .where(eq(conversationMemories.conversationId, params.conversationId))
-        .orderBy(desc(conversationMemories.updatedAt))
-        .limit(1),
-      getDb()
-        .select()
-        .from(userMemories)
-        .where(eq(userMemories.userId, params.userId))
-        .orderBy(desc(userMemories.updatedAt))
-        .limit(8),
-    ]);
+  const useFastPath = shouldUseProductionFastPath(params);
+  const db = getDb();
+  const [
+    promptTemplate,
+    userSetting,
+    recentMessages,
+    latestSummary,
+    memories,
+    clinicalProfile,
+  ] = await Promise.all([
+    getActiveSystemPrompt(agent.id),
+    getUserAgentSetting(params.userId, agent.id),
+    db
+      .select({
+        role: messages.role,
+        content: messages.content,
+      })
+      .from(messages)
+      .where(eq(messages.conversationId, params.conversationId))
+      .orderBy(desc(messages.createdAt))
+      .limit(FAST_PATH_RECENT_MESSAGE_LIMIT),
+    db
+      .select()
+      .from(conversationMemories)
+      .where(eq(conversationMemories.conversationId, params.conversationId))
+      .orderBy(desc(conversationMemories.updatedAt))
+      .limit(1),
+    useFastPath
+      ? Promise.resolve([])
+      : db
+          .select()
+          .from(userMemories)
+          .where(eq(userMemories.userId, params.userId))
+          .orderBy(desc(userMemories.updatedAt))
+          .limit(8),
+    db
+      .select()
+      .from(userClinicalProfiles)
+      .where(eq(userClinicalProfiles.userId, params.userId))
+      .limit(1),
+  ]);
 
   const allowVaultContext = userSetting?.allowVaultContext ?? true;
   const allowedCategories = allowVaultContext
     ? (agent.allowedVaultCategories as VaultDocumentCategory[])
     : [];
-  const vaultContext = await vaultV2Service.loadContext({
-    userId: params.userId,
-    allowedCategories,
-    query: params.latestUserMessage,
-    maxChunks: 4,
-  });
+  const vaultContext =
+    useFastPath || allowedCategories.length === 0
+      ? {
+          clinicalProfileSummary: clinicalProfile[0]?.summaryText ?? null,
+          selectedVaultChunks: [],
+          relatedVaultDocuments: [],
+        }
+      : await vaultV2Service.loadContext({
+          userId: params.userId,
+          allowedCategories,
+          query: params.latestUserMessage,
+          maxChunks: 4,
+        });
 
-  const enabledFormulaTools = buildEnabledFormulaTools({
-    allowWebResearch: userSetting?.allowWebResearch ?? false,
-    allowScientificResearch: userSetting?.allowScientificResearch ?? false,
-    preferKimiMemory: userSetting?.preferKimiMemory ?? false,
-    enabledFormulaTools: userSetting?.enabledFormulaTools ?? [],
-  });
+  const enabledFormulaTools = useFastPath
+    ? []
+    : buildEnabledFormulaTools({
+        allowWebResearch: userSetting?.allowWebResearch ?? false,
+        allowScientificResearch: userSetting?.allowScientificResearch ?? false,
+        preferKimiMemory: userSetting?.preferKimiMemory ?? false,
+        enabledFormulaTools: userSetting?.enabledFormulaTools ?? [],
+      });
 
   return {
     agentDefinitionId: agent.id,
@@ -96,10 +133,15 @@ export async function loadKimiTurnContext(params: {
     thinkingMode: resolveDefaultKimiThinkingMode({
       agentSlug: params.agentSlug,
       medicalMode: params.medicalMode,
-      explicitThinkingMode: userSetting?.kimiThinkingMode ?? null,
+      explicitThinkingMode: useFastPath
+        ? "disabled"
+        : userSetting?.kimiThinkingMode ?? null,
     }),
     promptCacheKey: `kimi:v2:conversation:${params.conversationId}`,
     safetyIdentifier: `user-${params.userId}`,
+    runtimeMetadata: {
+      fastPath: useFastPath,
+    },
   };
 }
 
@@ -143,4 +185,7 @@ function resolveDefaultKimiThinkingMode(input: {
   return "disabled" as const;
 }
 
-export { buildEnabledFormulaTools, resolveDefaultKimiThinkingMode };
+export {
+  buildEnabledFormulaTools,
+  resolveDefaultKimiThinkingMode,
+};

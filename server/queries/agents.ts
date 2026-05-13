@@ -47,6 +47,23 @@ const PROVIDER_SEEDS = [
     },
   },
   {
+    slug: "venice",
+    name: "Venice",
+    authStrategy: "api_key",
+    supportsTools: false,
+    supportsStreaming: true,
+    supportsJsonMode: true,
+    supportsVision: false,
+    endpoint: {
+      modelName: "zai-org-glm-5-1",
+      label: "GLM 5.1",
+      supportsTools: false,
+      supportsReasoning: true,
+      supportsVision: false,
+      maxContextTokens: 200000,
+    },
+  },
+  {
     slug: "anthropic",
     name: "Anthropic",
     authStrategy: "api_key",

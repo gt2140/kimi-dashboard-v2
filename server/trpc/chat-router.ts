@@ -26,6 +26,8 @@ export const chatSendMessageInputSchema = z.object({
   runtimeVersion: z.enum(["classic", "aura-medical-v1"]).optional(),
   medicalMode: z.enum(["personal-health", "research"]).optional(),
   policyLevel: z.enum(["interpretive-on-request"]).optional(),
+  requestedProviderSlug: z.enum(["openai", "venice"]).optional(),
+  requestedModelName: z.string().optional(),
 });
 
 export type ChatSendMessageInput = z.infer<typeof chatSendMessageInputSchema>;

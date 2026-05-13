@@ -1,8 +1,9 @@
 import { env } from "../lib/env.js";
 
-export const LIVE_PROVIDER_SLUGS = ["openai"] as const;
+export const LIVE_PROVIDER_SLUGS = ["openai", "venice"] as const;
 export type LiveProviderSlug = (typeof LIVE_PROVIDER_SLUGS)[number];
 const OPENAI_REQUEST_TIMEOUT_MS = 25_000;
+const VENICE_REQUEST_TIMEOUT_MS = 25_000;
 const PROVIDER_OPERATIONAL_BLOCK_MS = 5 * 60_000;
 const providerOperationalBlocks = new Map<
   string,
@@ -58,6 +59,31 @@ type OpenAIStreamingEvent = {
   response?: OpenAIResponsePayload & {
     id?: string;
   };
+};
+
+type ChatCompletionsResponsePayload = {
+  id?: string;
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
+};
+
+type ChatCompletionsStreamingEvent = {
+  error?: {
+    message?: string;
+  };
+  choices?: Array<{
+    delta?: {
+      content?: string;
+    };
+    finish_reason?: string | null;
+  }>;
 };
 
 function isQuotaExceededMessage(message: string) {
@@ -164,8 +190,29 @@ function normalizeOpenAITimeoutError(error: unknown, mode: "request" | "stream")
   return error;
 }
 
+function normalizeVeniceTimeoutError(error: unknown, mode: "request" | "stream") {
+  if (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  ) {
+    return new Error(
+      `Venice ${mode} timed out after ${VENICE_REQUEST_TIMEOUT_MS}ms.`
+    );
+  }
+
+  return error;
+}
+
 function buildOpenAISignal(signal?: AbortSignal | null) {
-  const timeoutSignal = AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS);
+  return buildTimedSignal(OPENAI_REQUEST_TIMEOUT_MS, signal);
+}
+
+function buildVeniceSignal(signal?: AbortSignal | null) {
+  return buildTimedSignal(VENICE_REQUEST_TIMEOUT_MS, signal);
+}
+
+function buildTimedSignal(timeoutMs: number, signal?: AbortSignal | null) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   if (!signal) {
     return timeoutSignal;
   }
@@ -191,6 +238,63 @@ function buildOpenAISignal(signal?: AbortSignal | null) {
   return controller.signal;
 }
 
+function buildChatCompletionMessages(input: GenerateTextInput) {
+  const messages = [...input.messages];
+  if (input.systemPrompt?.trim()) {
+    messages.unshift({
+      role: "system",
+      content: input.systemPrompt.trim(),
+    });
+  }
+
+  return messages;
+}
+
+function extractChatCompletionsResponseText(payload: ChatCompletionsResponsePayload) {
+  return (
+    payload.choices
+      ?.map(choice => choice.message?.content?.trim() ?? "")
+      .filter(Boolean)
+      .join("\n") ?? ""
+  );
+}
+
+function extractChatCompletionsStreamEvents(buffer: string) {
+  const normalizedBuffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const eventBlocks = normalizedBuffer.split("\n\n");
+  const remainder = eventBlocks.pop() ?? "";
+  const events: ChatCompletionsStreamingEvent[] = [];
+
+  for (const block of eventBlocks) {
+    const dataLines = block
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.startsWith("data:"))
+      .map(line => line.slice("data:".length).trim())
+      .filter(Boolean);
+
+    if (dataLines.length === 0) {
+      continue;
+    }
+
+    const payload = dataLines.join("\n");
+    if (payload === "[DONE]") {
+      continue;
+    }
+
+    try {
+      events.push(JSON.parse(payload) as ChatCompletionsStreamingEvent);
+    } catch {
+      // Ignore malformed fragments until the next complete frame arrives.
+    }
+  }
+
+  return {
+    events,
+    remainder,
+  };
+}
+
 export class ModelGatewayService {
   supportsProvider(providerSlug: string): providerSlug is LiveProviderSlug {
     return LIVE_PROVIDER_SLUGS.includes(providerSlug as LiveProviderSlug);
@@ -198,6 +302,8 @@ export class ModelGatewayService {
 
   getDefaultModel(providerSlug: LiveProviderSlug) {
     switch (providerSlug) {
+      case "venice":
+        return env.veniceModel;
       case "openai":
       default:
         return env.openaiModel;
@@ -207,43 +313,73 @@ export class ModelGatewayService {
   async generateText(input: GenerateTextInput): Promise<GenerateTextOutput> {
     if (!this.supportsProvider(input.providerSlug)) {
       throw new Error(
-        `Provider ${input.providerSlug} is not connected yet. OpenAI is the first live provider in this MVP.`
+        `Provider ${input.providerSlug} is not connected yet. Only live providers can answer chat turns.`
       );
     }
 
-    if (!env.openaiApiKey) {
+    if (input.providerSlug === "openai") {
+      if (!env.openaiApiKey) {
+        throw new Error(
+          "OPENAI_API_KEY is missing. Add it to app/.env before using OpenAI generation."
+        );
+      }
+
+      const providerBlock = getProviderOperationalBlock("openai");
+      if (providerBlock) {
+        throw new Error(providerBlock);
+      }
+
+      return this.generateWithOpenAI(input);
+    }
+
+    if (!env.veniceApiKey) {
       throw new Error(
-        "OPENAI_API_KEY is missing. Add it to app/.env before using OpenAI generation."
+        "VENICE_API_KEY is missing. Add it to app/.env before using Venice generation."
       );
     }
 
-    const providerBlock = getProviderOperationalBlock("openai");
+    const providerBlock = getProviderOperationalBlock("venice");
     if (providerBlock) {
       throw new Error(providerBlock);
     }
 
-    return this.generateWithOpenAI(input);
+    return this.generateWithVenice(input);
   }
 
   async streamText(input: StreamTextInput): Promise<GenerateTextOutput> {
     if (!this.supportsProvider(input.providerSlug)) {
       throw new Error(
-        `Provider ${input.providerSlug} is not connected yet. OpenAI is the first live provider in this MVP.`
+        `Provider ${input.providerSlug} is not connected yet. Only live providers can answer chat turns.`
       );
     }
 
-    if (!env.openaiApiKey) {
+    if (input.providerSlug === "openai") {
+      if (!env.openaiApiKey) {
+        throw new Error(
+          "OPENAI_API_KEY is missing. Add it to app/.env before using OpenAI generation."
+        );
+      }
+
+      const providerBlock = getProviderOperationalBlock("openai");
+      if (providerBlock) {
+        throw new Error(providerBlock);
+      }
+
+      return this.streamWithOpenAI(input);
+    }
+
+    if (!env.veniceApiKey) {
       throw new Error(
-        "OPENAI_API_KEY is missing. Add it to app/.env before using OpenAI generation."
+        "VENICE_API_KEY is missing. Add it to app/.env before using Venice generation."
       );
     }
 
-    const providerBlock = getProviderOperationalBlock("openai");
+    const providerBlock = getProviderOperationalBlock("venice");
     if (providerBlock) {
       throw new Error(providerBlock);
     }
 
-    return this.streamWithOpenAI(input);
+    return this.streamWithVenice(input);
   }
 
   private async generateWithOpenAI(
@@ -461,6 +597,150 @@ export class ModelGatewayService {
       modelName: model,
       inputTokens: completedResponse?.usage?.input_tokens,
       outputTokens: completedResponse?.usage?.output_tokens,
+    };
+  }
+
+  private async generateWithVenice(
+    input: GenerateTextInput
+  ): Promise<GenerateTextOutput> {
+    const model = input.modelName || this.getDefaultModel("venice");
+
+    let response: Response;
+
+    try {
+      response = await fetch("https://api.venice.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.veniceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        signal: buildVeniceSignal(input.signal),
+        body: JSON.stringify({
+          model,
+          messages: buildChatCompletionMessages(input),
+        }),
+      });
+    } catch (error) {
+      throw normalizeVeniceTimeoutError(error, "request");
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Venice request failed (${response.status}): ${body.slice(0, 500)}`
+      );
+    }
+
+    const payload = (await response.json()) as ChatCompletionsResponsePayload;
+    const text = extractChatCompletionsResponseText(payload);
+
+    if (!text.trim()) {
+      throw new Error("Venice returned an empty assistant message.");
+    }
+
+    clearProviderOperationalBlock("venice");
+
+    return {
+      text,
+      providerSlug: "venice",
+      modelName: model,
+      inputTokens: payload.usage?.prompt_tokens,
+      outputTokens: payload.usage?.completion_tokens,
+    };
+  }
+
+  private async streamWithVenice(
+    input: StreamTextInput
+  ): Promise<GenerateTextOutput> {
+    const model = input.modelName || this.getDefaultModel("venice");
+
+    let response: Response;
+
+    try {
+      response = await fetch("https://api.venice.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.veniceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        signal: buildVeniceSignal(input.signal),
+        body: JSON.stringify({
+          model,
+          stream: true,
+          messages: buildChatCompletionMessages(input),
+        }),
+      });
+    } catch (error) {
+      throw normalizeVeniceTimeoutError(error, "stream");
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Venice streaming request failed (${response.status}): ${body.slice(0, 500)}`
+      );
+    }
+
+    if (!response.body) {
+      throw new Error("Venice streaming response did not include a readable body.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let aggregatedText = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+      const parsed = extractChatCompletionsStreamEvents(buffer);
+      buffer = parsed.remainder;
+
+      for (const event of parsed.events) {
+        const delta = event.choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta.length > 0) {
+          aggregatedText += delta;
+          await input.onTextDelta?.(delta);
+          continue;
+        }
+
+        if (event.error?.message) {
+          throw new Error(event.error.message);
+        }
+      }
+
+      if (done) {
+        break;
+      }
+    }
+
+    if (buffer.trim()) {
+      const parsed = extractChatCompletionsStreamEvents(`${buffer}\n\n`);
+      for (const event of parsed.events) {
+        const delta = event.choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta.length > 0) {
+          aggregatedText += delta;
+          await input.onTextDelta?.(delta);
+          continue;
+        }
+
+        if (event.error?.message) {
+          throw new Error(event.error.message);
+        }
+      }
+    }
+
+    if (!aggregatedText.trim()) {
+      throw new Error("Venice streaming response completed without text output.");
+    }
+
+    clearProviderOperationalBlock("venice");
+
+    return {
+      text: aggregatedText,
+      providerSlug: "venice",
+      modelName: model,
     };
   }
 }

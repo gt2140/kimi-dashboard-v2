@@ -46,20 +46,20 @@ export function BountyFilters({
   onSortDirectionChange,
 }: BountyFiltersProps) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border/30 bg-card/20 p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="relative w-full lg:max-w-sm">
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/30 bg-card/20 px-3.5 py-3 sm:px-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="relative w-full xl:max-w-md">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/40" />
           <Input
             value={search}
             onChange={event => onSearchChange(event.target.value)}
             placeholder="Search title, requester, tags, or type"
-            className="pl-9"
+            className="h-10 rounded-xl border-border/35 bg-background/40 pl-9 text-[12px]"
           />
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row">
           <Select value={sortKey} onValueChange={value => onSortKeyChange(value as BountySortKey)}>
-            <SelectTrigger className="w-full sm:w-[180px]">
+            <SelectTrigger className="h-10 w-full rounded-xl border-border/35 bg-background/40 sm:w-[150px]">
               <ArrowDownWideNarrow className="h-4 w-4 text-muted-foreground/50" />
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
@@ -73,7 +73,7 @@ export function BountyFilters({
             value={sortDirection}
             onValueChange={value => onSortDirectionChange(value as SortDirection)}
           >
-            <SelectTrigger className="w-full sm:w-[140px]">
+            <SelectTrigger className="h-10 w-full rounded-xl border-border/35 bg-background/40 sm:w-[130px]">
               <SelectValue placeholder="Direction" />
             </SelectTrigger>
             <SelectContent>
@@ -89,12 +89,12 @@ export function BountyFilters({
         onValueChange={value => onStatusChange(value as BountyFilterStatus)}
         className="gap-0"
       >
-        <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-xl bg-muted/50 p-1">
+        <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-xl bg-background/45 p-1">
           {statusOptions.map(option => (
             <TabsTrigger
               key={option}
               value={option}
-              className="min-w-fit px-3 py-1.5 text-xs"
+              className="min-w-fit rounded-lg px-2.5 py-1.5 text-[10px] sm:px-3 sm:text-[11px]"
             >
               {option}
             </TabsTrigger>

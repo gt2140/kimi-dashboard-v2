@@ -1,19 +1,11 @@
 import { Activity, Coins, FolderClock, SearchCheck } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
 import type { BountySummary } from "../selectors";
 
 export function BountySummaryCards({ summary }: { summary: BountySummary }) {
   const cards = [
     {
-      label: "Active bounties",
+      label: "Active mining",
       value: summary.active.toString(),
       note: `${summary.open} currently open`,
       icon: <Activity className="h-4 w-4 text-amber-300" />,
@@ -33,30 +25,33 @@ export function BountySummaryCards({ summary }: { summary: BountySummary }) {
     {
       label: "Total submissions",
       value: summary.totalSubmissions.toString(),
-      note: "Across all seeded bounties",
+      note: "Across all seeded mining",
       icon: <FolderClock className="h-4 w-4 text-muted-foreground" />,
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
       {cards.map(card => (
-        <Card key={card.label} className="border-border/40 bg-card/20">
-          <CardHeader className="gap-1">
-            <div className="flex items-center justify-between gap-3">
-              <CardDescription className="text-[11px] uppercase tracking-wider text-muted-foreground/40">
-                {card.label}
-              </CardDescription>
-              {card.icon}
-            </div>
-            <CardTitle className="text-2xl font-medium tracking-tight">
+        <div
+          key={card.label}
+          className="rounded-2xl border border-border/30 bg-card/18 px-3.5 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.1)]"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/34">
+              {card.label}
+            </p>
+            {card.icon}
+          </div>
+          <div className="mt-2.5 flex flex-col gap-1.5 sm:flex-row sm:items-end sm:justify-between">
+            <p className="text-[17px] font-medium tracking-tight text-foreground sm:text-[20px]">
               {card.value}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <p className="text-[12px] text-muted-foreground/45">{card.note}</p>
-          </CardContent>
-        </Card>
+            </p>
+            <p className="max-w-[8rem] text-left text-[10px] leading-4 text-muted-foreground/42 sm:text-right">
+              {card.note}
+            </p>
+          </div>
+        </div>
       ))}
     </div>
   );

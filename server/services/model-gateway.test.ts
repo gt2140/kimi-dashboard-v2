@@ -41,8 +41,10 @@ describe("extractOpenAIResponseText", () => {
     const gateway = new ModelGatewayService();
 
     expect(gateway.supportsProvider("openai")).toBe(true);
+    expect(gateway.supportsProvider("venice")).toBe(true);
     expect(gateway.supportsProvider("anthropic")).toBe(false);
     expect(gateway.getDefaultModel("openai")).toBeTruthy();
+    expect(gateway.getDefaultModel("venice")).toBe("zai-org-glm-5-1");
   });
 
   it("extracts semantic streaming events from SSE payload chunks", () => {

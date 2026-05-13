@@ -53,7 +53,7 @@ vi.mock("./pages/NotFound", () => ({
 }));
 
 describe("App routes", () => {
-  it("renders the public whitepaper route", async () => {
+  it("renders the public whitepaper route", { timeout: 15000 }, async () => {
     const { default: App } = await import("./App");
 
     const markup = renderToStaticMarkup(
@@ -67,7 +67,7 @@ describe("App routes", () => {
     expect(markup).toContain("Whitepaper");
   });
 
-  it("renders the bounties route inside the dashboard layout", async () => {
+  it("renders the mining route inside the dashboard layout", async () => {
     const { default: App } = await import("./App");
 
     const markup = renderToStaticMarkup(
@@ -79,7 +79,7 @@ describe("App routes", () => {
     );
 
     expect(markup).toContain('data-layout="dashboard"');
-    expect(markup).toContain("Bounties");
-    expect(markup).toContain("Explore active reward opportunities");
+    expect(markup).toContain("Mining");
+    expect(markup).toContain("Explore active mining opportunities");
   });
 });

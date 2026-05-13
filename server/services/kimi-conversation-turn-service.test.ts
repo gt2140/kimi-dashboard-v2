@@ -887,4 +887,107 @@ describe("KimiConversationTurnService", () => {
     );
     expect(result.assistantMessage?.content).toContain("vault context");
   });
+
+  it("routes explicit Venice selections through the model gateway instead of the Kimi client", async () => {
+    const conversationRepository = {
+      requireConversationOwner: vi.fn().mockResolvedValue({
+        id: 77,
+        title: "Venice override conversation",
+      }),
+      createUserMessage: vi.fn().mockResolvedValue({ id: 901 }),
+      createAssistantMessage: vi.fn().mockResolvedValue({
+        id: 902,
+        createdAt: new Date("2026-05-13T18:00:00.000Z"),
+      }),
+      updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const agentRunRepository = {
+      createPrimaryRun: vi.fn().mockResolvedValue({ id: 903 }),
+      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
+      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
+      saveToolCallBatch: vi.fn().mockResolvedValue(undefined),
+      createMessageContextBlocks: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const kimiClient = {
+      createChatCompletion: vi.fn(),
+      streamChatCompletion: vi.fn(),
+    };
+
+    const toolExecutor = {
+      getEnabledTools: vi.fn(),
+      executeToolCalls: vi.fn(),
+    };
+
+    const modelGateway = {
+      generateText: vi.fn().mockResolvedValue({
+        text: "Venice handled this turn directly.",
+        providerSlug: "venice",
+        modelName: "zai-org-glm-5-1",
+        inputTokens: 55,
+        outputTokens: 21,
+      }),
+      streamText: vi.fn(),
+    };
+
+    const contextLoader = vi.fn().mockResolvedValue({
+      systemPrompt: "You are Generalist.",
+      responseStyle: "detailed",
+      recentMessages: [],
+      conversationSummary: "The user wants the explicit Venice model.",
+      longTermMemories: [],
+      clinicalProfileSummary: null,
+      selectedVaultChunks: [],
+      relatedVaultDocuments: [],
+      enabledFormulaTools: ["moonshot/web-search:latest"],
+      thinkingMode: "enabled",
+      promptCacheKey: "kimi:v1:conversation:77",
+      safetyIdentifier: "user-77",
+    });
+
+    const service = new KimiConversationTurnService({
+      conversationRepository,
+      agentRunRepository,
+      kimiClient,
+      toolExecutor,
+      contextLoader,
+      modelGateway,
+    });
+
+    const result = await service.executeTurn({
+      input: {
+        conversationId: 77,
+        content: "Use Venice GLM 5.1 for this answer.",
+        agentId: "generalist",
+        calledAgentIds: [],
+        runtimeVersion: "aura-medical-v1",
+        medicalMode: "personal-health",
+        policyLevel: "interpretive-on-request",
+        requestedProviderSlug: "venice",
+        requestedModelName: "zai-org-glm-5-1",
+      } as any,
+      userId: 77,
+      streamPrimary: false,
+    });
+
+    expect(modelGateway.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerSlug: "venice",
+        modelName: "zai-org-glm-5-1",
+      }),
+    );
+    expect(kimiClient.createChatCompletion).not.toHaveBeenCalled();
+    expect(kimiClient.streamChatCompletion).not.toHaveBeenCalled();
+    expect(toolExecutor.getEnabledTools).not.toHaveBeenCalled();
+    expect(result.assistantMessage?.metadata).toEqual(
+      expect.objectContaining({
+        providerSlug: "venice",
+        modelName: "zai-org-glm-5-1",
+        requestedProviderSlug: "venice",
+        requestedModelName: "zai-org-glm-5-1",
+      }),
+    );
+  });
 });

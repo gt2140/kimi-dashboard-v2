@@ -37,6 +37,8 @@ export function useKimiChatData() {
   const runtimeVersion = useChatStore(state => state.runtimeVersion);
   const medicalMode = useChatStore(state => state.medicalMode);
   const policyLevel = useChatStore(state => state.policyLevel);
+  const selectedProviderSlug = useChatStore(state => state.selectedProviderSlug);
+  const selectedModelName = useChatStore(state => state.selectedModelName);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
   const hydrateConversation = useChatStore(state => state.hydrateConversation);
   const clearChatStore = useChatStore(state => state.clearChat);
@@ -225,6 +227,10 @@ export function useKimiChatData() {
               runtimeVersion,
               medicalMode,
               policyLevel,
+              requestedProviderSlug:
+                selectedProviderSlug === "auto" ? undefined : selectedProviderSlug,
+              requestedModelName:
+                selectedProviderSlug === "auto" ? undefined : selectedModelName,
             }),
           },
         );

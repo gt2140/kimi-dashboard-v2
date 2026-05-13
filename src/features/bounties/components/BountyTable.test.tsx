@@ -14,7 +14,7 @@ describe("BountyTable", () => {
       })
     );
 
-    expect(markup).toContain("No bounties found");
+    expect(markup).toContain("No mining found");
     expect(markup).toContain("Try another filter or search query.");
   });
 

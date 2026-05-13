@@ -62,20 +62,29 @@ export default function Dashboard() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <div className="flex items-baseline justify-between gap-4">
-          <div>
-            <h1 className="text-[20px] font-medium tracking-tight text-foreground">
-              Overview
-            </h1>
-            <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/40">
-              {user?.name
-                ? `${user.name}, this workspace now revolves around chat, agents, and vault context.`
-                : "Aura now revolves around chat, agents, and vault context."}
-            </p>
+        <div className="rounded-[28px] border border-border/30 bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.015))] p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground/35">
+                Overview
+              </p>
+              <h1 className="mt-2 text-[22px] font-medium tracking-tight text-foreground sm:text-[24px]">
+                {user?.name ? `Welcome back, ${user.name}` : "Welcome back"}
+              </h1>
+              <p className="mt-1.5 max-w-2xl text-[12px] leading-5 text-muted-foreground/48">
+                Your chats, favorite agents, and vault context are ready to pick up where you left off.
+              </p>
+            </div>
+            <span className="inline-flex h-8 w-fit items-center rounded-full border border-border/25 bg-background/30 px-3 text-[11px] text-muted-foreground/45">
+              User-centered workspace
+            </span>
           </div>
-          <span className="text-[12px] text-muted-foreground/40">
-            Workspace layer
-          </span>
+
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            <HeroPill label={`${conversationsQuery.data?.length ?? 0} chats active`} />
+            <HeroPill label={`${favoriteAgentIds.length} favorite agents`} />
+            <HeroPill label={`${vaultQuery.data?.length ?? 0} vault files`} />
+          </div>
         </div>
       </motion.div>
 
@@ -85,7 +94,7 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 }}
-            className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4"
+            className="mt-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4"
           >
             <StatCard
               icon={<FileText className="h-4 w-4" />}
@@ -117,7 +126,7 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="mt-6"
+            className="mt-5"
           >
             <RecentUploadsCard
               files={recentFiles}
@@ -129,7 +138,7 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 }}
-            className="mt-6"
+            className="mt-5"
           >
             <FocusCard />
           </motion.div>
@@ -138,7 +147,7 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="mt-6"
+            className="mt-5"
           >
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground/40">
@@ -167,7 +176,7 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 }}
-            className="mt-6"
+            className="mt-5"
           >
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground/40">
@@ -194,7 +203,7 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4"
+            className="mt-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4"
           >
             <StatCard
               icon={<FileText className="h-4 w-4" />}
@@ -226,7 +235,7 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 }}
-            className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2"
+            className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]"
           >
             <RecentUploadsCard
               files={recentFiles}
@@ -262,11 +271,11 @@ function AgentGrid({
           <button
             key={agent.slug}
             onClick={() => onOpenAgent(agent.slug)}
-            className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/40 bg-card/20 px-4 py-3 text-left transition-all hover:border-border/70 hover:bg-card/50"
+            className="group flex min-w-0 items-center gap-3 rounded-2xl border border-border/35 bg-card/18 px-3.5 py-3 text-left transition-all hover:border-border/60 hover:bg-card/40"
           >
             <div
               className={cn(
-                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/50 transition-colors",
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-muted/40 transition-colors",
                 agent.color
               )}
             >
@@ -293,7 +302,7 @@ function AgentGrid({
 
       <button
         onClick={onOpenAgents}
-        className="mt-3 flex w-full items-center justify-between rounded-xl border border-dashed border-border/40 bg-card/10 px-4 py-3 text-left transition-all hover:border-border/70 hover:bg-card/30"
+        className="mt-3 flex w-full items-center justify-between rounded-2xl border border-dashed border-border/35 bg-card/10 px-4 py-3 text-left transition-all hover:border-border/60 hover:bg-card/25"
       >
         <div>
           <p className="text-[13px] font-medium text-foreground">
@@ -321,7 +330,7 @@ function RecentUploadsCard({
   onOpenVault: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-border/30 bg-card/20 p-4">
+    <div className="rounded-[26px] border border-border/30 bg-card/18 p-4 sm:p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground/40">
           Recent uploads
@@ -338,13 +347,13 @@ function RecentUploadsCard({
           <button
             key={file.id}
             onClick={onOpenVault}
-            className="group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-card/40"
+            className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-card/35"
           >
             <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground/25 transition-colors group-hover:text-muted-foreground/40" />
             <span className="truncate text-[12px] text-foreground">
               {file.filename}
             </span>
-            <span className="ml-auto shrink-0 text-[11px] uppercase text-muted-foreground/25">
+            <span className="ml-auto shrink-0 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/28">
               {file.category}
             </span>
           </button>
@@ -361,16 +370,25 @@ function RecentUploadsCard({
 
 function FocusCard() {
   return (
-    <div className="rounded-xl border border-border/30 bg-card/20 p-4">
+    <div className="rounded-[26px] border border-border/30 bg-card/18 p-4 sm:p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground/40">
           Workspace focus
         </h2>
       </div>
-      <div className="rounded-xl border border-border/20 bg-background/35 p-4 text-[12px] leading-relaxed text-muted-foreground/50">
-        Aura now runs on three living layers: reusable conversations, favorite
-        agents with configurable memory and tools, and a vault of files that
-        can come back as context when needed.
+      <div className="space-y-2.5">
+        <FocusRow
+          title="Chat"
+          body="Pick up active threads quickly and keep context close at hand."
+        />
+        <FocusRow
+          title="Agents"
+          body="Keep your most useful profiles pinned and ready to switch into."
+        />
+        <FocusRow
+          title="Vault"
+          body="Bring saved files back into the conversation when they matter."
+        />
       </div>
     </div>
   );
@@ -390,13 +408,40 @@ function StatCard({
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-3 rounded-xl border border-border/40 bg-card/20 px-4 py-3 text-left transition-all hover:border-border/60 hover:bg-card/40"
+      className="flex items-center gap-3 rounded-2xl border border-border/35 bg-card/18 px-3.5 py-3 text-left transition-all hover:border-border/60 hover:bg-card/35"
     >
-      <div className="text-muted-foreground/25">{icon}</div>
-      <div>
-        <p className="text-[16px] font-medium text-foreground">{value}</p>
-        <p className="text-[11px] text-muted-foreground/35">{label}</p>
+      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-background/35 text-muted-foreground/28">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-[15px] font-medium text-foreground">{value}</p>
+        <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground/32">{label}</p>
       </div>
     </button>
+  );
+}
+
+function HeroPill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex h-8 items-center rounded-full border border-border/22 bg-background/25 px-3 text-[11px] text-muted-foreground/50">
+      {label}
+    </span>
+  );
+}
+
+function FocusRow({
+  title,
+  body,
+}: {
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border/20 bg-background/30 px-3.5 py-3">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground/34">
+        {title}
+      </p>
+      <p className="mt-1 text-[12px] leading-5 text-muted-foreground/52">{body}</p>
+    </div>
   );
 }

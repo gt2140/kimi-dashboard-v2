@@ -37,7 +37,7 @@ vi.mock("@/hooks/useKimiChatData", () => ({
 }));
 
 describe("Sidebar", () => {
-  it("includes the Bounties nav item and marks it active on the bounties route", async () => {
+  it("includes the Mining nav item and marks it active on the bounties route", async () => {
     const { Sidebar } = await import("./Sidebar");
 
     const markup = renderToStaticMarkup(
@@ -51,7 +51,7 @@ describe("Sidebar", () => {
       )
     );
 
-    expect(markup).toContain("Bounties");
+    expect(markup).toContain("Mining");
     expect(markup).toContain("Chat");
     expect(markup).toContain("Agents");
     expect(markup).toContain("Vault");

@@ -20,6 +20,7 @@ import {
   buildShortTermMemoryWindow,
 } from "./kimi-memory.js";
 import { persistKimiTurnMemory } from "./kimi-memory-persistence.js";
+import { ModelGatewayService } from "./model-gateway.js";
 
 type ConversationTurnInput = {
   conversationId: number;
@@ -29,6 +30,8 @@ type ConversationTurnInput = {
   runtimeVersion?: "classic" | "aura-medical-v1";
   medicalMode?: "personal-health" | "research";
   policyLevel?: "interpretive-on-request";
+  requestedProviderSlug?: "openai" | "venice";
+  requestedModelName?: string;
 };
 
 type ChatStage = {
@@ -193,12 +196,15 @@ type ToolExecutorLike = {
   }) => Promise<ToolResult[]>;
 };
 
+type ModelGatewayLike = Pick<ModelGatewayService, "generateText" | "streamText">;
+
 export class KimiConversationTurnService {
   private readonly dependencies: {
     conversationRepository: ConversationRepositoryLike;
     agentRunRepository: AgentRunRepositoryLike;
     kimiClient: KimiClientLike;
     toolExecutor: ToolExecutorLike;
+    modelGateway?: ModelGatewayLike;
     contextLoader: (params: {
       userId: number;
       conversationId: number;
@@ -216,6 +222,7 @@ export class KimiConversationTurnService {
       agentRunRepository: AgentRunRepositoryLike;
       kimiClient: KimiClientLike;
       toolExecutor: ToolExecutorLike;
+      modelGateway?: ModelGatewayLike;
       contextLoader: (params: {
         userId: number;
         conversationId: number;
@@ -241,8 +248,14 @@ export class KimiConversationTurnService {
       route: string;
     };
   }) {
-    const { conversationRepository, agentRunRepository, contextLoader, kimiClient, toolExecutor } =
-      this.dependencies;
+    const {
+      conversationRepository,
+      agentRunRepository,
+      contextLoader,
+      kimiClient,
+      toolExecutor,
+      modelGateway = new ModelGatewayService(),
+    } = this.dependencies;
     let primaryRunId: number | null = null;
     let failureKind: ChatTurnFailureKind = "unknown";
     const startedAt = Date.now();
@@ -350,6 +363,152 @@ export class KimiConversationTurnService {
       ]
         .filter(Boolean)
         .join("\n\n");
+
+      const requestedProviderSlug = params.input.requestedProviderSlug ?? null;
+      const requestedModelName = params.input.requestedModelName ?? null;
+      const gatewayMessages: RunMessage[] = contextPayload.messages.map(message => ({
+        role: message.role,
+        content: message.content,
+      }));
+
+      if (requestedProviderSlug) {
+        await params.onStage?.({
+          id: "analyze",
+          label: context.stageLabels?.analyze ?? "Planning the answer",
+        });
+        trace.markStage(
+          "analyze",
+          context.stageLabels?.analyze ?? "Planning the answer",
+        );
+
+        await params.onStage?.({
+          id: "draft",
+          label: context.stageLabels?.draft ?? "Generating the final answer",
+        });
+        trace.markStage(
+          "draft",
+          context.stageLabels?.draft ?? "Generating the final answer",
+        );
+
+        failureKind = params.streamPrimary ? "provider-stream" : "provider-response";
+        metrics.providerStartedAt = Date.now();
+        let firstProviderDeltaSeen = false;
+        const generation = params.streamPrimary
+          ? await modelGateway.streamText({
+              providerSlug: requestedProviderSlug,
+              modelName: requestedModelName,
+              systemPrompt: resolvedSystemPrompt,
+              messages: gatewayMessages,
+              onTextDelta: async delta => {
+                if (!firstProviderDeltaSeen) {
+                  firstProviderDeltaSeen = true;
+                  metrics.providerFirstTokenMs =
+                    Date.now() - metrics.providerStartedAt;
+                }
+                await params.onTextDelta?.(delta);
+              },
+            })
+          : await modelGateway.generateText({
+              providerSlug: requestedProviderSlug,
+              modelName: requestedModelName,
+              systemPrompt: resolvedSystemPrompt,
+              messages: gatewayMessages,
+            });
+        metrics.providerTotalMs = Date.now() - metrics.providerStartedAt;
+
+        const outputText = generation.text;
+        const gatewayUsage = {
+          inputTokens: generation.inputTokens,
+          outputTokens: generation.outputTokens,
+          totalTokens:
+            typeof generation.inputTokens === "number" &&
+            typeof generation.outputTokens === "number"
+              ? generation.inputTokens + generation.outputTokens
+              : undefined,
+        };
+        const assistantMetadata = {
+          engine: "aura-multi-provider-v1",
+          providerSlug: generation.providerSlug,
+          modelName: generation.modelName,
+          requestedProviderSlug,
+          requestedModelName,
+          promptCacheKey:
+            context.promptCacheKey ??
+            buildKimiPromptCacheKey(params.input.conversationId),
+          thinkingMode: context.thinkingMode,
+          requestedThinkingMode: context.thinkingMode,
+          relatedVaultFiles: context.relatedVaultDocuments.map(
+            document => document.filename,
+          ),
+          contextSummary: context.conversationSummary ?? undefined,
+          memoryApplied: context.longTermMemories.length > 0,
+          toolCalls: [] as string[],
+          toolResults: [] as string[],
+          toolWarnings: [] as string[],
+          finishReason: "stop",
+          usage: gatewayUsage,
+          ...context.runtimeMetadata,
+          ...buildAuraMedicalMetadata({
+            runtimeOptions,
+            toolResults: [],
+          }),
+        };
+
+        failureKind = "assistant-persist";
+        const assistantMessage = await conversationRepository.createAssistantMessage({
+          conversationId: params.input.conversationId,
+          content: outputText,
+          agentId: params.input.agentId,
+          metadata: assistantMetadata,
+        });
+
+        await conversationRepository.updateConversationAfterTurn({
+          conversation,
+          userMessage: params.input.content,
+          agentId: params.input.agentId,
+          orchestrationMode: "single_agent",
+        });
+
+        failureKind = "message-context";
+        await agentRunRepository.createMessageContextBlocks({
+          conversationId: params.input.conversationId,
+          messageId: assistantMessage.id,
+          agentRunId: primaryRun.id,
+          relatedVaultDocuments: context.relatedVaultDocuments,
+          vaultChunks: context.selectedVaultChunks,
+          toolResults: [],
+        });
+
+        failureKind = "run-finalize";
+        await agentRunRepository.finalizePrimaryRun(primaryRun.id, {
+          messageId: assistantMessage.id,
+          providerId: null,
+          modelEndpointId: null,
+          status: "completed",
+          inputMessages: gatewayMessages,
+          systemPrompt: resolvedSystemPrompt,
+          outputText,
+          inputTokens: generation.inputTokens,
+          outputTokens: generation.outputTokens,
+          providerRequestId: null,
+          finishReason: "stop",
+          thinkingMode: context.thinkingMode,
+          toolCallsJson: [],
+          usageJson: gatewayUsage,
+        });
+
+        return {
+          success: true,
+          assistantMessage: {
+            id: assistantMessage.id,
+            role: "assistant" as const,
+            content: outputText,
+            agentId: params.input.agentId,
+            createdAt: assistantMessage.createdAt,
+            metadata: assistantMetadata,
+          },
+        };
+      }
 
       let toolWarnings: string[] = [];
       let tools: Array<Record<string, unknown>> = [];
@@ -563,6 +722,8 @@ export class KimiConversationTurnService {
         engine: "kimi-v1",
         providerSlug: "kimi",
         modelName: "kimi-k2.6",
+        requestedProviderSlug,
+        requestedModelName,
         promptCacheKey:
           context.promptCacheKey ??
           buildKimiPromptCacheKey(params.input.conversationId),

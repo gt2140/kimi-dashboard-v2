@@ -16,6 +16,10 @@ vi.mock("./pages/Login", () => ({
   default: () => createElement("div", null, "Login"),
 }));
 
+vi.mock("./pages/Home", () => ({
+  default: () => createElement("div", null, "Whitepaper"),
+}));
+
 vi.mock("./pages/AuthCallback", () => ({
   default: () => createElement("div", null, "AuthCallback"),
 }));
@@ -49,6 +53,20 @@ vi.mock("./pages/NotFound", () => ({
 }));
 
 describe("App routes", () => {
+  it("renders the public whitepaper route", async () => {
+    const { default: App } = await import("./App");
+
+    const markup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/whitepaper"] },
+        createElement(App)
+      )
+    );
+
+    expect(markup).toContain("Whitepaper");
+  });
+
   it("renders the bounties route inside the dashboard layout", async () => {
     const { default: App } = await import("./App");
 

@@ -46,4 +46,17 @@ describe("getMobileOverviewAgents", () => {
       "bloodwork",
     ]);
   });
+
+  it("keeps generalist first without duplicating it when favorites already include it", () => {
+    const result = getMobileOverviewAgents(AGENTS, [
+      "generalist",
+      "generalist",
+      "bloodwork",
+    ]);
+
+    expect(result.map((agent) => agent.slug)).toEqual([
+      "generalist",
+      "bloodwork",
+    ]);
+  });
 });

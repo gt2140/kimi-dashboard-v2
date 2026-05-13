@@ -5,17 +5,17 @@ import { cn } from "@/lib/utils";
 const kimiTabs = [
   {
     to: "/kimi/chat",
-    label: "Kimi Chat",
+    label: "Chat",
     icon: MessageSquareCode,
   },
   {
     to: "/kimi/agents",
-    label: "Kimi Agents",
+    label: "Agents",
     icon: BrainCircuit,
   },
   {
     to: "/kimi/vault",
-    label: "Kimi Vault",
+    label: "Vault",
     icon: DatabaseZap,
   },
 ];
@@ -33,7 +33,7 @@ export function KimiHeader({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-amber-200/65">
-              Aura Kimi V1
+              Aura Workspace
             </p>
             <h1 className="mt-2 text-[24px] font-medium tracking-tight text-white sm:text-[28px]">
               {title}
@@ -43,9 +43,9 @@ export function KimiHeader({
             </p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[11px] text-white/60">
-            Kimi-first runtime
+            Multi-model workspace
             <div className="mt-1 text-[14px] font-medium text-white">
-              kimi-k2.6 + official tools
+              Chat, agents, and vault context
             </div>
           </div>
         </div>

@@ -287,15 +287,14 @@ export default function KimiVault() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
-            Vault V2
+            Vault
           </p>
           <h1 className="mt-1 text-[22px] font-medium tracking-tight text-foreground">
-            Historial clinico persistente y trazable
+            Persistent and traceable file context
           </h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
-            El vault nuevo separa original, ingestion, perfil clinico y retrieval.
-            Cada archivo queda visible desde el upload y solo entra al chat cuando
-            llega a `ready`.
+            Uploads stay visible through ingestion, processing, and retrieval.
+            Files only become reusable chat context once they reach `ready`.
           </p>
         </div>
 
@@ -313,7 +312,7 @@ export default function KimiVault() {
           </Button>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-[11px] text-emerald-100/85">
             <Upload className="h-3.5 w-3.5" />
-            {uploadMutation.isPending ? "Uploading..." : "Upload to Vault V2"}
+            {uploadMutation.isPending ? "Uploading..." : "Upload to Vault"}
             <input
               type="file"
               multiple

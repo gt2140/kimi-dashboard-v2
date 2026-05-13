@@ -53,6 +53,22 @@ const SHORTCUTS = [
   "Pensa paso a paso y decime si necesitas usar web-search o memory",
 ];
 
+function getVisibleProviderLabel(providerSlug?: string) {
+  if (!providerSlug || providerSlug.toLowerCase() === "kimi") {
+    return "provider";
+  }
+
+  return providerSlug;
+}
+
+function getVisibleModelLabel(modelName?: string) {
+  if (!modelName || modelName.toLowerCase().includes("kimi")) {
+    return "active model";
+  }
+
+  return modelName;
+}
+
 export default function KimiChat() {
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const calledAgentIds = useChatStore(state => state.calledAgentIds);
@@ -202,7 +218,7 @@ export default function KimiChat() {
               <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
                 {runtime.runtimeVersion === "aura-medical-v1"
                   ? "Aura medical runtime"
-                  : "Kimi chat"}
+                  : "Chat"}
               </p>
               <div className="mt-1 flex items-center gap-2 text-[14px] text-foreground">
                 <span className={cn("text-amber-200/85", activeAgent.color)}>
@@ -212,8 +228,8 @@ export default function KimiChat() {
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/45">
                 {runtime.runtimeVersion === "aura-medical-v1"
-                  ? "Modo dual para personal health y research con policy conservadora por defecto."
-                  : "Memoria, vault y tools en una vista mas compacta."}
+                  ? "Dual mode for personal health and research with a conservative policy by default."
+                  : "Memory, vault context, and tools in one compact workspace."}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -279,7 +295,7 @@ export default function KimiChat() {
                 ))}
                 {availableHelpers.length === 0 && (
                   <span className="text-[11px] text-muted-foreground/35">
-                    No hay mas helpers disponibles.
+                    No more helpers available.
                   </span>
                 )}
               </div>
@@ -288,7 +304,7 @@ export default function KimiChat() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
             {isConversationLoading ? (
-              <LoadingState label="Loading Kimi conversation" />
+              <LoadingState label="Loading conversation" />
             ) : displayedMessages.length === 0 && !pendingUserMessage ? (
               <EmptyState onShortcutClick={setInput} />
             ) : (
@@ -375,7 +391,7 @@ export default function KimiChat() {
                     ? runtime.medicalMode === "research"
                       ? "Preguntale a Aura por evidencia, PubMed, trials o tus documentos..."
                       : "Preguntale a Aura por biomarcadores, documentos, suplementos o research..."
-                    : "Preguntale a Aura usando Kimi, memory y vault..."
+                    : "Ask Aura using memory, vault context, and tools..."
                 }
                 className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 text-[13px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0"
               />
@@ -408,11 +424,11 @@ function EmptyState({ onShortcutClick }: { onShortcutClick: (value: string) => v
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
       <Sparkles className="h-6 w-6 text-amber-200/70" />
       <h2 className="mt-4 text-[18px] font-medium text-foreground">
-        Aura Medical V1 esta listo
+        Aura Medical V1 is ready
       </h2>
       <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-muted-foreground/45">
-        Esta version prioriza Kimi memory, tools oficiales y retrieval desde el
-        vault antes de llegar al texto final.
+        This runtime prioritizes memory, official tools, and vault retrieval
+        before producing the final response.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         {SHORTCUTS.map(shortcut => (
@@ -457,7 +473,7 @@ function KimiMessageBubble({
       </div>
       <div className={cn("flex max-w-[88%] flex-col gap-2", isUser && "items-end")}>
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground/35">
-          <span>{isUser ? "You" : "Aura / Kimi"}</span>
+          <span>{isUser ? "You" : "Aura"}</span>
           <span>
             {message.timestamp.toLocaleTimeString([], {
               hour: "2-digit",
@@ -532,7 +548,8 @@ function KimiMessageBubble({
               </MetaPill>
             )}
             <MetaPill icon={<Sparkles className="h-3 w-3" />}>
-              {metadata.providerSlug ?? "kimi"} | {metadata.modelName ?? "kimi-k2.6"}
+              {getVisibleProviderLabel(metadata.providerSlug)} |{" "}
+              {getVisibleModelLabel(metadata.modelName)}
             </MetaPill>
             {metadata.thinkingMode && (
               <MetaPill icon={<Brain className="h-3 w-3" />}>

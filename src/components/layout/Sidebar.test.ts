@@ -52,6 +52,12 @@ describe("Sidebar", () => {
     );
 
     expect(markup).toContain("Bounties");
+    expect(markup).toContain("Chat");
+    expect(markup).toContain("Agents");
+    expect(markup).toContain("Vault");
+    expect(markup).not.toContain("Kimi Chat");
+    expect(markup).not.toContain("Kimi Agents");
+    expect(markup).not.toContain("Kimi Vault");
     expect(markup).toContain("bg-sidebar-accent text-sidebar-accent-foreground");
   });
 });

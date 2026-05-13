@@ -47,14 +47,14 @@ export default function KimiAgents() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/35">
-            Kimi agents
+            Agents
           </p>
           <h1 className="mt-1 text-[20px] font-medium tracking-tight text-foreground">
-            Agentes canonicos, memoria y tools
+            Favorite agents, memory, and tools
           </h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted-foreground/45">
-            Elegi que agentes queres fijar en el sidebar y ajusta como usan
-            memory, web-search y el vault dentro del dashboard final.
+            Choose which agents stay pinned in the workspace and adjust how they
+            use memory, web search, and vault context.
           </p>
         </div>
 
@@ -135,7 +135,7 @@ export default function KimiAgents() {
                   thinking {setting?.kimiThinkingMode ?? "enabled"}
                 </Pill>
                 <Pill icon={<DatabaseZap className="h-3 w-3" />}>
-                  {setting?.preferKimiMemory === false ? "Aura memory" : "Kimi memory"}
+                  {setting?.preferKimiMemory === false ? "Aura memory" : "Primary memory"}
                 </Pill>
                 <Pill icon={<Globe className="h-3 w-3" />}>
                   {setting?.allowWebResearch ? "web on" : "web off"}

@@ -26,7 +26,9 @@ export default function KimiAgentSettings() {
   const { agentId } = useParams();
   const slug = agentId ?? "generalist";
   const { saveUserSettings, isSaving } = useAgentCatalog();
-  const providersQuery = trpc.agents.listProviders.useQuery();
+  const providersQuery = trpc.agents.listProviders.useQuery(undefined, {
+    retry: false,
+  });
   const settingsQuery = trpc.agents.getUserSettings.useQuery(
     { slug },
     { retry: false },
@@ -123,7 +125,7 @@ export default function KimiAgentSettings() {
     <div className="mx-auto w-full max-w-[1200px] p-4 sm:p-6 lg:p-8">
       <KimiHeader
         title={`${agent?.name ?? "Agent"} settings`}
-        description="Ajustá cómo este perfil usa thinking, Kimi memory, tools oficiales y routing de modelo dentro del runtime nuevo."
+        description="Adjust how this profile uses reasoning, memory, official tools, and model routing inside the current runtime."
       />
 
       <button
@@ -131,7 +133,7 @@ export default function KimiAgentSettings() {
         className="mb-4 inline-flex items-center gap-1 text-[12px] text-muted-foreground/45 transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Kimi agents
+        Back to Agents
       </button>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -165,15 +167,14 @@ export default function KimiAgentSettings() {
           </Panel>
 
           <Panel
-            title="Kimi reasoning and memory"
-            description="Define how much the model should think and whether official Kimi memory is preferred."
+            title="Reasoning and memory"
+            description="Define how much the model should think and whether primary memory is preferred."
             icon={<Brain className="h-4 w-4" />}
           >
             <div className="rounded-2xl border border-border/20 bg-background/35 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground/50">
-              Generalist funciona como una memoria tipo proyecto: mezcla
-              contexto fijo del agente, notas operativas, resumen de la
-              conversación y memorias estables del usuario extraídas después de
-              cada respuesta.
+              Generalist behaves like a project-level memory layer: it blends
+              the agent prompt, operating notes, conversation summaries, and
+              stable user memory extracted after each response.
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {(["enabled", "disabled"] as const).map(mode => (
@@ -190,7 +191,7 @@ export default function KimiAgentSettings() {
                   <div className="text-[12px] font-medium capitalize">{mode}</div>
                   <p className="mt-1 text-[11px] leading-relaxed">
                     {mode === "enabled"
-                      ? "Use Kimi thinking mode for harder reasoning turns."
+                      ? "Use extended reasoning for harder turns."
                       : "Favor speed and direct output over deliberate thinking."}
                   </p>
                 </button>
@@ -203,7 +204,7 @@ export default function KimiAgentSettings() {
             >
               <div>
                 <p className="text-[12px] font-medium text-foreground">
-                  Prefer Kimi memory
+                  Prefer primary memory
                 </p>
                 <p className="mt-1 text-[11px] text-muted-foreground/45">
                   When enabled, Aura exposes `moonshot/memory:latest` as the primary memory capability.
@@ -224,7 +225,7 @@ export default function KimiAgentSettings() {
 
           <Panel
             title="Official tools"
-            description="Turn Kimi formula tools on or off and add custom entries when needed."
+            description="Turn formula tools on or off and add custom entries when needed."
             icon={<Wrench className="h-4 w-4" />}
           >
             <ToggleRow
@@ -271,7 +272,7 @@ export default function KimiAgentSettings() {
 
           <Panel
             title="Routing"
-            description="Keep the provider pinned to Kimi or override model selection per profile."
+            description="Keep the provider pinned or override model selection per profile."
             icon={<Globe className="h-4 w-4" />}
           >
             <div className="grid gap-3 sm:grid-cols-2">
@@ -334,13 +335,13 @@ export default function KimiAgentSettings() {
         <aside className="space-y-4">
           <Panel
             title="Resolved profile"
-            description="Quick view of what this agent will expose to Kimi."
+            description="Quick view of what this agent will expose in chat."
             icon={<DatabaseZap className="h-4 w-4" />}
           >
             <Info label="Thinking mode" value={thinkingMode} />
             <Info
               label="Memory strategy"
-              value={preferKimiMemory ? "Kimi official memory" : "Aura-first memory"}
+              value={preferKimiMemory ? "Primary memory" : "Aura-first memory"}
             />
             <Info
               label="Research tools"
@@ -362,14 +363,14 @@ export default function KimiAgentSettings() {
             className="flex w-full items-center justify-center gap-2 rounded-2xl bg-foreground px-4 py-3 text-[12px] text-background transition-opacity hover:opacity-90"
           >
             <Save className="h-4 w-4" />
-            {isSaving ? "Saving..." : "Save Kimi settings"}
+            {isSaving ? "Saving..." : "Save agent settings"}
           </button>
         </aside>
       </div>
 
       {error && (
         <p className="mt-4 text-[12px] text-destructive/80">
-          {formatRuntimeError(error, "Kimi agent settings")}
+          {formatRuntimeError(error, "Agent settings")}
         </p>
       )}
     </div>

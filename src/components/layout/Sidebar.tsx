@@ -48,9 +48,9 @@ const navItems = [
     icon: LayoutDashboard,
     path: "/dashboard",
   },
-  { id: "kimi-chat", label: "Kimi Chat", icon: Sparkles, path: "/kimi/chat" },
-  { id: "kimi-agents", label: "Kimi Agents", icon: Brain, path: "/kimi/agents" },
-  { id: "kimi-vault", label: "Kimi Vault", icon: Zap, path: "/kimi/vault" },
+  { id: "kimi-chat", label: "Chat", icon: Sparkles, path: "/kimi/chat" },
+  { id: "kimi-agents", label: "Agents", icon: Brain, path: "/kimi/agents" },
+  { id: "kimi-vault", label: "Vault", icon: Zap, path: "/kimi/vault" },
   { id: "bounties", label: "Bounties", icon: Target, path: "/bounties" },
 ];
 

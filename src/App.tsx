@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, useParams } from "react-router";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
+import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import KimiChat from "./pages/KimiChat";
 import KimiAgents from "./pages/KimiAgents";
@@ -15,6 +16,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/whitepaper" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route element={<DashboardLayout />}>

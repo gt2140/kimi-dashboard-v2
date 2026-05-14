@@ -21,7 +21,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
     overrides: {
       streamText?: ReturnType<typeof vi.fn>;
       generateText?: ReturnType<typeof vi.fn>;
-      contextLoader?: ReturnType<typeof vi.fn>;
+      loadRecentMessages?: ReturnType<typeof vi.fn>;
     } = {}
   ) {
     const conversationRepository = {
@@ -41,33 +41,15 @@ describe("VeniceFirstConversationTurnRuntime", () => {
       updateConversationAfterTurn: vi.fn().mockResolvedValue(undefined),
     };
 
-    const agentRunRepository = {
-      createPrimaryRun: vi.fn().mockImplementation(async () => {
-        callOrder.push("primary-run");
-        return { id: 303 };
-      }),
-      markPrimaryRunRunning: vi.fn().mockResolvedValue(undefined),
-      finalizePrimaryRun: vi.fn().mockResolvedValue(undefined),
-      finalizePrimaryRunFailure: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const contextLoader =
-      overrides.contextLoader ??
+    const loadRecentMessages =
+      overrides.loadRecentMessages ??
       vi.fn().mockImplementation(async () => {
-        callOrder.push("context");
-        return {
-          agentDefinitionId: 9,
-          systemPrompt: [
-            "You are Aura Generalist.",
-            "Existing conversation summary:\nThe user prefers concise strategic answers.",
-          ].join("\n\n"),
-          conversationSummary: "The user prefers concise strategic answers.",
-          messages: [
-            { role: "user" as const, content: "Earlier question" },
-            { role: "assistant" as const, content: "Earlier answer" },
-            { role: "user" as const, content: "Latest question" },
-          ],
-        };
+        callOrder.push("recent-messages");
+        return [
+          { role: "user" as const, content: "Earlier question" },
+          { role: "assistant" as const, content: "Earlier answer" },
+          { role: "user" as const, content: "Latest question" },
+        ];
       });
 
     const streamText =
@@ -95,35 +77,25 @@ describe("VeniceFirstConversationTurnRuntime", () => {
 
     const runtime = new VeniceFirstConversationTurnRuntime({
       conversationRepository,
-      agentRunRepository,
-      contextLoader,
+      loadRecentMessages,
       modelGateway: {
         streamText,
         generateText,
         getDefaultModel: vi.fn().mockReturnValue("zai-org-glm-5-1"),
       },
-      syncParticipants: vi.fn().mockResolvedValue({
-        primary: { id: 9, slug: "generalist" },
-        supporting: [],
-      }),
-      resolveModelReference: vi.fn().mockResolvedValue({
-        providerId: 5,
-        modelEndpointId: 6,
-      }),
     });
 
     return {
       runtime,
       conversationRepository,
-      agentRunRepository,
-      contextLoader,
+      loadRecentMessages,
       streamText,
       generateText,
     };
   }
 
-  it("persists user and assistant messages around a streamed Venice response", async () => {
-    const { runtime, conversationRepository, agentRunRepository, streamText } =
+  it("persists user and assistant messages around a streamed Venice response without orchestration tables", async () => {
+    const { runtime, conversationRepository, loadRecentMessages, streamText } =
       buildRuntime();
     const onTextDelta = vi.fn();
     const onStage = vi.fn();
@@ -141,16 +113,21 @@ describe("VeniceFirstConversationTurnRuntime", () => {
 
     expect(callOrder).toEqual([
       "user-message",
-      "primary-run",
-      "context",
+      "recent-messages",
       "venice-stream",
       "assistant-message",
     ]);
+    expect(loadRecentMessages).toHaveBeenCalledWith({
+      conversationId: 42,
+      limit: 6,
+    });
     expect(streamText).toHaveBeenCalledWith(
       expect.objectContaining({
         providerSlug: "venice",
         modelName: "zai-org-glm-5-1",
-        systemPrompt: expect.stringContaining("You are Aura Generalist."),
+        systemPrompt: expect.stringContaining(
+          "You are Aura, a calm and practical generalist assistant."
+        ),
         messages: [
           { role: "user", content: "Earlier question" },
           { role: "assistant", content: "Earlier answer" },
@@ -180,15 +157,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
         },
       })
     );
-    expect(agentRunRepository.finalizePrimaryRun).toHaveBeenCalledWith(
-      303,
-      expect.objectContaining({
-        status: "completed",
-        outputText: "Hola mundo",
-        inputTokens: 31,
-        outputTokens: 7,
-      })
-    );
+    expect(conversationRepository.updateConversationAfterTurn).toHaveBeenCalled();
     expect(result.assistantMessage.content).toBe("Hola mundo");
   });
 
@@ -207,9 +176,9 @@ describe("VeniceFirstConversationTurnRuntime", () => {
     expect(streamText).not.toHaveBeenCalled();
   });
 
-  it("finalizes the primary run as failed when Venice fails", async () => {
+  it("does not write an assistant message when Venice fails", async () => {
     const providerError = new Error("Venice request failed (503).");
-    const { runtime, agentRunRepository } = buildRuntime({
+    const { runtime, conversationRepository } = buildRuntime({
       streamText: vi.fn().mockRejectedValue(providerError),
     });
 
@@ -223,9 +192,6 @@ describe("VeniceFirstConversationTurnRuntime", () => {
       })
     ).rejects.toThrow("Venice request failed (503).");
 
-    expect(agentRunRepository.finalizePrimaryRunFailure).toHaveBeenCalledWith(
-      303,
-      { errorMessage: "Venice request failed (503)." }
-    );
+    expect(conversationRepository.createAssistantMessage).not.toHaveBeenCalled();
   });
 });

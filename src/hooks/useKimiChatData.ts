@@ -448,7 +448,7 @@ export function useKimiChatData() {
     isSending: isStreaming || createConversation.isPending,
     error:
       typeof error === "string"
-        ? formatRuntimeError(new Error(error), "Aura chat")
+        ? error
         : error
           ? formatRuntimeError(error, "Aura chat")
           : null,

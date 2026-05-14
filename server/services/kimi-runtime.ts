@@ -1,5 +1,5 @@
 export {
   auraChatConversationTurnRuntime,
-  loadLightweightConversationContext,
+  loadRecentConversationMessages,
   VeniceFirstConversationTurnRuntime,
 } from "./venice-chat-runtime.js";

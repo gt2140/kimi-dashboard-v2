@@ -27,7 +27,7 @@ export function resolveAuraRuntimeOptions(input: Partial<AuraRuntimeOptions>) {
 
 export function resolveAuraRuntimeEndpoint(input: Partial<AuraRuntimeOptions>) {
   resolveAuraRuntimeOptions(input);
-  return "/api/chat/stream";
+  return "/api/chat/send";
 }
 
 export { DEFAULT_AURA_RUNTIME_OPTIONS };

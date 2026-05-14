@@ -273,4 +273,29 @@ describe("ModelGatewayService", () => {
     });
     expect(getProviderOperationalBlock("venice")).toBeNull();
   });
+
+  it("diagnoses Venice generation readiness without exposing upstream response bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => '{"error":"bad key","secret":"raw upstream data"}',
+    });
+    const gateway = new ModelGatewayService({
+      fetch: fetchMock as unknown as typeof fetch,
+      veniceApiKey: "test-venice-key",
+    });
+
+    const result = await gateway.diagnoseVenice();
+
+    expect(result).toEqual({
+      ok: false,
+      providerSlug: "venice",
+      modelName: "zai-org-glm-5",
+      status: 401,
+      category: "auth",
+      message: "Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY.",
+    });
+
+    expect(JSON.stringify(result)).not.toContain("raw upstream data");
+  });
 });

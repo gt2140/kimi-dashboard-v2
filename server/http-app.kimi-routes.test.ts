@@ -16,9 +16,9 @@ describe("Vault V2 HTTP routes", () => {
     expect(response.status).toBe(404);
   });
 
-  it("protects the canonical chat stream with auth", async () => {
+  it("protects the canonical json chat route with auth", async () => {
     const response = await app.fetch(
-      new Request("http://localhost/api/chat/stream", {
+      new Request("http://localhost/api/chat/send", {
         method: "POST",
         headers: {
           "content-type": "application/json",

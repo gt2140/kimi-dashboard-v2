@@ -32,6 +32,22 @@ export type GenerateTextOutput = {
   outputTokens?: number;
 };
 
+export type VeniceDiagnosticResult = {
+  ok: boolean;
+  providerSlug: "venice";
+  modelName: string;
+  status?: number;
+  category:
+    | "ready"
+    | "auth"
+    | "model"
+    | "capacity"
+    | "timeout"
+    | "provider"
+    | "configuration";
+  message: string;
+};
+
 export type StreamTextInput = GenerateTextInput & {
   onTextDelta?: (delta: string) => void | Promise<void>;
 };
@@ -251,6 +267,35 @@ function buildSanitizedVeniceErrorMessage(
   }
 
   return `Venice ${mode} failed (${status}). The provider is temporarily unavailable.`;
+}
+
+function classifyVeniceDiagnosticFailure(status: number, body: string) {
+  if (status === 401 || status === 403) {
+    return {
+      category: "auth" as const,
+      message:
+        "Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY.",
+    };
+  }
+
+  if (isVeniceModelSelectionFailure(status, body)) {
+    return {
+      category: "model" as const,
+      message: `Venice request failed (${status}). The selected model is unavailable.`,
+    };
+  }
+
+  if (status === 402 || status === 429 || isVeniceCapacityMessage(body)) {
+    return {
+      category: "capacity" as const,
+      message: `Venice request failed (${status}). The provider is rate-limiting or has reached its current capacity.`,
+    };
+  }
+
+  return {
+    category: "provider" as const,
+    message: `Venice request failed (${status}). The provider is temporarily unavailable.`,
+  };
 }
 
 function buildVeniceSignal(signal?: AbortSignal | null) {
@@ -517,6 +562,80 @@ export class ModelGatewayService {
     };
 
     return models;
+  }
+
+  async diagnoseVenice(): Promise<VeniceDiagnosticResult> {
+    const model = this.getDefaultModel("venice");
+    const veniceApiKey = this.getVeniceApiKey();
+    if (!veniceApiKey) {
+      return {
+        ok: false,
+        providerSlug: "venice",
+        modelName: model,
+        category: "configuration",
+        message:
+          "VENICE_API_KEY or VENICE_INFERENCE_KEY is missing in production.",
+      };
+    }
+
+    const fetchImpl = this.getFetchImplementation();
+    let response: Response;
+
+    try {
+      response = await fetchImpl(
+        "https://api.venice.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${veniceApiKey}`,
+            "Content-Type": "application/json",
+          },
+          signal: buildVeniceSignal(),
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "user",
+                content: "Reply with OK.",
+              },
+            ],
+          }),
+        }
+      );
+    } catch (error) {
+      const normalized = normalizeVeniceTimeoutError(error, "request");
+      return {
+        ok: false,
+        providerSlug: "venice",
+        modelName: model,
+        category: "timeout",
+        message:
+          normalized instanceof Error
+            ? normalized.message
+            : "Venice request timed out.",
+      };
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      const failure = classifyVeniceDiagnosticFailure(response.status, body);
+      return {
+        ok: false,
+        providerSlug: "venice",
+        modelName: model,
+        status: response.status,
+        ...failure,
+      };
+    }
+
+    return {
+      ok: true,
+      providerSlug: "venice",
+      modelName: model,
+      status: response.status,
+      category: "ready",
+      message: "Venice generation is ready.",
+    };
   }
 
   async generateText(input: GenerateTextInput): Promise<GenerateTextOutput> {

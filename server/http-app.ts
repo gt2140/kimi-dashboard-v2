@@ -12,6 +12,8 @@ import { auraChatConversationTurnRuntime } from "./services/venice-chat-runtime.
 import { classifyApiError } from "./lib/api-errors.js";
 import { logServerDebug } from "./lib/debug.js";
 import { vaultV2Service } from "./services/vault-v2-service.js";
+import { handleSimpleChatRequest } from "./chat/simple-chat-handler.js";
+import { handleProviderCheckRequest } from "./chat/provider-check-handler.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -221,6 +223,15 @@ async function handleChatStreamRoute(c: Parameters<typeof stream>[0]) {
 app.post("/api/chat/stream", async c => {
   return handleChatStreamRoute(c);
 });
+
+app.post("/api/chat/send", async c => {
+  return handleSimpleChatRequest(c.req.raw);
+});
+
+app.on(["GET", "POST"], "/api/chat/provider-check", async c => {
+  return handleProviderCheckRequest(c.req.raw);
+});
+
 app.post("/api/vault/documents", async c => {
   ensureVaultWorkerStarted();
   let user: Awaited<ReturnType<typeof authenticateRequest>>;

@@ -12,6 +12,7 @@ describe("production chat route behavior", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
+    vi.doUnmock("./services/model-gateway.js");
   });
 
   it("keeps direct provider streaming enabled for serverless production routes", async () => {
@@ -77,6 +78,107 @@ describe("production chat route behavior", () => {
     expect(body).toContain('"type":"ack"');
     expect(body).toContain('"type":"error"');
     expect(body).toContain('"category":"provider-timeout"');
+  });
+
+  it("serves the json chat send route from the hono app contract", async () => {
+    vi.doMock("./trpc/auth.js", () => ({
+      authenticateRequest: vi.fn().mockResolvedValue({
+        id: 42,
+        unionId: "supabase:test-user",
+      }),
+    }));
+    vi.doMock("./services/vault-v2-service.js", () => ({
+      vaultV2Service: {
+        startWorker: vi.fn(),
+      },
+    }));
+    vi.doMock("./services/venice-chat-runtime.js", () => ({
+      auraChatConversationTurnRuntime: {
+        executeTurn: vi.fn().mockResolvedValue({
+          assistantMessage: {
+            id: 101,
+            role: "assistant",
+            content: "json send works",
+            agentId: "generalist",
+            createdAt: new Date("2026-05-13T12:00:00.000Z"),
+            metadata: {
+              engine: "aura-chat-v1",
+              providerSlug: "venice",
+              modelName: "zai-org-glm-5",
+            },
+          },
+        }),
+      },
+    }));
+
+    const { app } = await import("./http-app.js");
+    const response = await app.fetch(
+      new Request("http://localhost/api/chat/send", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          conversationId: 1,
+          content: "hello",
+          agentId: "generalist",
+        }),
+      })
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      message: {
+        id: "101",
+        content: "json send works",
+      },
+    });
+  });
+
+  it("serves an authenticated Venice provider diagnostic route", async () => {
+    vi.doMock("./trpc/auth.js", () => ({
+      authenticateRequest: vi.fn().mockResolvedValue({
+        id: 42,
+        unionId: "supabase:test-user",
+      }),
+    }));
+    vi.doMock("./services/vault-v2-service.js", () => ({
+      vaultV2Service: {
+        startWorker: vi.fn(),
+      },
+    }));
+    vi.doMock("./services/model-gateway.js", () => ({
+      ModelGatewayService: class {
+        async diagnoseVenice() {
+          return {
+            ok: true,
+            providerSlug: "venice",
+            modelName: "zai-org-glm-5",
+            status: 200,
+            category: "ready",
+            message: "Venice generation is ready.",
+          };
+        }
+      },
+    }));
+
+    const { app } = await import("./http-app.js");
+    const response = await app.fetch(
+      new Request("http://localhost/api/chat/provider-check", {
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      provider: {
+        ok: true,
+        providerSlug: "venice",
+        category: "ready",
+      },
+    });
   });
 
   it("streams ack, stage, text delta, and completion events from the canonical chat route", async () => {

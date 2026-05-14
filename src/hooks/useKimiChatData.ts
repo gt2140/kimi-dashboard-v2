@@ -6,28 +6,21 @@ import {
   useBackendSessionState,
 } from "@/providers/trpc";
 import { useChatStore } from "@/hooks/useStore";
-import { resolveAuraRuntimeEndpoint } from "@/lib/aura-runtime";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug } from "@/lib/debug";
 import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
-  createMalformedStreamError,
-  createChatStreamWatchdog,
   isRecoverableChatStreamError,
   isRecoverableChatStreamStatus,
-  parseChatStreamChunk,
-  readChatStreamResponseMetadata,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
 import { resolveRuntimeModelSelection } from "@/lib/model-catalog";
 import { mapConversationSummary, mapMessage } from "@/hooks/kimi-chat-mappers";
 import { createPersistedCompletionReader } from "@/hooks/kimi-chat-recovery";
 
-const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 const STREAM_RECOVERY_POLL_ATTEMPTS = 6;
 const STREAM_RECOVERY_POLL_DELAY_MS = 750;
-const CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS = 60_000;
 
 export function useKimiChatData() {
   const navigate = useNavigate();
@@ -152,19 +145,10 @@ export function useKimiChatData() {
     setStreamError(null);
     setIsStreaming(true);
     let streamStarted = false;
-    let firstEventAt: number | null = null;
-    let firstDeltaAt: number | null = null;
     const requestStartedAt = Date.now();
     const modelSelection = resolveRuntimeModelSelection(
       selectedProviderSlug,
       selectedModelName,
-    );
-    const streamWatchdog = createChatStreamWatchdog(
-      CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
-      "Aura chat stream",
-      {
-        initialTimeoutMs: CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS,
-      },
     );
 
     const readPersistedCompletion = createPersistedCompletionReader({
@@ -195,7 +179,7 @@ export function useKimiChatData() {
     }
 
     try {
-      async function openStream(forceSessionRefresh = false) {
+      async function sendJsonMessage(forceSessionRefresh = false) {
         if (forceSessionRefresh) {
           const refreshed = await ensureBackendSession({ force: true });
           if (!refreshed) {
@@ -209,43 +193,53 @@ export function useKimiChatData() {
         const headers = await buildAuthenticatedHeaders(readAccessToken, {
           "Content-Type": "application/json",
         });
-        return fetch(
-          resolveAuraRuntimeEndpoint({}),
-          {
-            method: "POST",
-            credentials: "include",
-            signal: streamWatchdog.signal,
-            headers,
-            body: JSON.stringify({
-              conversationId,
-              content,
-              agentId: activeAgentId,
-              ...modelSelection,
-            }),
-          },
-        );
+        return fetch("/api/chat/send", {
+          method: "POST",
+          credentials: "include",
+          headers,
+          body: JSON.stringify({
+            conversationId,
+            content,
+            agentId: activeAgentId,
+            ...modelSelection,
+          }),
+        });
       }
 
-      let response = await openStream();
+      handlers.onStage?.({
+        type: "stage",
+        stageId: "draft",
+        label: "Writing Venice response",
+      });
+
+      let response = await sendJsonMessage();
 
       if (response.status === 401) {
-        response = await openStream(true);
+        response = await sendJsonMessage(true);
       }
+
+      const payload = (await response.json().catch(() => null)) as {
+        message?: Extract<ChatStreamEvent, { type: "message-complete" }>["message"];
+        error?:
+          | string
+          | {
+              message?: string;
+              category?: string;
+              traceId?: string;
+            };
+      } | null;
 
       if (!response.ok) {
         let responseMessage = `Aura chat failed with HTTP ${response.status}.`;
-        try {
-          const payload = (await response.clone().json()) as {
-            error?: string;
-            message?: string;
-            traceId?: string;
-          };
-          responseMessage =
-            payload.error?.trim() ||
-            payload.message?.trim() ||
-            responseMessage;
-        } catch {
-          // Fall back to the HTTP status message when the response is not JSON.
+        let category: string | undefined;
+        let traceId: string | undefined;
+
+        if (typeof payload?.error === "string" && payload.error.trim()) {
+          responseMessage = payload.error.trim();
+        } else if (payload?.error && typeof payload.error === "object") {
+          responseMessage = payload.error.message?.trim() || responseMessage;
+          category = payload.error.category;
+          traceId = payload.error.traceId;
         }
 
         if (isRecoverableChatStreamStatus(response.status)) {
@@ -257,103 +251,20 @@ export function useKimiChatData() {
 
         const httpError = new Error(responseMessage) as Error & {
           category?: string;
+          traceId?: string;
         };
         httpError.category =
-          response.status === 401
+          category ||
+          (response.status === 401
             ? "auth"
             : response.status >= 500
               ? "backend-timeout"
-              : "transport";
+              : "transport");
+        httpError.traceId = traceId;
         throw httpError;
       }
 
-      if (!response.body) {
-        throw new Error("Aura chat did not return a readable stream.");
-      }
-
-      const responseMetadata = readChatStreamResponseMetadata(response);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let rawBodyPreview = "";
-      let completedMessage:
-        | Extract<ChatStreamEvent, { type: "message-complete" }>["message"]
-        | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        streamWatchdog.touch();
-        const decoded = decoder.decode(value ?? new Uint8Array(), {
-          stream: !done,
-        });
-        buffer += decoded;
-        if (rawBodyPreview.length < 300) {
-          rawBodyPreview = `${rawBodyPreview}${decoded}`.slice(0, 300);
-        }
-
-        const parsed = parseChatStreamChunk(buffer);
-        buffer = parsed.remainder;
-
-        for (const event of parsed.events) {
-          streamStarted = true;
-          if (firstEventAt === null) {
-            firstEventAt = Date.now();
-            logClientDebug("kimi.chat.first-event", {
-              conversationId,
-              elapsedMs: firstEventAt - requestStartedAt,
-              eventType: event.type,
-            });
-          }
-          handlers.onEvent?.(event);
-
-          if (event.type === "ack") {
-            handlers.onAck?.(event);
-            logClientDebug("kimi.chat.ack", {
-              conversationId,
-              traceId: event.traceId,
-              elapsedMs: Date.now() - requestStartedAt,
-            });
-            continue;
-          }
-
-          if (event.type === "stage") {
-            handlers.onStage?.(event);
-            continue;
-          }
-
-          if (event.type === "text-delta") {
-            if (firstDeltaAt === null) {
-              firstDeltaAt = Date.now();
-              logClientDebug("kimi.chat.first-delta", {
-                conversationId,
-                elapsedMs: firstDeltaAt - requestStartedAt,
-              });
-            }
-            handlers.onTextDelta?.(event);
-            continue;
-          }
-
-          if (event.type === "message-complete") {
-            completedMessage = event.message;
-            handlers.onMessageComplete?.(event);
-            continue;
-          }
-
-          if (event.type === "error") {
-            const structuredError = new Error(event.message) as Error & {
-              category?: string;
-              traceId?: string;
-            };
-            structuredError.category = event.category;
-            structuredError.traceId = event.traceId;
-            throw structuredError;
-          }
-        }
-
-        if (done) {
-          break;
-        }
-      }
+      const completedMessage = payload?.message ?? null;
 
       await Promise.all([
         utils.chat.listConversations.invalidate(),
@@ -363,16 +274,8 @@ export function useKimiChatData() {
       logClientDebug("kimi.chat.stream.completed", {
         conversationId,
         elapsedMs: Date.now() - requestStartedAt,
+        transport: "json",
       });
-
-      if (!streamStarted && (buffer.trim() || rawBodyPreview.trim())) {
-        throw createMalformedStreamError({
-          bodyPreview: buffer.trim() || rawBodyPreview,
-          status: responseMetadata.status,
-          contentType: responseMetadata.contentType,
-          traceId: responseMetadata.traceId,
-        });
-      }
 
       if (!completedMessage) {
         const recoveredMessage = await recoverPersistedCompletion();
@@ -385,6 +288,11 @@ export function useKimiChatData() {
         );
       }
 
+      streamStarted = true;
+      handlers.onMessageComplete?.({
+        type: "message-complete",
+        message: completedMessage,
+      });
       return completedMessage;
     } catch (error) {
       if (isRecoverableChatStreamError(error)) {
@@ -411,7 +319,6 @@ export function useKimiChatData() {
       setStreamError(message);
       throw error;
     } finally {
-      streamWatchdog.cancel();
       setIsStreaming(false);
     }
   }

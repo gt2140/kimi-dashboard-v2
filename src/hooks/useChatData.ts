@@ -166,7 +166,6 @@ export function useChatData() {
         conversationId,
         content,
         agentId: activeAgentId,
-        calledAgentIds,
       })
     );
     await Promise.all([

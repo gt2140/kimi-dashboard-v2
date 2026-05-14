@@ -1,4 +1,4 @@
-export type ChatModelProviderSlug = "auto" | "openai" | "venice" | "kimi";
+export type ChatModelProviderSlug = "auto" | "venice";
 
 export type ChatModelSelection = {
   providerSlug: ChatModelProviderSlug;

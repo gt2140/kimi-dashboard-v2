@@ -34,10 +34,6 @@ export function useKimiChatData() {
   const [searchParams, setSearchParams] = useSearchParams();
   const backendSession = useBackendSessionState();
   const activeAgentId = useChatStore(state => state.activeAgentId);
-  const calledAgentIds = useChatStore(state => state.calledAgentIds);
-  const runtimeVersion = useChatStore(state => state.runtimeVersion);
-  const medicalMode = useChatStore(state => state.medicalMode);
-  const policyLevel = useChatStore(state => state.policyLevel);
   const selectedProviderSlug = useChatStore(state => state.selectedProviderSlug);
   const selectedModelName = useChatStore(state => state.selectedModelName);
   const setActiveAgent = useChatStore(state => state.setActiveAgent);
@@ -214,11 +210,7 @@ export function useKimiChatData() {
           "Content-Type": "application/json",
         });
         return fetch(
-          resolveAuraRuntimeEndpoint({
-            runtimeVersion,
-            medicalMode,
-            policyLevel,
-          }),
+          resolveAuraRuntimeEndpoint({}),
           {
             method: "POST",
             credentials: "include",
@@ -228,10 +220,6 @@ export function useKimiChatData() {
               conversationId,
               content,
               agentId: activeAgentId,
-              calledAgentIds,
-              runtimeVersion,
-              medicalMode,
-              policyLevel,
               ...modelSelection,
             }),
           },

@@ -212,13 +212,12 @@ export function resolveRuntimeModelSelection(
 ) {
   if (providerSlug === "auto") {
     return {
-      requestedProviderSlug: "venice" as const,
       requestedModelName: undefined,
     };
   }
 
   return {
-    requestedProviderSlug: providerSlug,
-    requestedModelName: modelName ?? undefined,
+    requestedModelName:
+      providerSlug === "venice" ? (modelName ?? undefined) : undefined,
   };
 }

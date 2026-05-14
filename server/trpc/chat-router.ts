@@ -26,11 +26,6 @@ export const chatSendMessageInputSchema = z.object({
   conversationId: z.number(),
   content: z.string().min(1),
   agentId: z.string(),
-  calledAgentIds: z.array(z.string()).optional(),
-  runtimeVersion: z.enum(["classic", "aura-medical-v1"]).optional(),
-  medicalMode: z.enum(["personal-health", "research"]).optional(),
-  policyLevel: z.enum(["interpretive-on-request"]).optional(),
-  requestedProviderSlug: z.enum(["openai", "venice"]).optional(),
   requestedModelName: z.string().optional(),
 });
 
@@ -51,7 +46,6 @@ const chatMetadataSchema = z
     executionNotes: z.array(z.string()).optional(),
     providerSlug: z.string().optional(),
     modelName: z.string().optional(),
-    requestedProviderSlug: z.string().optional(),
     requestedModelName: z.string().optional(),
     inputTokens: z.number().optional(),
     outputTokens: z.number().optional(),

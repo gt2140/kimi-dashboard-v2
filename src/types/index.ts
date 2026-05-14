@@ -48,7 +48,6 @@ export interface Message {
     executionNotes?: string[];
     providerSlug?: string;
     modelName?: string;
-    requestedProviderSlug?: string;
     requestedModelName?: string;
     inputTokens?: number;
     outputTokens?: number;

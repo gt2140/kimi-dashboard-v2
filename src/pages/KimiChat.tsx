@@ -79,7 +79,7 @@ const SHORTCUTS = [
 function getVisibleProviderLabel(metadata?: KimiMetadata) {
   const providerSlug = metadata?.providerSlug?.toLowerCase();
   if (!providerSlug || providerSlug === "kimi") {
-    return metadata?.requestedProviderSlug ? "Aura override" : "Aura";
+    return "Aura";
   }
 
   return metadata?.providerSlug ?? "Aura";

@@ -35,12 +35,6 @@ function toModelGatewayInput(input: AiProviderRequest): GenerateTextInput {
     );
   }
 
-  if (input.modelSelection.providerSlug === "kimi") {
-    throw new Error(
-      "Kimi execution is still handled by the Kimi runtime adapter.",
-    );
-  }
-
   return {
     providerSlug: input.modelSelection.providerSlug,
     modelName: input.modelSelection.modelName,

@@ -293,8 +293,4 @@ export class VeniceFirstConversationTurnRuntime implements ConversationTurnRunti
 export const auraChatConversationTurnRuntime =
   new VeniceFirstConversationTurnRuntime();
 
-export const kimiConversationTurnService = auraChatConversationTurnRuntime;
-export const auraMedicalConversationTurnService =
-  auraChatConversationTurnRuntime;
-
 export { loadLightweightConversationContext };

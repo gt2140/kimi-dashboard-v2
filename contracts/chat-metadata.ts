@@ -7,7 +7,6 @@ export type ChatAssistantMetadata = {
   engine?: "aura-chat-v1" | "aura-multi-provider-v1" | "kimi-v1";
   providerSlug?: ChatModelProviderSlug | string;
   modelName?: string;
-  requestedProviderSlug?: ChatModelProviderSlug | string;
   requestedModelName?: string | null;
   runtimeVersion?: AuraRuntimeVersion;
   medicalMode?: AuraMedicalMode;

@@ -61,7 +61,7 @@ describe("generatePrimaryReply", () => {
     expect(parsed.requestedModelName).toBe("zai-org-glm-5-1");
   });
 
-  it("accepts legacy transport fields while the backend runtime ignores them", () => {
+  it("strips legacy transport fields from the backend runtime input", () => {
     const parsed = chatSendMessageInputSchema.parse({
       conversationId: 42,
       content: "Keep the backend MVP simple",
@@ -70,15 +70,14 @@ describe("generatePrimaryReply", () => {
       runtimeVersion: "aura-medical-v1",
       medicalMode: "personal-health",
       policyLevel: "interpretive-on-request",
-      requestedProviderSlug: "openai",
       requestedModelName: "zai-org-glm-5-1",
     });
 
-    expect(parsed.calledAgentIds).toEqual(["bloodwork"]);
-    expect(parsed.runtimeVersion).toBe("aura-medical-v1");
-    expect(parsed.medicalMode).toBe("personal-health");
-    expect(parsed.policyLevel).toBe("interpretive-on-request");
-    expect(parsed.requestedProviderSlug).toBe("openai");
+    expect(parsed).not.toHaveProperty("calledAgentIds");
+    expect(parsed).not.toHaveProperty("runtimeVersion");
+    expect(parsed).not.toHaveProperty("medicalMode");
+    expect(parsed).not.toHaveProperty("policyLevel");
+    expect(parsed).not.toHaveProperty("requestedProviderSlug");
     expect(parsed.requestedModelName).toBe("zai-org-glm-5-1");
   });
 });

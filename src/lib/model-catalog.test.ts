@@ -81,12 +81,10 @@ describe("model catalog", () => {
 
   it("routes Auto through the Venice default provider at request time", () => {
     expect(resolveRuntimeModelSelection("auto", null)).toEqual({
-      requestedProviderSlug: "venice",
       requestedModelName: undefined,
     });
 
     expect(resolveRuntimeModelSelection("venice", "zai-org-glm-5-1")).toEqual({
-      requestedProviderSlug: "venice",
       requestedModelName: "zai-org-glm-5-1",
     });
   });

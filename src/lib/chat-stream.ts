@@ -4,7 +4,7 @@ import type {
   ChatStreamResponseMetadata,
   ChatStreamWatchdog,
   ChatStreamWatchdogOptions,
-} from "@contracts/chat-stream";
+} from "../../contracts/chat-stream";
 
 function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!value || typeof value !== "object") {
@@ -203,4 +203,4 @@ export type {
   ChatStreamResponseMetadata,
   ChatStreamWatchdog,
   ChatStreamWatchdogOptions,
-} from "@contracts/chat-stream";
+} from "../../contracts/chat-stream";

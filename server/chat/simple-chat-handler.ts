@@ -1,12 +1,16 @@
 import { classifyApiError } from "../lib/api-errors.js";
 import { auraChatConversationTurnRuntime } from "../services/venice-chat-runtime.js";
 import type { ConversationTurnRuntime } from "../services/conversation-turn-runtime.js";
+import { ModelGatewayService } from "../services/model-gateway.js";
 import { authenticateRequest as defaultAuthenticateRequest } from "../trpc/auth.js";
 import { chatSendMessageInputSchema } from "../trpc/chat-router.js";
 
 type SimpleChatHandlerDependencies = {
   authenticateRequest?: typeof defaultAuthenticateRequest;
   runtime?: ConversationTurnRuntime;
+  diagnoseProvider?: () => Promise<
+    Awaited<ReturnType<ModelGatewayService["diagnoseVenice"]>>
+  >;
 };
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
@@ -21,6 +25,28 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 
 function statusForCategory(category: ReturnType<typeof classifyApiError>["category"]) {
   return category === "auth" ? 401 : 500;
+}
+
+async function enrichProviderError(
+  classified: ReturnType<typeof classifyApiError>,
+  dependencies: SimpleChatHandlerDependencies
+) {
+  let message = classified.message;
+  let provider:
+    | Awaited<ReturnType<ModelGatewayService["diagnoseVenice"]>>
+    | undefined;
+
+  if (classified.category === "provider-error") {
+    const diagnoseProvider =
+      dependencies.diagnoseProvider ??
+      (() => new ModelGatewayService().diagnoseVenice());
+    provider = await diagnoseProvider().catch(() => undefined);
+    if (provider && !provider.ok) {
+      message = provider.message;
+    }
+  }
+
+  return { message, provider };
 }
 
 export async function handleSimpleChatRequest(
@@ -110,12 +136,14 @@ export async function handleSimpleChatRequest(
     );
   } catch (error) {
     const classified = classifyApiError(error);
+    const enriched = await enrichProviderError(classified, dependencies);
     return jsonResponse(
       {
         error: {
-          message: classified.message,
+          message: enriched.message,
           category: classified.category,
           traceId,
+          provider: enriched.provider,
         },
       },
       {

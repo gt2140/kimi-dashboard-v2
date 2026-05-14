@@ -90,4 +90,54 @@ describe("handleSimpleChatRequest", () => {
     });
     expect(response.status).toBe(401);
   });
+
+  it("replaces generic provider failures with a sanitized Venice diagnostic", async () => {
+    const response = await handleSimpleChatRequest(
+      new Request("https://example.com/api/chat/send", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          conversationId: 42,
+          content: "holaaa",
+          agentId: "generalist",
+        }),
+      }),
+      {
+        authenticateRequest: vi.fn().mockResolvedValue({ id: 7 }),
+        runtime: {
+          executeTurn: vi
+            .fn()
+            .mockRejectedValue(
+              new Error("the model provider failed to complete the chat turn")
+            ),
+        },
+        diagnoseProvider: vi.fn().mockResolvedValue({
+          ok: false,
+          providerSlug: "venice",
+          modelName: "zai-org-glm-5",
+          status: 401,
+          category: "auth",
+          message:
+            "Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY.",
+        }),
+      }
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        category: "provider-error",
+        message:
+          "Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY.",
+        provider: {
+          category: "auth",
+          status: 401,
+          modelName: "zai-org-glm-5",
+        },
+      },
+    });
+    expect(response.status).toBe(500);
+  });
 });

@@ -61,7 +61,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
         return {
           text: "Hola mundo",
           providerSlug: "venice",
-          modelName: "zai-org-glm-5-1",
+          modelName: "zai-org-glm-5",
           inputTokens: 31,
           outputTokens: 7,
         };
@@ -72,7 +72,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
       vi.fn().mockResolvedValue({
         text: "Hola mundo",
         providerSlug: "venice",
-        modelName: "zai-org-glm-5-1",
+        modelName: "zai-org-glm-5",
       });
 
     const runtime = new VeniceFirstConversationTurnRuntime({
@@ -81,7 +81,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
       modelGateway: {
         streamText,
         generateText,
-        getDefaultModel: vi.fn().mockReturnValue("zai-org-glm-5-1"),
+        getDefaultModel: vi.fn().mockReturnValue("zai-org-glm-5"),
       },
     });
 
@@ -105,7 +105,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
       conversationId: 42,
       content: "Latest question",
       agentId: "generalist",
-      requestedModelName: "zai-org-glm-5-1",
+      requestedModelName: "zai-org-glm-5",
       stream: true,
       onStage,
       onTextDelta,
@@ -124,7 +124,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
     expect(streamText).toHaveBeenCalledWith(
       expect.objectContaining({
         providerSlug: "venice",
-        modelName: "zai-org-glm-5-1",
+        modelName: "zai-org-glm-5",
         systemPrompt: expect.stringContaining(
           "You are Aura, a calm and practical generalist assistant."
         ),
@@ -150,8 +150,8 @@ describe("VeniceFirstConversationTurnRuntime", () => {
         metadata: {
           engine: "aura-chat-v1",
           providerSlug: "venice",
-          modelName: "zai-org-glm-5-1",
-          requestedModelName: "zai-org-glm-5-1",
+          modelName: "zai-org-glm-5",
+          requestedModelName: "zai-org-glm-5",
           inputTokens: 31,
           outputTokens: 7,
         },

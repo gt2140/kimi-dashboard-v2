@@ -22,7 +22,7 @@ describe("ModelGatewayService", () => {
     expect(gateway.supportsProvider("openai")).toBe(false);
     expect(gateway.supportsProvider("venice")).toBe(true);
     expect(gateway.supportsProvider("anthropic")).toBe(false);
-    expect(gateway.getDefaultModel("venice")).toBe("zai-org-glm-5-1");
+    expect(gateway.getDefaultModel("venice")).toBe("zai-org-glm-5");
   });
 
   it("remembers provider operational blocks until they expire", () => {
@@ -143,7 +143,7 @@ describe("ModelGatewayService", () => {
       expect.arrayContaining([
         expect.objectContaining({
           providerSlug: "venice",
-          modelName: "zai-org-glm-5-1",
+          modelName: "zai-org-glm-5",
           isDefaultCandidate: true,
         }),
       ])
@@ -223,5 +223,54 @@ describe("ModelGatewayService", () => {
     expect(getProviderOperationalBlock("venice")).toBe(
       "Venice no pudo responder porque el proveedor esta temporalmente inestable."
     );
+  });
+
+  it("retries a model-not-found Venice response with a live catalog fallback", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        text: async () => '{"error":"model not found"}',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: "zai-org-glm-5",
+              type: "text",
+              model_spec: {
+                name: "GLM 5",
+                traits: ["default"],
+                capabilities: {},
+              },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "fallback works" } }],
+          usage: { prompt_tokens: 4, completion_tokens: 2 },
+        }),
+      });
+    const gateway = new ModelGatewayService({
+      fetch: fetchMock as unknown as typeof fetch,
+      veniceApiKey: "test-venice-key",
+    });
+
+    await expect(
+      gateway.generateText({
+        providerSlug: "venice",
+        modelName: "retired-model",
+        messages: [{ role: "user", content: "hello" }],
+      })
+    ).resolves.toMatchObject({
+      text: "fallback works",
+      modelName: "zai-org-glm-5",
+    });
+    expect(getProviderOperationalBlock("venice")).toBeNull();
   });
 });

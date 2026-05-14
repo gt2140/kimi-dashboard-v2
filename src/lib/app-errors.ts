@@ -32,6 +32,9 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     case "provider-timeout":
       return `Provider timeout: the model provider took too long to answer. Retry in a moment.${traceSuffix}`;
     case "provider-error":
+      if (normalized.startsWith("venice ")) {
+        return `Provider error: ${message}${traceSuffix}`;
+      }
       return `Provider error: the model provider failed to complete the chat turn. Check the API logs for upstream details.${traceSuffix}`;
     case "db-error":
       return `Database error: ${message}${traceSuffix}`;

@@ -77,6 +77,22 @@ describe("formatRuntimeError", () => {
     );
   });
 
+  it("preserves sanitized Venice provider details", () => {
+    expect(
+      formatRuntimeError(
+        {
+          message:
+            "Venice request failed (404). The selected model is unavailable.",
+          category: "provider-error",
+          traceId: "venice-1",
+        },
+        "Aura chat"
+      )
+    ).toBe(
+      "Provider error: Venice request failed (404). The selected model is unavailable. (trace venice-1)"
+    );
+  });
+
   it("formats structured provider timeout errors with trace ids", () => {
     expect(
       formatRuntimeError({

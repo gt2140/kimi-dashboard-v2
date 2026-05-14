@@ -46,7 +46,7 @@ DATABASE_URL=postgresql://postgres:YOUR_DB_PASSWORD@aws-0-region.pooler.supabase
 OWNER_UNION_ID=supabase:YOUR_SUPABASE_AUTH_USER_ID
 VENICE_API_KEY=
 VENICE_INFERENCE_KEY=
-VENICE_MODEL=zai-org-glm-5-1
+VENICE_MODEL=zai-org-glm-5
 ```
 
 Notes:
@@ -73,7 +73,7 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your_supabase_publishable_anon_key
 VENICE_API_KEY=your_venice_api_key
 VENICE_INFERENCE_KEY=your_venice_inference_key
-VENICE_MODEL=zai-org-glm-5-1
+VENICE_MODEL=zai-org-glm-5
 ```
 
 Also add each deployed `https://<your-domain>/auth/callback` URL to the Supabase Google OAuth redirect allow-list.
@@ -82,7 +82,7 @@ For Venice on Vercel:
 
 - Set either `VENICE_API_KEY` or `VENICE_INFERENCE_KEY`. The backend accepts both, but only one is needed.
 - Keep Venice secrets only in local `app/.env` and Vercel project environment variables. Do not commit them to GitHub.
-- `VENICE_MODEL` is optional. If you omit it, the backend defaults to `zai-org-glm-5-1`.
+- `VENICE_MODEL` is optional. If you omit it, the backend defaults to `zai-org-glm-5`.
 
 ## GitHub and deploy checklist
 

@@ -4,6 +4,7 @@ export const LIVE_PROVIDER_SLUGS = ["venice"] as const;
 export type LiveProviderSlug = (typeof LIVE_PROVIDER_SLUGS)[number];
 const VENICE_REQUEST_TIMEOUT_MS = 25_000;
 const PROVIDER_OPERATIONAL_BLOCK_MS = 5 * 60_000;
+const SAFE_VENICE_FALLBACK_MODEL = "zai-org-glm-5";
 const providerOperationalBlocks = new Map<
   string,
   {
@@ -75,11 +76,11 @@ type VeniceModelListEntry = {
 const VENICE_MODEL_CATALOG_CACHE_TTL_MS = 10 * 60_000;
 const CURATED_VENICE_TEXT_MODELS: VeniceModelListEntry[] = [
   {
-    id: env.veniceModel,
+    id: SAFE_VENICE_FALLBACK_MODEL,
     type: "text",
     model_spec: {
-      name: "Auto Venice Default",
-      availableContextTokens: 200000,
+      name: "GLM 5",
+      availableContextTokens: 198000,
       privacy: "private",
       traits: ["default"],
       capabilities: {
@@ -88,12 +89,13 @@ const CURATED_VENICE_TEXT_MODELS: VeniceModelListEntry[] = [
     },
   },
   {
-    id: "zai-org-glm-5-1",
+    id: env.veniceModel,
     type: "text",
     model_spec: {
-      name: "GLM 5.1",
+      name: "Auto Venice Default",
       availableContextTokens: 200000,
       privacy: "private",
+      traits: ["default"],
       capabilities: {
         supportsReasoning: true,
       },
@@ -215,6 +217,18 @@ function buildVeniceOperationalBlockMessage(status: number, body: string) {
   return "Venice no pudo responder porque el proveedor esta temporalmente inestable.";
 }
 
+function isVeniceModelSelectionFailure(status: number, body: string) {
+  const normalized = body.toLowerCase();
+  return (
+    status === 400 ||
+    status === 404 ||
+    normalized.includes("model not found") ||
+    normalized.includes("invalid model") ||
+    normalized.includes("unknown model") ||
+    normalized.includes("model is not available")
+  );
+}
+
 function buildSanitizedVeniceErrorMessage(
   mode: "request" | "streaming request" | "model list request",
   status: number,
@@ -226,6 +240,10 @@ function buildSanitizedVeniceErrorMessage(
     }
 
     return `Venice ${mode} failed (${status}). The provider is temporarily unavailable.`;
+  }
+
+  if (isVeniceModelSelectionFailure(status, body)) {
+    return `Venice ${mode} failed (${status}). The selected model is unavailable.`;
   }
 
   if (status === 402 || status === 429 || isVeniceCapacityMessage(body)) {
@@ -427,7 +445,17 @@ export class ModelGatewayService {
   }
 
   getDefaultModel(_providerSlug: LiveProviderSlug = "venice") {
-    return env.veniceModel;
+    return env.veniceModel || SAFE_VENICE_FALLBACK_MODEL;
+  }
+
+  private async resolveVeniceFallbackModel(failedModel: string) {
+    const liveModels = await this.listVeniceTextModels();
+    const fallback =
+      liveModels.find(model => model.isDefaultCandidate)?.modelName ||
+      liveModels[0]?.modelName ||
+      SAFE_VENICE_FALLBACK_MODEL;
+
+    return fallback && fallback !== failedModel ? fallback : null;
   }
 
   async listVeniceTextModels(): Promise<VeniceCatalogOption[]> {
@@ -534,7 +562,8 @@ export class ModelGatewayService {
   }
 
   private async generateWithVenice(
-    input: GenerateTextInput
+    input: GenerateTextInput,
+    attemptedModelFallback = false
   ): Promise<GenerateTextOutput> {
     const model = input.modelName || this.getDefaultModel("venice");
     const veniceApiKey = this.getVeniceApiKey();
@@ -564,11 +593,29 @@ export class ModelGatewayService {
 
     if (!response.ok) {
       const body = await response.text();
-      rememberProviderOperationalBlock(
-        "venice",
-        buildVeniceOperationalBlockMessage(response.status, body),
-        this.getCurrentTime()
-      );
+      if (
+        isVeniceModelSelectionFailure(response.status, body) &&
+        !attemptedModelFallback
+      ) {
+        const fallbackModel = await this.resolveVeniceFallbackModel(model);
+        if (fallbackModel) {
+          return this.generateWithVenice(
+            {
+              ...input,
+              modelName: fallbackModel,
+            },
+            true
+          );
+        }
+      }
+
+      if (!isVeniceModelSelectionFailure(response.status, body)) {
+        rememberProviderOperationalBlock(
+          "venice",
+          buildVeniceOperationalBlockMessage(response.status, body),
+          this.getCurrentTime()
+        );
+      }
       throw new Error(
         buildSanitizedVeniceErrorMessage("request", response.status, body)
       );

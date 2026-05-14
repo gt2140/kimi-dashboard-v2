@@ -9,14 +9,14 @@ describe("buildProductionReadinessPayload", () => {
       supabaseUrl: "https://project.supabase.co",
       supabaseAnonKey: "public-anon-key",
       veniceApiKey: "venice-secret",
-      veniceModel: "zai-org-glm-5-1",
+      veniceModel: "zai-org-glm-5",
     });
 
     expect(payload).toEqual({
       ok: true,
       service: "aura-dashboard",
       chatProvider: "venice",
-      defaultModel: "zai-org-glm-5-1",
+      defaultModel: "zai-org-glm-5",
       checks: {
         sessionSecret: true,
         database: true,

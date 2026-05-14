@@ -14,8 +14,8 @@ describe("handleSimpleChatRequest", () => {
         metadata: {
           engine: "aura-chat-v1",
           providerSlug: "venice",
-          modelName: "zai-org-glm-5-1",
-          requestedModelName: "zai-org-glm-5-1",
+          modelName: "zai-org-glm-5",
+          requestedModelName: "zai-org-glm-5",
         },
       },
     });
@@ -32,7 +32,7 @@ describe("handleSimpleChatRequest", () => {
           conversationId: 42,
           content: "holaaa",
           agentId: "generalist",
-          requestedModelName: "zai-org-glm-5-1",
+          requestedModelName: "zai-org-glm-5",
         }),
       }),
       {
@@ -50,7 +50,7 @@ describe("handleSimpleChatRequest", () => {
         createdAt: "2026-05-14T21:00:00.000Z",
         metadata: {
           providerSlug: "venice",
-          modelName: "zai-org-glm-5-1",
+          modelName: "zai-org-glm-5",
         },
       },
     });
@@ -61,7 +61,7 @@ describe("handleSimpleChatRequest", () => {
         conversationId: 42,
         content: "holaaa",
         agentId: "generalist",
-        requestedModelName: "zai-org-glm-5-1",
+        requestedModelName: "zai-org-glm-5",
         stream: false,
       })
     );

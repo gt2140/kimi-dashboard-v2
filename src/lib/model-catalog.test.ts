@@ -10,33 +10,26 @@ describe("model catalog", () => {
   it("keeps the curated text-only list available for the chat picker", () => {
     expect(CURATED_TEXT_MODELS.map(model => model.displayName)).toEqual([
       "Auto",
-      "GLM 5.1",
-      "GLM 5 Turbo",
-      "GLM 4.7 Flash Heretic",
+      "GLM 5",
       "Venice Uncensored 1.2",
-      "Qwen 3.6 Plus Uncensored",
-      "Claude Sonnet 4.6",
-      "GPT-5.5",
-      "DeepSeek V4 Flash",
-      "Kimi K2.6",
     ]);
   });
 
   it("filters the curated list by visible name and model id", () => {
-    expect(
-      filterCuratedTextModels("glm").map(model => model.displayName),
-    ).toEqual(["GLM 5.1", "GLM 5 Turbo", "GLM 4.7 Flash Heretic"]);
+    expect(filterCuratedTextModels("glm").map(model => model.displayName)).toEqual([
+      "GLM 5",
+    ]);
 
     expect(
-      filterCuratedTextModels("kimi-k2-6").map(model => model.displayName),
-    ).toEqual(["Kimi K2.6"]);
+      filterCuratedTextModels("venice-uncensored").map(model => model.displayName),
+    ).toEqual(["Venice Uncensored 1.2"]);
   });
 
   it("resolves auto and explicit model selections consistently", () => {
     expect(getSelectedModelOption("auto", null)?.displayName).toBe("Auto");
     expect(
-      getSelectedModelOption("venice", "zai-org-glm-5-1")?.displayName,
-    ).toBe("GLM 5.1");
+      getSelectedModelOption("venice", "zai-org-glm-5")?.displayName,
+    ).toBe("GLM 5");
   });
 
   it("supports externally supplied model catalogs without losing auto resolution", () => {
@@ -84,8 +77,8 @@ describe("model catalog", () => {
       requestedModelName: undefined,
     });
 
-    expect(resolveRuntimeModelSelection("venice", "zai-org-glm-5-1")).toEqual({
-      requestedModelName: "zai-org-glm-5-1",
+    expect(resolveRuntimeModelSelection("venice", "zai-org-glm-5")).toEqual({
+      requestedModelName: "zai-org-glm-5",
     });
   });
 });

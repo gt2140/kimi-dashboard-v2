@@ -48,7 +48,7 @@ export const env = {
   openaiApiKey: process.env.OPENAI_API_KEY?.trim() || "",
   openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
   veniceApiKey: requiredOneOf("VENICE_API_KEY", "VENICE_INFERENCE_KEY"),
-  veniceModel: process.env.VENICE_MODEL?.trim() || "zai-org-glm-5-1",
+  veniceModel: process.env.VENICE_MODEL?.trim() || "zai-org-glm-5",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || "",
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
   kimiApiKey: process.env.KIMI_API_KEY?.trim() || "",

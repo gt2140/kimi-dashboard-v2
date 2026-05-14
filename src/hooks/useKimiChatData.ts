@@ -161,7 +161,7 @@ export function useKimiChatData() {
     );
     const streamWatchdog = createChatStreamWatchdog(
       CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
-      "Kimi chat stream",
+      "Aura chat stream",
       {
         initialTimeoutMs: CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS,
       },
@@ -233,7 +233,7 @@ export function useKimiChatData() {
       }
 
       if (!response.ok) {
-        let responseMessage = `Kimi chat failed with HTTP ${response.status}.`;
+        let responseMessage = `Aura chat failed with HTTP ${response.status}.`;
         try {
           const payload = (await response.clone().json()) as {
             error?: string;
@@ -268,7 +268,7 @@ export function useKimiChatData() {
       }
 
       if (!response.body) {
-        throw new Error("Kimi chat did not return a readable stream.");
+        throw new Error("Aura chat did not return a readable stream.");
       }
 
       const responseMetadata = readChatStreamResponseMetadata(response);
@@ -381,7 +381,7 @@ export function useKimiChatData() {
         }
 
         throw new Error(
-          "Kimi chat completed without a terminal assistant message.",
+          "Aura chat completed without a terminal assistant message.",
         );
       }
 
@@ -403,10 +403,10 @@ export function useKimiChatData() {
 
       const message =
         error instanceof Error
-          ? formatRuntimeError(error, "Kimi chat")
+          ? formatRuntimeError(error, "Aura chat")
           : formatRuntimeError(
-              new Error("Kimi streaming failed unexpectedly."),
-              "Kimi chat",
+              new Error("Aura streaming failed unexpectedly."),
+              "Aura chat",
             );
       setStreamError(message);
       throw error;
@@ -448,9 +448,9 @@ export function useKimiChatData() {
     isSending: isStreaming || createConversation.isPending,
     error:
       typeof error === "string"
-        ? formatRuntimeError(new Error(error), "Kimi chat")
+        ? formatRuntimeError(new Error(error), "Aura chat")
         : error
-          ? formatRuntimeError(error, "Kimi chat")
+          ? formatRuntimeError(error, "Aura chat")
           : null,
     selectConversation,
     startNewChat,

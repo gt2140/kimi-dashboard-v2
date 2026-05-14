@@ -124,31 +124,6 @@ export function getCuratedVeniceTextModels() {
   });
 }
 
-type OpenAIResponsePayload = {
-  output_text?: string;
-  output?: Array<{
-    content?: Array<{
-      type?: string;
-      text?: string;
-    }>;
-  }>;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
-};
-
-type OpenAIStreamingEvent = {
-  type?: string;
-  delta?: string;
-  error?: {
-    message?: string;
-  };
-  response?: OpenAIResponsePayload & {
-    id?: string;
-  };
-};
-
 type ChatCompletionsResponsePayload = {
   id?: string;
   choices?: Array<{
@@ -214,59 +189,6 @@ export function getProviderOperationalBlock(
 
 export function clearProviderOperationalBlock(providerSlug: string) {
   providerOperationalBlocks.delete(providerSlug);
-}
-
-export function extractOpenAIResponseText(payload: OpenAIResponsePayload) {
-  if (payload.output_text?.trim()) {
-    return payload.output_text.trim();
-  }
-
-  const derived = (payload.output ?? [])
-    .flatMap(item => item.content ?? [])
-    .filter(
-      item => item.type === "output_text" && typeof item.text === "string"
-    )
-    .map(item => item.text!.trim())
-    .filter(Boolean)
-    .join("\n");
-
-  return derived;
-}
-
-export function extractOpenAIStreamEvents(buffer: string) {
-  const normalizedBuffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const eventBlocks = normalizedBuffer.split("\n\n");
-  const remainder = eventBlocks.pop() ?? "";
-  const events: OpenAIStreamingEvent[] = [];
-
-  for (const block of eventBlocks) {
-    const dataLines = block
-      .split("\n")
-      .map(line => line.trim())
-      .filter(line => line.startsWith("data:"))
-      .map(line => line.slice("data:".length).trim())
-      .filter(Boolean);
-
-    if (dataLines.length === 0) {
-      continue;
-    }
-
-    const payload = dataLines.join("\n");
-    if (payload === "[DONE]") {
-      continue;
-    }
-
-    try {
-      events.push(JSON.parse(payload) as OpenAIStreamingEvent);
-    } catch {
-      // Keep the parser resilient to unknown/partial event frames.
-    }
-  }
-
-  return {
-    events,
-    remainder,
-  };
 }
 
 function normalizeVeniceTimeoutError(

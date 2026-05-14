@@ -48,7 +48,7 @@ describe("formatRuntimeError", () => {
     expect(
       formatRuntimeError(
         new Error("Aura Medical chat turn timed out after 45000ms."),
-        "Kimi chat"
+        "Aura chat"
       )
     ).toBe(
       "Runtime error: the chat backend timed out before finishing. Check the deployed API, database connectivity, or model provider."
@@ -59,7 +59,7 @@ describe("formatRuntimeError", () => {
     expect(
       formatRuntimeError(
         new Error("Kimi request failed (502): upstream error"),
-        "Kimi chat"
+        "Aura chat"
       )
     ).toBe(
       "Runtime error: the model provider failed to complete the chat turn. Check the local API logs for provider or stream details."
@@ -72,7 +72,7 @@ describe("formatRuntimeError", () => {
         message: "Primary response generation timed out after 25000ms.",
         category: "provider-timeout",
         traceId: "trace-456",
-      }, "Kimi chat")
+      }, "Aura chat")
     ).toBe(
       "Provider timeout: the model provider took too long to answer. Retry in a moment. (trace trace-456)"
     );
@@ -84,7 +84,7 @@ describe("formatRuntimeError", () => {
         message: "Aura Medical chat turn timed out after 180000ms.",
         category: "backend-timeout",
         traceId: "trace-999",
-      }, "Kimi chat")
+      }, "Aura chat")
     ).toBe(
       "Backend timeout: the chat backend took too long to finish. Check the deployed API, database connectivity, or upstream provider. (trace trace-999)"
     );

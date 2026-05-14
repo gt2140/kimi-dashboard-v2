@@ -16,7 +16,7 @@ import {
   generatePrimaryReply,
 } from "../services/chat-reply-builder.js";
 import { syncConversationParticipants } from "../services/conversation-participants.js";
-import { auraChatConversationTurnRuntime } from "../services/kimi-runtime.js";
+import { auraChatConversationTurnRuntime } from "../services/venice-chat-runtime.js";
 import { ModelGatewayService } from "../services/model-gateway.js";
 import { createRouter, authedQuery } from "./middleware.js";
 

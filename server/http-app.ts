@@ -8,7 +8,7 @@ import { authenticateRequest } from "./trpc/auth.js";
 import { chatSendMessageInputSchema } from "./trpc/chat-router.js";
 import { TurnStreamController } from "./services/turn-stream-controller.js";
 import { withAbortableTimeout } from "./services/async-guard.js";
-import { auraChatConversationTurnRuntime } from "./services/kimi-runtime.js";
+import { auraChatConversationTurnRuntime } from "./services/venice-chat-runtime.js";
 import { classifyApiError } from "./lib/api-errors.js";
 import { logServerDebug } from "./lib/debug.js";
 import { vaultV2Service } from "./services/vault-v2-service.js";
@@ -273,7 +273,7 @@ app.post("/api/vault/documents", async c => {
         error:
           error instanceof Error
             ? error.message
-            : "Kimi vault upload failed unexpectedly.",
+            : "Vault upload failed unexpectedly.",
       },
       500
     );

@@ -44,7 +44,7 @@ describe("production chat route behavior", () => {
         startWorker: vi.fn(),
       },
     }));
-    vi.doMock("./services/kimi-runtime.js", () => ({
+    vi.doMock("./services/venice-chat-runtime.js", () => ({
       auraChatConversationTurnRuntime: {
         executeTurn: vi
           .fn()
@@ -91,7 +91,7 @@ describe("production chat route behavior", () => {
         startWorker: vi.fn(),
       },
     }));
-    vi.doMock("./services/kimi-runtime.js", () => ({
+    vi.doMock("./services/venice-chat-runtime.js", () => ({
       auraChatConversationTurnRuntime: {
         executeTurn: vi.fn().mockImplementation(async params => {
           await params.onStage?.({
@@ -190,7 +190,7 @@ describe("production chat route behavior", () => {
         startWorker: vi.fn(),
       },
     }));
-    vi.doMock("./services/kimi-runtime.js", () => ({
+    vi.doMock("./services/venice-chat-runtime.js", () => ({
       auraChatConversationTurnRuntime: {
         executeTurn,
       },

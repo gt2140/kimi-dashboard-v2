@@ -1,11 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { VeniceFirstConversationTurnRuntime } from "./kimi-runtime.js";
+import {
+  auraChatConversationTurnRuntime,
+  VeniceFirstConversationTurnRuntime,
+} from "./venice-chat-runtime.js";
 
 describe("VeniceFirstConversationTurnRuntime", () => {
   let callOrder: string[];
 
   beforeEach(() => {
     callOrder = [];
+  });
+
+  it("exports the production chat runtime from the Venice-named module", () => {
+    expect(auraChatConversationTurnRuntime).toBeInstanceOf(
+      VeniceFirstConversationTurnRuntime
+    );
   });
 
   function buildRuntime(

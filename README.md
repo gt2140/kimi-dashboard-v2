@@ -96,6 +96,7 @@ Before promoting the Vercel project:
 
 - Verify Supabase callback URLs include the deployed domain.
 - Add the Venice secret to both `Preview` and `Production`.
+- Open `https://<your-domain>/api/health` and confirm `ok: true`; the payload reports missing environment categories without exposing secret values.
 - Run one authenticated `POST /api/chat/stream` turn with an explicit `requestedModelName` after deploy.
 
 ## Supabase setup

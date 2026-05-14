@@ -64,6 +64,13 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
   }
 
   if (
+    normalized.includes("chat stream timed out") ||
+    normalized.includes("aura chat stream timed out")
+  ) {
+    return `Backend timeout: the chat backend took too long to start streaming. Check the deployed API, auth, database connectivity, or cold start logs.${traceSuffix}`;
+  }
+
+  if (
     normalized.includes("chat turn timed out") ||
     normalized.includes("kimi chat turn timed out") ||
     normalized.includes("aura medical chat turn timed out") ||

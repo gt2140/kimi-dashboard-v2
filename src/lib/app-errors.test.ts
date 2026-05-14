@@ -55,6 +55,17 @@ describe("formatRuntimeError", () => {
     );
   });
 
+  it("surfaces production stream startup timeouts as backend timeouts", () => {
+    expect(
+      formatRuntimeError(
+        new Error("Aura chat stream timed out after 60000ms."),
+        "Aura chat"
+      )
+    ).toBe(
+      "Backend timeout: the chat backend took too long to start streaming. Check the deployed API, auth, database connectivity, or cold start logs."
+    );
+  });
+
   it("surfaces provider failures as runtime errors instead of generic network failures", () => {
     expect(
       formatRuntimeError(

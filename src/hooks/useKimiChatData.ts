@@ -27,7 +27,7 @@ import { createPersistedCompletionReader } from "@/hooks/kimi-chat-recovery";
 const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 const STREAM_RECOVERY_POLL_ATTEMPTS = 6;
 const STREAM_RECOVERY_POLL_DELAY_MS = 750;
-const CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS = 15_000;
+const CHAT_STREAM_FIRST_EVENT_TIMEOUT_MS = 60_000;
 
 export function useKimiChatData() {
   const navigate = useNavigate();

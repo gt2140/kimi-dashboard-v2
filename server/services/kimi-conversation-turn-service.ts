@@ -12,6 +12,7 @@ import {
 } from "./chat-turn-trace.js";
 import {
   buildAuraMedicalMetadata,
+  buildAuraMedicalStageLabels,
   resolveAuraRuntimeOptions,
 } from "./aura-medical-runtime.js";
 import {
@@ -20,7 +21,10 @@ import {
   buildShortTermMemoryWindow,
 } from "./kimi-memory.js";
 import { persistKimiTurnMemory } from "./kimi-memory-persistence.js";
-import { ModelGatewayService } from "./model-gateway.js";
+import {
+  ModelGatewayAiProviderGateway,
+  type AiProviderGateway,
+} from "./ai-provider-gateway.js";
 
 type ConversationTurnInput = {
   conversationId: number;
@@ -196,7 +200,7 @@ type ToolExecutorLike = {
   }) => Promise<ToolResult[]>;
 };
 
-type ModelGatewayLike = Pick<ModelGatewayService, "generateText" | "streamText">;
+type AiProviderGatewayLike = Pick<AiProviderGateway, "generateText" | "streamText">;
 
 export class KimiConversationTurnService {
   private readonly dependencies: {
@@ -204,7 +208,7 @@ export class KimiConversationTurnService {
     agentRunRepository: AgentRunRepositoryLike;
     kimiClient: KimiClientLike;
     toolExecutor: ToolExecutorLike;
-    modelGateway?: ModelGatewayLike;
+    aiProviderGateway?: AiProviderGatewayLike;
     contextLoader: (params: {
       userId: number;
       conversationId: number;
@@ -222,7 +226,7 @@ export class KimiConversationTurnService {
       agentRunRepository: AgentRunRepositoryLike;
       kimiClient: KimiClientLike;
       toolExecutor: ToolExecutorLike;
-      modelGateway?: ModelGatewayLike;
+      aiProviderGateway?: AiProviderGatewayLike;
       contextLoader: (params: {
         userId: number;
         conversationId: number;
@@ -241,6 +245,7 @@ export class KimiConversationTurnService {
     input: ConversationTurnInput;
     userId: number;
     streamPrimary?: boolean;
+    signal?: AbortSignal | null;
     onStage?: (stage: ChatStage) => void | Promise<void>;
     onTextDelta?: (delta: string) => void | Promise<void>;
     traceContext?: {
@@ -254,7 +259,7 @@ export class KimiConversationTurnService {
       contextLoader,
       kimiClient,
       toolExecutor,
-      modelGateway = new ModelGatewayService(),
+      aiProviderGateway = new ModelGatewayAiProviderGateway(),
     } = this.dependencies;
     let primaryRunId: number | null = null;
     let failureKind: ChatTurnFailureKind = "unknown";
@@ -279,6 +284,8 @@ export class KimiConversationTurnService {
       medicalMode: params.input.medicalMode,
     });
 
+    params.signal?.throwIfAborted?.();
+
     const conversation = await conversationRepository.requireConversationOwner(
       params.input.conversationId,
       params.userId,
@@ -286,11 +293,22 @@ export class KimiConversationTurnService {
 
     try {
       trace.debug("start");
+      const initialRuntimeOptions = resolveAuraRuntimeOptions({
+        runtimeVersion: params.input.runtimeVersion,
+        medicalMode: params.input.medicalMode,
+        policyLevel: params.input.policyLevel,
+      });
+      const initialMemoryLabel = buildAuraMedicalStageLabels({
+        medicalMode: initialRuntimeOptions.medicalMode,
+        latestUserMessage: params.input.content,
+        requestedProviderSlug: params.input.requestedProviderSlug,
+        requestedModelName: params.input.requestedModelName,
+      }).memory;
       await params.onStage?.({
         id: "memory",
-        label: "Loading Kimi memory and Aura context",
+        label: initialMemoryLabel,
       });
-      trace.markStage("memory", "Loading Kimi memory and Aura context");
+      trace.markStage("memory", initialMemoryLabel);
 
       failureKind = "context-load";
       metrics.contextStartedAt = Date.now();
@@ -372,6 +390,8 @@ export class KimiConversationTurnService {
       }));
 
       if (requestedProviderSlug) {
+        params.signal?.throwIfAborted?.();
+
         await params.onStage?.({
           id: "analyze",
           label: context.stageLabels?.analyze ?? "Planning the answer",
@@ -394,9 +414,12 @@ export class KimiConversationTurnService {
         metrics.providerStartedAt = Date.now();
         let firstProviderDeltaSeen = false;
         const generation = params.streamPrimary
-          ? await modelGateway.streamText({
-              providerSlug: requestedProviderSlug,
-              modelName: requestedModelName,
+          ? await aiProviderGateway.streamText({
+              modelSelection: {
+                providerSlug: requestedProviderSlug,
+                modelName: requestedModelName,
+              },
+              signal: params.signal,
               systemPrompt: resolvedSystemPrompt,
               messages: gatewayMessages,
               onTextDelta: async delta => {
@@ -408,9 +431,12 @@ export class KimiConversationTurnService {
                 await params.onTextDelta?.(delta);
               },
             })
-          : await modelGateway.generateText({
-              providerSlug: requestedProviderSlug,
-              modelName: requestedModelName,
+          : await aiProviderGateway.generateText({
+              modelSelection: {
+                providerSlug: requestedProviderSlug,
+                modelName: requestedModelName,
+              },
+              signal: params.signal,
               systemPrompt: resolvedSystemPrompt,
               messages: gatewayMessages,
             });

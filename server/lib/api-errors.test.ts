@@ -36,6 +36,18 @@ describe("api-errors", () => {
     );
   });
 
+  it("classifies Venice upstream failures as provider errors", () => {
+    expect(
+      classifyApiError(
+        new Error("Venice streaming request failed (429): rate limit exceeded"),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        category: "provider-error",
+      }),
+    );
+  });
+
   it("serializes JSON errors with a stable shape", async () => {
     const response = toJsonErrorResponse(
       new Error("An error occurred"),

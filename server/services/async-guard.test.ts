@@ -82,4 +82,33 @@ describe("withAbortableTimeout", () => {
 
     expect(aborted).toBe(true);
   });
+
+  it("aborts the underlying task when the parent signal aborts", async () => {
+    const parentController = new AbortController();
+    let aborted = false;
+
+    const work = withAbortableTimeout(
+      signal =>
+        new Promise<string>((resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(signal.reason ?? new Error("aborted"));
+          });
+
+          setTimeout(() => resolve("late"), 30);
+        }),
+      {
+        label: "client linked task",
+        timeoutMs: 100,
+        signal: parentController.signal,
+      }
+    );
+
+    parentController.abort(new Error("Client disconnected while streaming chat."));
+
+    await expect(work).rejects.toThrow(
+      "Client disconnected while streaming chat."
+    );
+    expect(aborted).toBe(true);
+  });
 });

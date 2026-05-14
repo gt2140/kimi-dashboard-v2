@@ -78,6 +78,7 @@ export function classifyApiError(error: unknown): ClassifiedApiError {
 
   if (
     normalized.includes("openai") ||
+    normalized.includes("venice") ||
     normalized.includes("kimi request failed") ||
     normalized.includes("model provider") ||
     normalized.includes("upstream")

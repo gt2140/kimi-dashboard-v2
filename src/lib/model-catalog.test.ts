@@ -3,6 +3,7 @@ import {
   CURATED_TEXT_MODELS,
   filterCuratedTextModels,
   getSelectedModelOption,
+  resolveRuntimeModelSelection,
 } from "./model-catalog";
 
 describe("model catalog", () => {
@@ -36,5 +37,57 @@ describe("model catalog", () => {
     expect(
       getSelectedModelOption("venice", "zai-org-glm-5-1")?.displayName,
     ).toBe("GLM 5.1");
+  });
+
+  it("supports externally supplied model catalogs without losing auto resolution", () => {
+    const models = [
+      CURATED_TEXT_MODELS[0],
+      {
+        providerSlug: "venice" as const,
+        modelName: "grok-4-20",
+        displayName: "Grok 4.20",
+        providerLabel: "Venice",
+        modelId: "grok-4-20",
+        contextWindow: "2M",
+        badges: ["Private", "Reasoning", "Vision"],
+        supportsReasoning: true,
+        supportsVision: true,
+        supportsCode: false,
+        isDefaultCandidate: false,
+      },
+    ];
+
+    expect(filterCuratedTextModels("grok", models)).toHaveLength(1);
+    expect(getSelectedModelOption("venice", "grok-4-20", models)?.displayName).toBe(
+      "Grok 4.20",
+    );
+    expect(getSelectedModelOption("auto", null, models)?.displayName).toBe("Auto");
+  });
+
+  it("shows persisted model selections that are missing from the live catalog", () => {
+    const option = getSelectedModelOption("venice", "retired-venice-model", [
+      CURATED_TEXT_MODELS[0],
+    ]);
+
+    expect(option).toMatchObject({
+      providerSlug: "venice",
+      modelName: "retired-venice-model",
+      displayName: "retired-venice-model",
+      providerLabel: "Venice",
+      modelId: "retired-venice-model",
+      badges: ["Unavailable"],
+    });
+  });
+
+  it("routes Auto through the Venice default provider at request time", () => {
+    expect(resolveRuntimeModelSelection("auto", null)).toEqual({
+      requestedProviderSlug: "venice",
+      requestedModelName: undefined,
+    });
+
+    expect(resolveRuntimeModelSelection("venice", "zai-org-glm-5-1")).toEqual({
+      requestedProviderSlug: "venice",
+      requestedModelName: "zai-org-glm-5-1",
+    });
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { app } from "./http-app.js";
 
 describe("Vault V2 HTTP routes", () => {
-  it("protects kimi chat stream with auth", async () => {
+  it("does not expose the legacy kimi chat stream alias", async () => {
     const response = await app.fetch(
       new Request("http://localhost/api/kimi/chat/stream", {
         method: "POST",
@@ -10,13 +10,13 @@ describe("Vault V2 HTTP routes", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({}),
-      }),
+      })
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(404);
   });
 
-  it("protects the canonical chat stream alias with auth", async () => {
+  it("protects the canonical chat stream with auth", async () => {
     const response = await app.fetch(
       new Request("http://localhost/api/chat/stream", {
         method: "POST",
@@ -24,13 +24,13 @@ describe("Vault V2 HTTP routes", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({}),
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
   });
 
-  it("protects aura medical chat stream with auth", async () => {
+  it("does not expose the legacy aura medical chat stream alias", async () => {
     const response = await app.fetch(
       new Request("http://localhost/api/aura-medical/chat/stream", {
         method: "POST",
@@ -38,10 +38,10 @@ describe("Vault V2 HTTP routes", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({}),
-      }),
+      })
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(404);
   });
 
   it("protects vault v2 upload with auth", async () => {
@@ -49,14 +49,14 @@ describe("Vault V2 HTTP routes", () => {
     formData.append("category", "bloodwork");
     formData.append(
       "file",
-      new File(["hemoglobin"], "bloodwork.txt", { type: "text/plain" }),
+      new File(["hemoglobin"], "bloodwork.txt", { type: "text/plain" })
     );
 
     const response = await app.fetch(
       new Request("http://localhost/api/vault/documents", {
         method: "POST",
         body: formData,
-      }),
+      })
     );
 
     expect(response.status).toBe(401);
@@ -64,7 +64,7 @@ describe("Vault V2 HTTP routes", () => {
 
   it("protects vault v2 list with auth", async () => {
     const response = await app.fetch(
-      new Request("http://localhost/api/vault/documents"),
+      new Request("http://localhost/api/vault/documents")
     );
 
     expect(response.status).toBe(401);

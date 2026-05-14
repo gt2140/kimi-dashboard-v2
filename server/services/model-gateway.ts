@@ -1,8 +1,7 @@
 import { env } from "../lib/env.js";
 
-export const LIVE_PROVIDER_SLUGS = ["openai", "venice"] as const;
+export const LIVE_PROVIDER_SLUGS = ["venice"] as const;
 export type LiveProviderSlug = (typeof LIVE_PROVIDER_SLUGS)[number];
-const OPENAI_REQUEST_TIMEOUT_MS = 25_000;
 const VENICE_REQUEST_TIMEOUT_MS = 25_000;
 const PROVIDER_OPERATIONAL_BLOCK_MS = 5 * 60_000;
 const providerOperationalBlocks = new Map<
@@ -35,6 +34,95 @@ export type GenerateTextOutput = {
 export type StreamTextInput = GenerateTextInput & {
   onTextDelta?: (delta: string) => void | Promise<void>;
 };
+
+type ModelGatewayServiceOptions = {
+  fetch?: typeof fetch;
+  now?: () => number;
+  veniceApiKey?: string;
+};
+
+export type VeniceCatalogOption = {
+  providerSlug: "venice";
+  modelName: string;
+  displayName: string;
+  providerLabel: "Venice";
+  modelId: string;
+  contextWindow: string;
+  badges: string[];
+  supportsReasoning: boolean;
+  supportsVision: boolean;
+  supportsCode: boolean;
+  isDefaultCandidate: boolean;
+};
+
+type VeniceModelListEntry = {
+  id: string;
+  type?: string;
+  model_spec?: {
+    name?: string;
+    availableContextTokens?: number;
+    privacy?: string;
+    betaModel?: boolean;
+    traits?: string[];
+    capabilities?: {
+      optimizedForCode?: boolean;
+      supportsVision?: boolean;
+      supportsReasoning?: boolean;
+    };
+  };
+};
+
+const VENICE_MODEL_CATALOG_CACHE_TTL_MS = 10 * 60_000;
+const CURATED_VENICE_TEXT_MODELS: VeniceModelListEntry[] = [
+  {
+    id: env.veniceModel,
+    type: "text",
+    model_spec: {
+      name: "Auto Venice Default",
+      availableContextTokens: 200000,
+      privacy: "private",
+      traits: ["default"],
+      capabilities: {
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "zai-org-glm-5-1",
+    type: "text",
+    model_spec: {
+      name: "GLM 5.1",
+      availableContextTokens: 200000,
+      privacy: "private",
+      capabilities: {
+        supportsReasoning: true,
+      },
+    },
+  },
+];
+
+let veniceModelCatalogCache: {
+  apiKey: string;
+  expiresAt: number;
+  models: VeniceCatalogOption[];
+} | null = null;
+
+export function clearVeniceModelCatalogCache() {
+  veniceModelCatalogCache = null;
+}
+
+export function getCuratedVeniceTextModels() {
+  const byModelId = new Map<string, VeniceCatalogOption>();
+  for (const model of CURATED_VENICE_TEXT_MODELS) {
+    byModelId.set(model.id, mapVeniceModelToCatalogOption(model));
+  }
+
+  return Array.from(byModelId.values()).sort((left, right) => {
+    if (left.modelName === env.veniceModel) return -1;
+    if (right.modelName === env.veniceModel) return 1;
+    return left.displayName.localeCompare(right.displayName);
+  });
+}
 
 type OpenAIResponsePayload = {
   output_text?: string;
@@ -86,11 +174,13 @@ type ChatCompletionsStreamingEvent = {
   }>;
 };
 
-function isQuotaExceededMessage(message: string) {
+function isVeniceCapacityMessage(message: string) {
   const normalized = message.toLowerCase();
   return (
-    normalized.includes("exceeded your current quota") ||
-    normalized.includes("billing details")
+    normalized.includes("daily limit") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("capacity")
   );
 }
 
@@ -133,7 +223,9 @@ export function extractOpenAIResponseText(payload: OpenAIResponsePayload) {
 
   const derived = (payload.output ?? [])
     .flatMap(item => item.content ?? [])
-    .filter(item => item.type === "output_text" && typeof item.text === "string")
+    .filter(
+      item => item.type === "output_text" && typeof item.text === "string"
+    )
     .map(item => item.text!.trim())
     .filter(Boolean)
     .join("\n");
@@ -177,20 +269,10 @@ export function extractOpenAIStreamEvents(buffer: string) {
   };
 }
 
-function normalizeOpenAITimeoutError(error: unknown, mode: "request" | "stream") {
-  if (
-    error instanceof Error &&
-    (error.name === "AbortError" || error.name === "TimeoutError")
-  ) {
-    return new Error(
-      `OpenAI ${mode} timed out after ${OPENAI_REQUEST_TIMEOUT_MS}ms.`
-    );
-  }
-
-  return error;
-}
-
-function normalizeVeniceTimeoutError(error: unknown, mode: "request" | "stream") {
+function normalizeVeniceTimeoutError(
+  error: unknown,
+  mode: "request" | "stream"
+) {
   if (
     error instanceof Error &&
     (error.name === "AbortError" || error.name === "TimeoutError")
@@ -203,8 +285,32 @@ function normalizeVeniceTimeoutError(error: unknown, mode: "request" | "stream")
   return error;
 }
 
-function buildOpenAISignal(signal?: AbortSignal | null) {
-  return buildTimedSignal(OPENAI_REQUEST_TIMEOUT_MS, signal);
+function buildVeniceOperationalBlockMessage(status: number, body: string) {
+  if (status === 402 || status === 429 || isVeniceCapacityMessage(body)) {
+    return "Venice no pudo responder porque el proveedor alcanzo su limite o capacidad actual.";
+  }
+
+  return "Venice no pudo responder porque el proveedor esta temporalmente inestable.";
+}
+
+function buildSanitizedVeniceErrorMessage(
+  mode: "request" | "streaming request" | "model list request",
+  status: number,
+  body: string
+) {
+  if (mode === "model list request") {
+    if (status === 402 || status === 429 || isVeniceCapacityMessage(body)) {
+      return `Venice ${mode} failed (${status}). The provider is rate-limiting or has reached its current capacity.`;
+    }
+
+    return `Venice ${mode} failed (${status}). The provider is temporarily unavailable.`;
+  }
+
+  if (status === 402 || status === 429 || isVeniceCapacityMessage(body)) {
+    return `Venice ${mode} failed (${status}). The provider is rate-limiting or has reached its current capacity.`;
+  }
+
+  return `Venice ${mode} failed (${status}). The provider is temporarily unavailable.`;
 }
 
 function buildVeniceSignal(signal?: AbortSignal | null) {
@@ -250,7 +356,9 @@ function buildChatCompletionMessages(input: GenerateTextInput) {
   return messages;
 }
 
-function extractChatCompletionsResponseText(payload: ChatCompletionsResponsePayload) {
+function extractChatCompletionsResponseText(
+  payload: ChatCompletionsResponsePayload
+) {
   return (
     payload.choices
       ?.map(choice => choice.message?.content?.trim() ?? "")
@@ -295,44 +403,180 @@ function extractChatCompletionsStreamEvents(buffer: string) {
   };
 }
 
+export function formatContextWindow(tokens?: number) {
+  if (!tokens || tokens <= 0) {
+    return "Unknown";
+  }
+
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    return Number.isInteger(millions)
+      ? `${millions}M`
+      : `${millions.toFixed(1)}M`;
+  }
+
+  return `${Math.round(tokens / 1_000)}K`;
+}
+
+function formatPrivacyBadge(privacy?: string) {
+  switch (privacy) {
+    case "anonymized":
+      return "Anonymized";
+    case "private":
+      return "Private";
+    default:
+      return null;
+  }
+}
+
+function isUncensoredVeniceModel(model: VeniceModelListEntry) {
+  const searchable = [
+    model.id,
+    model.model_spec?.name ?? "",
+    ...(model.model_spec?.traits ?? []),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return searchable.includes("uncensored") || searchable.includes("heretic");
+}
+
+export function mapVeniceModelToCatalogOption(
+  model: VeniceModelListEntry
+): VeniceCatalogOption {
+  const badges = [
+    formatPrivacyBadge(model.model_spec?.privacy),
+    isUncensoredVeniceModel(model) ? "Uncensored" : null,
+    model.model_spec?.betaModel ? "Beta" : null,
+    model.model_spec?.capabilities?.supportsReasoning ? "Reasoning" : null,
+    model.model_spec?.capabilities?.supportsVision ? "Vision" : null,
+    model.model_spec?.capabilities?.optimizedForCode ? "Code" : null,
+    ...(model.model_spec?.traits ?? []).map(trait =>
+      trait
+        .split(/[_-]/g)
+        .filter(Boolean)
+        .map(part => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+        .join(" ")
+    ),
+  ].filter((badge): badge is string => Boolean(badge));
+
+  return {
+    providerSlug: "venice",
+    modelName: model.id,
+    displayName: model.model_spec?.name?.trim() || model.id,
+    providerLabel: "Venice",
+    modelId: model.id,
+    contextWindow: formatContextWindow(
+      model.model_spec?.availableContextTokens
+    ),
+    badges: Array.from(new Set(badges)),
+    supportsReasoning: Boolean(
+      model.model_spec?.capabilities?.supportsReasoning
+    ),
+    supportsVision: Boolean(model.model_spec?.capabilities?.supportsVision),
+    supportsCode: Boolean(model.model_spec?.capabilities?.optimizedForCode),
+    isDefaultCandidate:
+      model.id === env.veniceModel ||
+      (model.model_spec?.traits ?? []).includes("default"),
+  };
+}
+
 export class ModelGatewayService {
+  private readonly options: ModelGatewayServiceOptions;
+
+  constructor(options: ModelGatewayServiceOptions = {}) {
+    this.options = options;
+  }
+
+  private getFetchImplementation() {
+    return this.options.fetch ?? fetch;
+  }
+
+  private getCurrentTime() {
+    return this.options.now?.() ?? Date.now();
+  }
+
+  private getVeniceApiKey() {
+    return this.options.veniceApiKey ?? env.veniceApiKey;
+  }
+
   supportsProvider(providerSlug: string): providerSlug is LiveProviderSlug {
     return LIVE_PROVIDER_SLUGS.includes(providerSlug as LiveProviderSlug);
   }
 
-  getDefaultModel(providerSlug: LiveProviderSlug) {
-    switch (providerSlug) {
-      case "venice":
-        return env.veniceModel;
-      case "openai":
-      default:
-        return env.openaiModel;
+  getDefaultModel(_providerSlug: LiveProviderSlug = "venice") {
+    return env.veniceModel;
+  }
+
+  async listVeniceTextModels(): Promise<VeniceCatalogOption[]> {
+    const veniceApiKey = this.getVeniceApiKey();
+    if (!veniceApiKey) {
+      return getCuratedVeniceTextModels();
     }
+
+    const now = this.getCurrentTime();
+    if (
+      veniceModelCatalogCache?.apiKey === veniceApiKey &&
+      veniceModelCatalogCache.expiresAt > now
+    ) {
+      return veniceModelCatalogCache.models;
+    }
+
+    const fetchImpl = this.getFetchImplementation();
+    let models: VeniceCatalogOption[];
+
+    try {
+      const response = await fetchImpl(
+        "https://api.venice.ai/api/v1/models?type=text",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${veniceApiKey}`,
+          },
+          signal: buildVeniceSignal(),
+        }
+      );
+
+      if (!response.ok) {
+        await response.text();
+        return getCuratedVeniceTextModels();
+      }
+
+      const payload = (await response.json()) as {
+        data?: VeniceModelListEntry[];
+      };
+
+      models = (payload.data ?? [])
+        .filter(model => model.type === "text" && typeof model.id === "string")
+        .map(mapVeniceModelToCatalogOption)
+        .sort((left, right) =>
+          left.displayName.localeCompare(right.displayName)
+        );
+    } catch {
+      return getCuratedVeniceTextModels();
+    }
+
+    if (models.length === 0) {
+      return getCuratedVeniceTextModels();
+    }
+
+    veniceModelCatalogCache = {
+      apiKey: veniceApiKey,
+      expiresAt: now + VENICE_MODEL_CATALOG_CACHE_TTL_MS,
+      models,
+    };
+
+    return models;
   }
 
   async generateText(input: GenerateTextInput): Promise<GenerateTextOutput> {
-    if (!this.supportsProvider(input.providerSlug)) {
+    if (input.providerSlug !== "venice") {
       throw new Error(
-        `Provider ${input.providerSlug} is not connected yet. Only live providers can answer chat turns.`
+        "Venice is the only executable chat provider in this MVP stage."
       );
     }
 
-    if (input.providerSlug === "openai") {
-      if (!env.openaiApiKey) {
-        throw new Error(
-          "OPENAI_API_KEY is missing. Add it to app/.env before using OpenAI generation."
-        );
-      }
-
-      const providerBlock = getProviderOperationalBlock("openai");
-      if (providerBlock) {
-        throw new Error(providerBlock);
-      }
-
-      return this.generateWithOpenAI(input);
-    }
-
-    if (!env.veniceApiKey) {
+    if (!this.getVeniceApiKey()) {
       throw new Error(
         "VENICE_API_KEY is missing. Add it to app/.env before using Venice generation."
       );
@@ -347,28 +591,13 @@ export class ModelGatewayService {
   }
 
   async streamText(input: StreamTextInput): Promise<GenerateTextOutput> {
-    if (!this.supportsProvider(input.providerSlug)) {
+    if (input.providerSlug !== "venice") {
       throw new Error(
-        `Provider ${input.providerSlug} is not connected yet. Only live providers can answer chat turns.`
+        "Venice is the only executable chat provider in this MVP stage."
       );
     }
 
-    if (input.providerSlug === "openai") {
-      if (!env.openaiApiKey) {
-        throw new Error(
-          "OPENAI_API_KEY is missing. Add it to app/.env before using OpenAI generation."
-        );
-      }
-
-      const providerBlock = getProviderOperationalBlock("openai");
-      if (providerBlock) {
-        throw new Error(providerBlock);
-      }
-
-      return this.streamWithOpenAI(input);
-    }
-
-    if (!env.veniceApiKey) {
+    if (!this.getVeniceApiKey()) {
       throw new Error(
         "VENICE_API_KEY is missing. Add it to app/.env before using Venice generation."
       );
@@ -382,252 +611,44 @@ export class ModelGatewayService {
     return this.streamWithVenice(input);
   }
 
-  private async generateWithOpenAI(
-    input: GenerateTextInput
-  ): Promise<GenerateTextOutput> {
-    const model = input.modelName || this.getDefaultModel("openai");
-
-    let response: Response;
-
-    try {
-      response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.openaiApiKey}`,
-          "Content-Type": "application/json",
-        },
-        signal: buildOpenAISignal(input.signal),
-        body: JSON.stringify({
-          model,
-          instructions: input.systemPrompt || undefined,
-          input: input.messages.map(message => ({
-            role: message.role,
-            content: [
-              {
-                type: "input_text",
-                text: message.content,
-              },
-            ],
-          })),
-        }),
-      });
-    } catch (error) {
-      throw normalizeOpenAITimeoutError(error, "request");
-    }
-
-    if (!response.ok) {
-      const body = await response.text();
-      if (isQuotaExceededMessage(body)) {
-        rememberProviderOperationalBlock(
-          "openai",
-          "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
-        );
-      }
-      throw new Error(
-        `OpenAI request failed (${response.status}): ${body.slice(0, 500)}`
-      );
-    }
-
-    const payload = (await response.json()) as OpenAIResponsePayload;
-    const text = extractOpenAIResponseText(payload);
-
-    if (!text.trim()) {
-      throw new Error("OpenAI returned an empty output_text payload.");
-    }
-
-    clearProviderOperationalBlock("openai");
-
-    return {
-      text,
-      providerSlug: "openai",
-      modelName: model,
-      inputTokens: payload.usage?.input_tokens,
-      outputTokens: payload.usage?.output_tokens,
-    };
-  }
-
-  private async streamWithOpenAI(
-    input: StreamTextInput
-  ): Promise<GenerateTextOutput> {
-    const model = input.modelName || this.getDefaultModel("openai");
-
-    let response: Response;
-
-    try {
-      response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.openaiApiKey}`,
-          "Content-Type": "application/json",
-        },
-        signal: buildOpenAISignal(input.signal),
-        body: JSON.stringify({
-          model,
-          stream: true,
-          instructions: input.systemPrompt || undefined,
-          input: input.messages.map(message => ({
-            role: message.role,
-            content: [
-              {
-                type: "input_text",
-                text: message.content,
-              },
-            ],
-          })),
-        }),
-      });
-    } catch (error) {
-      throw normalizeOpenAITimeoutError(error, "stream");
-    }
-
-    if (!response.ok) {
-      const body = await response.text();
-      if (isQuotaExceededMessage(body)) {
-        rememberProviderOperationalBlock(
-          "openai",
-          "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
-        );
-      }
-      throw new Error(
-        `OpenAI streaming request failed (${response.status}): ${body.slice(0, 500)}`
-      );
-    }
-
-    if (!response.body) {
-      throw new Error("OpenAI streaming response did not include a readable body.");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let aggregatedText = "";
-    let completedResponse: OpenAIResponsePayload | null = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-
-      const parsed = extractOpenAIStreamEvents(buffer);
-      buffer = parsed.remainder;
-
-      for (const event of parsed.events) {
-        if (
-          event.type === "response.output_text.delta" &&
-          typeof event.delta === "string"
-        ) {
-          aggregatedText += event.delta;
-          await input.onTextDelta?.(event.delta);
-          continue;
-        }
-
-        if (event.type === "response.completed" && event.response) {
-          completedResponse = event.response;
-          if (!aggregatedText.trim()) {
-            aggregatedText = extractOpenAIResponseText(event.response);
-          }
-          continue;
-        }
-
-        if (event.type === "error") {
-          if (event.error?.message && isQuotaExceededMessage(event.error.message)) {
-            rememberProviderOperationalBlock(
-              "openai",
-              "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
-            );
-          }
-          throw new Error(
-            event.error?.message || "OpenAI streaming response returned an error event."
-          );
-        }
-      }
-
-      if (done) {
-        break;
-      }
-    }
-
-    if (buffer.trim()) {
-      const parsed = extractOpenAIStreamEvents(`${buffer}\n\n`);
-
-      for (const event of parsed.events) {
-        if (
-          event.type === "response.output_text.delta" &&
-          typeof event.delta === "string"
-        ) {
-          aggregatedText += event.delta;
-          await input.onTextDelta?.(event.delta);
-          continue;
-        }
-
-        if (event.type === "response.completed" && event.response) {
-          completedResponse = event.response;
-          if (!aggregatedText.trim()) {
-            aggregatedText = extractOpenAIResponseText(event.response);
-          }
-          continue;
-        }
-
-        if (event.type === "error") {
-          if (event.error?.message && isQuotaExceededMessage(event.error.message)) {
-            rememberProviderOperationalBlock(
-              "openai",
-              "OpenAI no pudo responder porque la cuota del proveedor esta agotada."
-            );
-          }
-          throw new Error(
-            event.error?.message || "OpenAI streaming response returned an error event."
-          );
-        }
-      }
-    }
-
-    if (!aggregatedText.trim() && completedResponse) {
-      aggregatedText = extractOpenAIResponseText(completedResponse);
-    }
-
-    if (!aggregatedText.trim()) {
-      throw new Error("OpenAI streaming response completed without text output.");
-    }
-
-    clearProviderOperationalBlock("openai");
-
-    return {
-      text: aggregatedText,
-      providerSlug: "openai",
-      modelName: model,
-      inputTokens: completedResponse?.usage?.input_tokens,
-      outputTokens: completedResponse?.usage?.output_tokens,
-    };
-  }
-
   private async generateWithVenice(
     input: GenerateTextInput
   ): Promise<GenerateTextOutput> {
     const model = input.modelName || this.getDefaultModel("venice");
+    const veniceApiKey = this.getVeniceApiKey();
+    const fetchImpl = this.getFetchImplementation();
 
     let response: Response;
 
     try {
-      response = await fetch("https://api.venice.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.veniceApiKey}`,
-          "Content-Type": "application/json",
-        },
-        signal: buildVeniceSignal(input.signal),
-        body: JSON.stringify({
-          model,
-          messages: buildChatCompletionMessages(input),
-        }),
-      });
+      response = await fetchImpl(
+        "https://api.venice.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${veniceApiKey}`,
+            "Content-Type": "application/json",
+          },
+          signal: buildVeniceSignal(input.signal),
+          body: JSON.stringify({
+            model,
+            messages: buildChatCompletionMessages(input),
+          }),
+        }
+      );
     } catch (error) {
       throw normalizeVeniceTimeoutError(error, "request");
     }
 
     if (!response.ok) {
       const body = await response.text();
+      rememberProviderOperationalBlock(
+        "venice",
+        buildVeniceOperationalBlockMessage(response.status, body),
+        this.getCurrentTime()
+      );
       throw new Error(
-        `Venice request failed (${response.status}): ${body.slice(0, 500)}`
+        buildSanitizedVeniceErrorMessage("request", response.status, body)
       );
     }
 
@@ -653,36 +674,52 @@ export class ModelGatewayService {
     input: StreamTextInput
   ): Promise<GenerateTextOutput> {
     const model = input.modelName || this.getDefaultModel("venice");
+    const veniceApiKey = this.getVeniceApiKey();
+    const fetchImpl = this.getFetchImplementation();
 
     let response: Response;
 
     try {
-      response = await fetch("https://api.venice.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.veniceApiKey}`,
-          "Content-Type": "application/json",
-        },
-        signal: buildVeniceSignal(input.signal),
-        body: JSON.stringify({
-          model,
-          stream: true,
-          messages: buildChatCompletionMessages(input),
-        }),
-      });
+      response = await fetchImpl(
+        "https://api.venice.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${veniceApiKey}`,
+            "Content-Type": "application/json",
+          },
+          signal: buildVeniceSignal(input.signal),
+          body: JSON.stringify({
+            model,
+            stream: true,
+            messages: buildChatCompletionMessages(input),
+          }),
+        }
+      );
     } catch (error) {
       throw normalizeVeniceTimeoutError(error, "stream");
     }
 
     if (!response.ok) {
       const body = await response.text();
+      rememberProviderOperationalBlock(
+        "venice",
+        buildVeniceOperationalBlockMessage(response.status, body),
+        this.getCurrentTime()
+      );
       throw new Error(
-        `Venice streaming request failed (${response.status}): ${body.slice(0, 500)}`
+        buildSanitizedVeniceErrorMessage(
+          "streaming request",
+          response.status,
+          body
+        )
       );
     }
 
     if (!response.body) {
-      throw new Error("Venice streaming response did not include a readable body.");
+      throw new Error(
+        "Venice streaming response did not include a readable body."
+      );
     }
 
     const reader = response.body.getReader();
@@ -706,7 +743,16 @@ export class ModelGatewayService {
         }
 
         if (event.error?.message) {
-          throw new Error(event.error.message);
+          if (isVeniceCapacityMessage(event.error.message)) {
+            rememberProviderOperationalBlock(
+              "venice",
+              "Venice no pudo responder porque el proveedor alcanzo su limite o capacidad actual.",
+              this.getCurrentTime()
+            );
+          }
+          throw new Error(
+            "Venice streaming response returned a provider error."
+          );
         }
       }
 
@@ -726,13 +772,24 @@ export class ModelGatewayService {
         }
 
         if (event.error?.message) {
-          throw new Error(event.error.message);
+          if (isVeniceCapacityMessage(event.error.message)) {
+            rememberProviderOperationalBlock(
+              "venice",
+              "Venice no pudo responder porque el proveedor alcanzo su limite o capacidad actual.",
+              this.getCurrentTime()
+            );
+          }
+          throw new Error(
+            "Venice streaming response returned a provider error."
+          );
         }
       }
     }
 
     if (!aggregatedText.trim()) {
-      throw new Error("Venice streaming response completed without text output.");
+      throw new Error(
+        "Venice streaming response completed without text output."
+      );
     }
 
     clearProviderOperationalBlock("venice");

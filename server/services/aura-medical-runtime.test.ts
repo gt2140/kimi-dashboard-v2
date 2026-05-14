@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAuraMedicalPromptAddendum,
+  buildAuraMedicalStageLabels,
   buildAuraMedicalToolPreferences,
   extractAuraMedicalEvidence,
 } from "./aura-medical-runtime.js";
@@ -67,5 +68,27 @@ describe("aura medical runtime helpers", () => {
         url: "https://clinicaltrials.gov/study/NCT01234567",
       }),
     ]);
+  });
+
+  it("personalizes stage labels for vault-heavy questions", () => {
+    const labels = buildAuraMedicalStageLabels({
+      medicalMode: "personal-health",
+      latestUserMessage: "Check my vault PDF and summarize my bloodwork",
+      requestedProviderSlug: "venice",
+      requestedModelName: "zai-org-glm-5-1",
+    });
+
+    expect(labels.memory).toBe("Reviewing your vault context and recent history");
+    expect(labels.draft).toBe("Drafting the answer with Venice");
+  });
+
+  it("personalizes stage labels for research questions", () => {
+    const labels = buildAuraMedicalStageLabels({
+      medicalMode: "research",
+      latestUserMessage: "Find evidence and PubMed on ApoB targets",
+    });
+
+    expect(labels.memory).toBe("Reviewing prior context and research focus");
+    expect(labels.tools).toBe("Collecting research evidence");
   });
 });

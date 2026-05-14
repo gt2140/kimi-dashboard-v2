@@ -97,21 +97,57 @@ export function buildAuraMedicalToolPreferences(input: {
 
 export function buildAuraMedicalStageLabels(input: {
   medicalMode: AuraMedicalMode;
+  latestUserMessage?: string;
+  requestedProviderSlug?: string | null;
+  requestedModelName?: string | null;
 }) {
+  const normalizedMessage = input.latestUserMessage?.toLowerCase() ?? "";
+  const isVaultFocused =
+    normalizedMessage.includes("vault") ||
+    normalizedMessage.includes("pdf") ||
+    normalizedMessage.includes("bloodwork") ||
+    normalizedMessage.includes("lab") ||
+    normalizedMessage.includes("study") ||
+    normalizedMessage.includes("upload");
+  const isEvidenceFocused =
+    normalizedMessage.includes("evidence") ||
+    normalizedMessage.includes("pubmed") ||
+    normalizedMessage.includes("trial") ||
+    normalizedMessage.includes("research") ||
+    normalizedMessage.includes("paper");
+  const providerLabel =
+    input.requestedProviderSlug === "venice"
+      ? "Venice"
+      : input.requestedProviderSlug === "openai"
+        ? "OpenAI"
+        : "Aura";
+
   if (input.medicalMode === "research") {
     return {
-      memory: "Loading Aura memory and evidence context",
+      memory: isEvidenceFocused
+        ? "Reviewing prior context and research focus"
+        : "Reviewing context and evidence goals",
       analyze: "Checking evidence quality and retrieval plan",
       tools: "Collecting research evidence",
-      draft: "Writing the evidence synthesis",
+      draft:
+        providerLabel === "Aura"
+          ? "Writing the evidence synthesis"
+          : `Writing the evidence synthesis with ${providerLabel}`,
     };
   }
 
   return {
-    memory: "Loading Aura memory and health context",
-    analyze: "Reviewing biomarkers, notes, and next steps",
+    memory: isVaultFocused
+      ? "Reviewing your vault context and recent history"
+      : "Reviewing your context and recent history",
+    analyze: isVaultFocused
+      ? "Checking biomarkers, notes, and uploaded context"
+      : "Reviewing the question and next best context",
     tools: "Collecting supporting evidence",
-    draft: "Writing the health summary",
+    draft:
+      providerLabel === "Aura"
+        ? "Writing the health summary"
+        : `Drafting the answer with ${providerLabel}`,
   };
 }
 

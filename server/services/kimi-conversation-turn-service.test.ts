@@ -921,7 +921,7 @@ describe("KimiConversationTurnService", () => {
       executeToolCalls: vi.fn(),
     };
 
-    const modelGateway = {
+    const aiProviderGateway = {
       generateText: vi.fn().mockResolvedValue({
         text: "Venice handled this turn directly.",
         providerSlug: "venice",
@@ -953,8 +953,9 @@ describe("KimiConversationTurnService", () => {
       kimiClient,
       toolExecutor,
       contextLoader,
-      modelGateway,
+      aiProviderGateway,
     });
+    const signal = new AbortController().signal;
 
     const result = await service.executeTurn({
       input: {
@@ -970,12 +971,16 @@ describe("KimiConversationTurnService", () => {
       } as any,
       userId: 77,
       streamPrimary: false,
+      signal,
     });
 
-    expect(modelGateway.generateText).toHaveBeenCalledWith(
+    expect(aiProviderGateway.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
-        providerSlug: "venice",
-        modelName: "zai-org-glm-5-1",
+        modelSelection: {
+          providerSlug: "venice",
+          modelName: "zai-org-glm-5-1",
+        },
+        signal,
       }),
     );
     expect(kimiClient.createChatCompletion).not.toHaveBeenCalled();

@@ -11,9 +11,13 @@ import {
 import { logServerDebug, logServerError } from "../lib/debug.js";
 import { getDb } from "../queries/connection.js";
 import { ConversationRepository } from "../repositories/conversation-repository.js";
-import { type ChatTurnStage, generatePrimaryReply } from "../services/chat-reply-builder.js";
+import {
+  type ChatTurnStage,
+  generatePrimaryReply,
+} from "../services/chat-reply-builder.js";
 import { syncConversationParticipants } from "../services/conversation-participants.js";
-import { auraMedicalConversationTurnService } from "../services/kimi-runtime.js";
+import { auraChatConversationTurnRuntime } from "../services/kimi-runtime.js";
+import { ModelGatewayService } from "../services/model-gateway.js";
 import { createRouter, authedQuery } from "./middleware.js";
 
 export { generatePrimaryReply };
@@ -22,7 +26,7 @@ export const chatSendMessageInputSchema = z.object({
   conversationId: z.number(),
   content: z.string().min(1),
   agentId: z.string(),
-  calledAgentIds: z.array(z.string()).default([]),
+  calledAgentIds: z.array(z.string()).optional(),
   runtimeVersion: z.enum(["classic", "aura-medical-v1"]).optional(),
   medicalMode: z.enum(["personal-health", "research"]).optional(),
   policyLevel: z.enum(["interpretive-on-request"]).optional(),
@@ -62,13 +66,14 @@ const chatMetadataSchema = z
           title: z.string(),
           url: z.string(),
           citation: z.string().optional(),
-        }),
+        })
       )
       .optional(),
   })
   .optional();
 
 const conversationRepository = new ConversationRepository();
+const modelGatewayService = new ModelGatewayService();
 
 function parseMetadata(metadata: string | null) {
   if (!metadata) {
@@ -93,18 +98,40 @@ export async function sendChatMessage(params: {
     route: string;
   };
 }) {
-  return auraMedicalConversationTurnService.executeTurn({
-    ...params,
-    input: {
-      ...params.input,
-      runtimeVersion: "aura-medical-v1",
-      medicalMode: params.input.medicalMode ?? "personal-health",
-      policyLevel: params.input.policyLevel ?? "interpretive-on-request",
-    },
+  return auraChatConversationTurnRuntime.executeTurn({
+    userId: params.userId,
+    conversationId: params.input.conversationId,
+    content: params.input.content,
+    agentId: params.input.agentId,
+    requestedModelName: params.input.requestedModelName,
+    stream: Boolean(params.streamPrimary),
+    onStage: params.onStage,
+    onTextDelta: params.onTextDelta,
   });
 }
 
 export const chatRouter = createRouter({
+  listAvailableModels: authedQuery.query(async () => {
+    const veniceModels = await modelGatewayService.listVeniceTextModels();
+
+    return [
+      {
+        providerSlug: "auto" as const,
+        modelName: null,
+        displayName: "Auto",
+        providerLabel: "Aura",
+        modelId: null,
+        contextWindow: "Default",
+        badges: ["Recommended"],
+        supportsReasoning: true,
+        supportsVision: false,
+        supportsCode: false,
+        isDefaultCandidate: true,
+      },
+      ...veniceModels,
+    ];
+  }),
+
   listConversations: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
     try {
@@ -164,10 +191,11 @@ export const chatRouter = createRouter({
     .input(z.object({ id: z.number() }))
     .query(async ({ input, ctx }) => {
       const db = getDb();
-      const conversation = await conversationRepository.requireConversationOwner(
-        input.id,
-        ctx.user.id
-      );
+      const conversation =
+        await conversationRepository.requireConversationOwner(
+          input.id,
+          ctx.user.id
+        );
 
       const rows = await db
         .select()
@@ -271,7 +299,10 @@ export const chatRouter = createRouter({
   deleteConversation: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
-      await conversationRepository.requireConversationOwner(input.id, ctx.user.id);
+      await conversationRepository.requireConversationOwner(
+        input.id,
+        ctx.user.id
+      );
       const db = getDb();
 
       await db.transaction(async tx => {
@@ -282,7 +313,9 @@ export const chatRouter = createRouter({
         await tx
           .delete(messageContextBlocks)
           .where(eq(messageContextBlocks.conversationId, input.id));
-        await tx.delete(agentRuns).where(eq(agentRuns.conversationId, input.id));
+        await tx
+          .delete(agentRuns)
+          .where(eq(agentRuns.conversationId, input.id));
         await tx.delete(conversations).where(eq(conversations.id, input.id));
       });
       logServerDebug("chat.deleteConversation", {

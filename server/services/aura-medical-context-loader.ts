@@ -47,6 +47,7 @@ export async function loadAuraMedicalTurnContext(params: {
     promptCacheKey: `aura-medical:v1:${runtimeOptions.medicalMode}:conversation:${params.conversationId}`,
     stageLabels: buildAuraMedicalStageLabels({
       medicalMode: runtimeOptions.medicalMode,
+      latestUserMessage: params.latestUserMessage,
     }),
     runtimeMetadata: buildAuraMedicalMetadata({
       runtimeOptions,

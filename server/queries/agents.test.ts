@@ -9,7 +9,7 @@ describe("isConversationalCatalogReadyFromCounts", () => {
   it("returns true when all required seed groups are already present", () => {
     expect(
       isConversationalCatalogReadyFromCounts({
-        providerCount: 4,
+        providerCount: 5,
         agentCount: AGENTS.length,
         promptCount: AGENTS.length,
       })
@@ -27,7 +27,7 @@ describe("isConversationalCatalogReadyFromCounts", () => {
 
     expect(
       isConversationalCatalogReadyFromCounts({
-        providerCount: 4,
+        providerCount: 5,
         agentCount: AGENTS.length - 1,
         promptCount: AGENTS.length,
       })
@@ -35,7 +35,7 @@ describe("isConversationalCatalogReadyFromCounts", () => {
 
     expect(
       isConversationalCatalogReadyFromCounts({
-        providerCount: 4,
+        providerCount: 5,
         agentCount: AGENTS.length,
         promptCount: AGENTS.length - 1,
       })

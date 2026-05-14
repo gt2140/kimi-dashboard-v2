@@ -1,3 +1,5 @@
+import type { ChatAssistantMetadata } from "@contracts/chat-metadata";
+
 export interface Agent {
   id: string;
   name: string;
@@ -30,7 +32,7 @@ export interface Message {
   content: string;
   agentId: string;
   timestamp: Date;
-  metadata?: {
+  metadata?: ChatAssistantMetadata & {
     sources?: string[];
     confidence?: number;
     relatedVaultFiles?: string[];

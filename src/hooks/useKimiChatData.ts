@@ -20,6 +20,7 @@ import {
   readChatStreamResponseMetadata,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
+import { resolveRuntimeModelSelection } from "@/lib/model-catalog";
 import { mapConversationSummary, mapMessage } from "@/hooks/kimi-chat-mappers";
 import { createPersistedCompletionReader } from "@/hooks/kimi-chat-recovery";
 
@@ -158,6 +159,10 @@ export function useKimiChatData() {
     let firstEventAt: number | null = null;
     let firstDeltaAt: number | null = null;
     const requestStartedAt = Date.now();
+    const modelSelection = resolveRuntimeModelSelection(
+      selectedProviderSlug,
+      selectedModelName,
+    );
     const streamWatchdog = createChatStreamWatchdog(
       CHAT_STREAM_INACTIVITY_TIMEOUT_MS,
       "Kimi chat stream",
@@ -227,10 +232,7 @@ export function useKimiChatData() {
               runtimeVersion,
               medicalMode,
               policyLevel,
-              requestedProviderSlug:
-                selectedProviderSlug === "auto" ? undefined : selectedProviderSlug,
-              requestedModelName:
-                selectedProviderSlug === "auto" ? undefined : selectedModelName,
+              ...modelSelection,
             }),
           },
         );

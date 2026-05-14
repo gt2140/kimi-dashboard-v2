@@ -47,7 +47,7 @@ export const env = {
   ownerUnionId: process.env.OWNER_UNION_ID ?? "",
   openaiApiKey: process.env.OPENAI_API_KEY?.trim() || "",
   openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
-  veniceApiKey: process.env.VENICE_API_KEY?.trim() || "",
+  veniceApiKey: requiredOneOf("VENICE_API_KEY", "VENICE_INFERENCE_KEY"),
   veniceModel: process.env.VENICE_MODEL?.trim() || "zai-org-glm-5-1",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || "",
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",

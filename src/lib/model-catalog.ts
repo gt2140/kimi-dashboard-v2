@@ -1,4 +1,9 @@
-export type ChatModelProviderSlug = "auto" | "openai" | "venice";
+import type { ChatModelProviderSlug as ContractChatModelProviderSlug } from "@contracts/chat-models";
+
+export type ChatModelProviderSlug = Exclude<
+  ContractChatModelProviderSlug,
+  "kimi"
+>;
 
 export type CuratedTextModelOption = {
   providerSlug: ChatModelProviderSlug;
@@ -21,8 +26,8 @@ export const CURATED_TEXT_MODELS: CuratedTextModelOption[] = [
     displayName: "Auto",
     providerLabel: "Aura",
     modelId: null,
-    contextWindow: "Default",
-    badges: ["Recommended"],
+    contextWindow: "Venice default",
+    badges: ["Recommended", "Venice default"],
     supportsReasoning: true,
     supportsVision: false,
     supportsCode: false,
@@ -147,13 +152,16 @@ export const CURATED_TEXT_MODELS: CuratedTextModelOption[] = [
   },
 ];
 
-export function filterCuratedTextModels(query: string) {
+export function filterCuratedTextModels(
+  query: string,
+  models: CuratedTextModelOption[] = CURATED_TEXT_MODELS,
+) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
-    return CURATED_TEXT_MODELS;
+    return models;
   }
 
-  return CURATED_TEXT_MODELS.filter(model =>
+  return models.filter(model =>
     [
       model.displayName,
       model.providerLabel,
@@ -167,16 +175,50 @@ export function filterCuratedTextModels(query: string) {
 export function getSelectedModelOption(
   providerSlug: ChatModelProviderSlug,
   modelName: string | null,
+  models: CuratedTextModelOption[] = CURATED_TEXT_MODELS,
 ) {
   if (providerSlug === "auto") {
-    return CURATED_TEXT_MODELS[0];
+    return models[0] ?? CURATED_TEXT_MODELS[0];
   }
 
-  return (
-    CURATED_TEXT_MODELS.find(
-      model =>
-        model.providerSlug === providerSlug &&
-        model.modelName === modelName,
-    ) ?? CURATED_TEXT_MODELS[0]
+  const selectedModel = models.find(
+    model =>
+      model.providerSlug === providerSlug &&
+      model.modelName === modelName,
   );
+
+  if (selectedModel) {
+    return selectedModel;
+  }
+
+  return {
+    providerSlug,
+    modelName,
+    displayName: modelName ?? "Unknown model",
+    providerLabel: providerSlug === "venice" ? "Venice" : "Provider",
+    modelId: modelName,
+    contextWindow: "Unknown",
+    badges: ["Unavailable"],
+    supportsReasoning: false,
+    supportsVision: false,
+    supportsCode: false,
+    isDefaultCandidate: false,
+  } satisfies CuratedTextModelOption;
+}
+
+export function resolveRuntimeModelSelection(
+  providerSlug: ChatModelProviderSlug,
+  modelName: string | null,
+) {
+  if (providerSlug === "auto") {
+    return {
+      requestedProviderSlug: "venice" as const,
+      requestedModelName: undefined,
+    };
+  }
+
+  return {
+    requestedProviderSlug: providerSlug,
+    requestedModelName: modelName ?? undefined,
+  };
 }

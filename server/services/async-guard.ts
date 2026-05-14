@@ -3,6 +3,10 @@ type TimeoutOptions = {
   timeoutMs: number;
 };
 
+type AbortableTimeoutOptions = TimeoutOptions & {
+  signal?: AbortSignal | null;
+};
+
 export async function withTimeout<T>(
   promise: Promise<T>,
   options: TimeoutOptions
@@ -29,14 +33,44 @@ export async function withTimeout<T>(
 
 export async function withAbortableTimeout<T>(
   task: (signal: AbortSignal) => Promise<T>,
-  options: TimeoutOptions
+  options: AbortableTimeoutOptions
 ) {
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let parentAbortListener: (() => void) | undefined;
 
   try {
+    if (options.signal) {
+      parentAbortListener = () => {
+        controller.abort(
+          options.signal?.reason ??
+            new Error(`${options.label} was aborted before completion.`)
+        );
+      };
+
+      if (options.signal.aborted) {
+        parentAbortListener();
+      } else {
+        options.signal.addEventListener("abort", parentAbortListener, {
+          once: true,
+        });
+      }
+    }
+
     return await Promise.race([
       task(controller.signal),
+      new Promise<T>((_, reject) => {
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            reject(
+              controller.signal.reason ??
+                new Error(`${options.label} was aborted before completion.`)
+            );
+          },
+          { once: true }
+        );
+      }),
       new Promise<T>((_, reject) => {
         timeoutId = setTimeout(() => {
           controller.abort(
@@ -51,6 +85,10 @@ export async function withAbortableTimeout<T>(
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId);
+    }
+
+    if (options.signal && parentAbortListener) {
+      options.signal.removeEventListener("abort", parentAbortListener);
     }
   }
 }

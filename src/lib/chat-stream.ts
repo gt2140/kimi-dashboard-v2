@@ -1,68 +1,10 @@
-type ChatStreamAckEvent = {
-  type: "ack";
-  traceId: string;
-};
-
-type ChatStreamStageEvent = {
-  type: "stage";
-  stageId: string;
-  label: string;
-};
-
-type ChatStreamTextDeltaEvent = {
-  type: "text-delta";
-  delta: string;
-};
-
-type ChatStreamMessageCompleteEvent = {
-  type: "message-complete";
-  message: {
-    id: string;
-    role: "assistant";
-    content: string;
-    agentId: string;
-    createdAt: string;
-    metadata?: Record<string, unknown>;
-  };
-};
-
-type ChatStreamErrorEvent = {
-  type: "error";
-  message: string;
-  category?:
-    | "auth"
-    | "transport"
-    | "backend-timeout"
-    | "provider-timeout"
-    | "provider-error"
-    | "db-error"
-    | "context-error";
-  traceId?: string;
-};
-
-type ChatStreamWatchdog = {
-  signal: AbortSignal;
-  touch: () => void;
-  abort: (reason?: string) => void;
-  cancel: () => void;
-};
-
-type ChatStreamWatchdogOptions = {
-  initialTimeoutMs?: number;
-};
-
-type ChatStreamResponseMetadata = {
-  status: number;
-  contentType: string | null;
-  traceId: string | null;
-};
-
-type ChatStreamEvent =
-  | ChatStreamAckEvent
-  | ChatStreamStageEvent
-  | ChatStreamTextDeltaEvent
-  | ChatStreamMessageCompleteEvent
-  | ChatStreamErrorEvent;
+import type {
+  ChatStreamErrorEvent,
+  ChatStreamEvent,
+  ChatStreamResponseMetadata,
+  ChatStreamWatchdog,
+  ChatStreamWatchdogOptions,
+} from "@contracts/chat-stream";
 
 function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!value || typeof value !== "object") {
@@ -259,5 +201,6 @@ export type {
   ChatStreamStageEvent,
   ChatStreamTextDeltaEvent,
   ChatStreamResponseMetadata,
+  ChatStreamWatchdog,
   ChatStreamWatchdogOptions,
-};
+} from "@contracts/chat-stream";

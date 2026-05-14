@@ -6,13 +6,14 @@ This stabilized MVP supports:
 - Google login through Supabase
 - backend session synchronization with an app cookie
 - persisted user conversations
-- unified Kimi/Aura Medical chat turns through `KimiConversationTurnService`
+- Venice-first generalist chat turns through `VeniceFirstConversationTurnRuntime`
 - persisted vault files, extracted text, chunk indexing, and per-file ingestion traces
 
 Out of scope for the stable MVP:
 
 - predictions / token economy
 - persistent per-agent settings
+- Kimi/OpenAI chat execution, medical runtime branching, and multi-agent orchestration
 
 ## Local development
 
@@ -43,10 +44,9 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your_supabase_publishable_anon_key
 DATABASE_URL=postgresql://postgres:YOUR_DB_PASSWORD@aws-0-region.pooler.supabase.com:6543/postgres?sslmode=require
 OWNER_UNION_ID=supabase:YOUR_SUPABASE_AUTH_USER_ID
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-DEEPSEEK_API_KEY=
-KIMI_API_KEY=
+VENICE_API_KEY=
+VENICE_INFERENCE_KEY=
+VENICE_MODEL=zai-org-glm-5-1
 ```
 
 Notes:
@@ -56,7 +56,9 @@ Notes:
 - Prefer the current Supabase pooled Postgres connection string for local development if the direct `db.<project>.supabase.co` host is unreliable.
 - `DATABASE_URL` must be a real connection string, not a placeholder.
 - `OWNER_UNION_ID` is optional unless you want your own account promoted to `admin`.
-- Model provider API keys are optional until we connect a real model gateway.
+- Venice is the only required model provider for the Stage 1 chat backend.
+- For Venice, prefer `VENICE_API_KEY`. The backend also accepts `VENICE_INFERENCE_KEY` as an alias for inference keys created in Venice.
+- Legacy provider variables may remain in local environments for older code paths, but they are not required for the primary chat runtime.
 
 ## Vercel deployment
 
@@ -69,9 +71,32 @@ SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your_supabase_publishable_anon_key
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your_supabase_publishable_anon_key
+VENICE_API_KEY=your_venice_api_key
+VENICE_INFERENCE_KEY=your_venice_inference_key
+VENICE_MODEL=zai-org-glm-5-1
 ```
 
 Also add each deployed `https://<your-domain>/auth/callback` URL to the Supabase Google OAuth redirect allow-list.
+
+For Venice on Vercel:
+
+- Set either `VENICE_API_KEY` or `VENICE_INFERENCE_KEY`. The backend accepts both, but only one is needed.
+- Keep Venice secrets only in local `app/.env` and Vercel project environment variables. Do not commit them to GitHub.
+- `VENICE_MODEL` is optional. If you omit it, the backend defaults to `zai-org-glm-5-1`.
+
+## GitHub and deploy checklist
+
+Before pushing the repo:
+
+- Keep `.env` out of GitHub.
+- Confirm `app/.env.example` has placeholders only.
+- Make sure local `npm run check` and focused chat tests are green.
+
+Before promoting the Vercel project:
+
+- Verify Supabase callback URLs include the deployed domain.
+- Add the Venice secret to both `Preview` and `Production`.
+- Run one authenticated `POST /api/chat/stream` turn with an explicit `requestedModelName` after deploy.
 
 ## Supabase setup
 

@@ -44,4 +44,15 @@ describe("server env resolution", () => {
     expect(env.supabaseUrl).toBe("https://example.supabase.co");
     expect(env.supabaseAnonKey).toBe("public-anon-key");
   });
+
+  it("accepts Venice inference keys as an alias for the Venice API key", async () => {
+    process.env = {
+      NODE_ENV: "production",
+      VENICE_INFERENCE_KEY: "venice-inference-test-key",
+    };
+
+    const { env } = await loadEnvModule();
+
+    expect(env.veniceApiKey).toBe("venice-inference-test-key");
+  });
 });

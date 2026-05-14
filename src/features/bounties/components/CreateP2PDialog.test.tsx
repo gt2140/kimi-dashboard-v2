@@ -24,12 +24,12 @@ describe("CreateP2PDialog", () => {
       createElement(CreateP2PDialog, {
         open: true,
         onOpenChange: vi.fn(),
-      }),
+      })
     );
 
     expect(markup).toContain("Create P2P mining");
-    expect(markup).toContain("Draft preview");
+    expect(markup).toContain("Draft snapshot");
     expect(markup).toContain("Save draft");
-    expect(markup).toContain("This version is local only");
+    expect(markup).toContain("Local draft only");
   });
 });

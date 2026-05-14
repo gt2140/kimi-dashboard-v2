@@ -33,11 +33,14 @@ import {
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { useKimiChatData } from "@/hooks/useKimiChatData";
+import { trpc, useBackendSessionState } from "@/providers/trpc";
 import { useChatStore } from "@/hooks/useStore";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { isSupabaseConfigured } from "@/lib/supabase";
 import { type PendingTurnStage } from "@/lib/chat-experience";
 import { buildKimiChatTimeline } from "@/lib/kimi-chat-timeline";
 import {
+  CURATED_TEXT_MODELS,
   filterCuratedTextModels,
   getSelectedModelOption,
   type CuratedTextModelOption,
@@ -95,6 +98,28 @@ function getVisibleModelLabel(metadata?: KimiMetadata) {
   return metadata.modelName;
 }
 
+function getModelBadgeClassName(badge: string) {
+  const normalizedBadge = badge.toLowerCase();
+
+  if (normalizedBadge.includes("uncensored")) {
+    return "border-amber-400/35 bg-amber-500/12 text-amber-100";
+  }
+
+  if (normalizedBadge.includes("private")) {
+    return "border-emerald-400/35 bg-emerald-500/12 text-emerald-100";
+  }
+
+  if (normalizedBadge.includes("venice")) {
+    return "border-sky-400/35 bg-sky-500/12 text-sky-100";
+  }
+
+  if (normalizedBadge.includes("unavailable")) {
+    return "border-rose-400/35 bg-rose-500/12 text-rose-100";
+  }
+
+  return "border-border/25 bg-card/45 text-muted-foreground/65";
+}
+
 export default function KimiChat() {
   const activeAgentId = useChatStore(state => state.activeAgentId);
   const calledAgentIds = useChatStore(state => state.calledAgentIds);
@@ -128,18 +153,30 @@ export default function KimiChat() {
   const [modelSearch, setModelSearch] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const backendSession = useBackendSessionState();
+  const availableModelsQuery = trpc.chat.listAvailableModels.useQuery(undefined, {
+    enabled: !isSupabaseConfigured || backendSession.backendReady,
+    retry: false,
+  });
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
   const availableHelpers = AGENTS.filter(
     agent => agent.id !== activeAgentId && !calledAgentIds.includes(agent.id),
   );
 
+  const availableModels = availableModelsQuery.data ?? CURATED_TEXT_MODELS;
+
   const selectedModelOption = useMemo(
-    () => getSelectedModelOption(selectedProviderSlug, selectedModelName),
-    [selectedModelName, selectedProviderSlug],
+    () =>
+      getSelectedModelOption(
+        selectedProviderSlug,
+        selectedModelName,
+        availableModels,
+      ),
+    [availableModels, selectedModelName, selectedProviderSlug],
   );
   const filteredModels = useMemo(
-    () => filterCuratedTextModels(modelSearch),
-    [modelSearch],
+    () => filterCuratedTextModels(modelSearch, availableModels),
+    [availableModels, modelSearch],
   );
   const displayedMessages = useMemo(
     () =>
@@ -498,6 +535,11 @@ export default function KimiChat() {
                 {error}
               </p>
             )}
+            {!error && availableModelsQuery.error && (
+              <p className="mx-auto mt-2 max-w-3xl text-[12px] text-muted-foreground/70">
+                Venice model list is unavailable right now, so the chat is using the local fallback catalog.
+              </p>
+            )}
           </div>
         </section>
       </div>
@@ -560,7 +602,7 @@ export default function KimiChat() {
           <DrawerHeader className="text-left">
             <DrawerTitle>Models</DrawerTitle>
             <DrawerDescription>
-              Text-only curated models for lean chat turns.
+              Available Venice models plus Aura auto mode.
             </DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-5">
@@ -608,7 +650,10 @@ export default function KimiChat() {
                     {option.badges.map(badge => (
                       <span
                         key={`${option.displayName}-${badge}`}
-                        className="rounded-full border border-border/25 bg-card/45 px-2 py-0.5 text-[10px] text-muted-foreground/65"
+                        className={cn(
+                          "rounded-full border px-2 py-0.5 text-[10px]",
+                          getModelBadgeClassName(badge),
+                        )}
                       >
                         {badge}
                       </span>
@@ -961,7 +1006,10 @@ function DesktopModelMenu({
                       {option.badges.map(badge => (
                         <span
                           key={`${option.displayName}-${badge}`}
-                          className="rounded-full border border-white/8 bg-white/[0.04] px-2 py-0.5 text-[10px] text-muted-foreground/60"
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[10px]",
+                            getModelBadgeClassName(badge),
+                          )}
                         >
                           {badge}
                         </span>

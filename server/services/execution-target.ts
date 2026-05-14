@@ -42,7 +42,10 @@ export async function resolveExecutionTarget(params: {
         providerSlug: modelProviders.slug,
       })
       .from(modelEndpoints)
-      .innerJoin(modelProviders, eq(modelEndpoints.providerId, modelProviders.id))
+      .innerJoin(
+        modelProviders,
+        eq(modelEndpoints.providerId, modelProviders.id)
+      )
       .where(eq(modelEndpoints.id, params.modelId))
       .limit(1);
 
@@ -51,7 +54,7 @@ export async function resolveExecutionTarget(params: {
       requestedProviderSlug ?? endpointRows[0]?.providerSlug ?? null;
   }
 
-  const defaultProviderSlug = "openai";
+  const defaultProviderSlug = "venice";
   const defaultModelName = gateway.getDefaultModel(defaultProviderSlug);
   const requestedOrDefaultProviderSlug =
     requestedProviderSlug ?? defaultProviderSlug;
@@ -76,7 +79,8 @@ export async function resolveExecutionTarget(params: {
     requestedModelName,
     providerSlug: requestedOrDefaultProviderSlug,
     modelName:
-      requestedModelName ?? gateway.getDefaultModel(requestedOrDefaultProviderSlug),
+      requestedModelName ??
+      gateway.getDefaultModel(requestedOrDefaultProviderSlug),
     executionNotes,
     usedFallback: false,
   } satisfies ResolvedExecutionTarget;

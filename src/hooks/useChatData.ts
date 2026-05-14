@@ -15,46 +15,9 @@ import {
   readChatStreamResponseMetadata,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
-import type { ChatSession, Message } from "@/types";
+import { mapConversationSummary, mapMessage } from "@/hooks/kimi-chat-mappers";
 
 const CHAT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
-
-function mapConversationSummary(item: {
-  id: number;
-  agentId: string;
-  title: string | null;
-  createdAt: Date | string;
-  updatedAt: Date | string;
-  calledAgentIds?: string[];
-}): ChatSession {
-  return {
-    id: String(item.id),
-    agentId: item.agentId,
-    calledAgentIds: item.calledAgentIds ?? [],
-    title: item.title || "New conversation",
-    messages: [],
-    createdAt: new Date(item.createdAt),
-    updatedAt: new Date(item.updatedAt),
-  };
-}
-
-function mapMessage(item: {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-  agentId: string | null;
-  createdAt: Date | string;
-  metadata?: Message["metadata"];
-}): Message {
-  return {
-    id: String(item.id),
-    role: item.role,
-    content: item.content,
-    agentId: item.agentId ?? "generalist",
-    timestamp: new Date(item.createdAt),
-    metadata: item.metadata,
-  };
-}
 
 function isUnauthorizedError(error: unknown) {
   if (!error || typeof error !== "object") {
@@ -68,6 +31,11 @@ function isUnauthorizedError(error: unknown) {
   );
 }
 
+/**
+ * @deprecated The live chat surface uses `useKimiChatData` while the backend
+ * migration consolidates on one Aura chat runtime. Keep this hook only as a
+ * compatibility path until callers are confirmed external or removed.
+ */
 export function useChatData() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();

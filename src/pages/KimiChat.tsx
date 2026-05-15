@@ -40,6 +40,11 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { listVaultDocuments } from "@/lib/vault-client";
 import { buildChatContextStatus } from "@/lib/chat-context-status";
+import {
+  getChatComposerShellClassName,
+  getChatScrollAreaClassName,
+  getChatShellClassName,
+} from "@/lib/mobile-chat-layout";
 import { type PendingTurnStage } from "@/lib/chat-experience";
 import { buildKimiChatTimeline } from "@/lib/kimi-chat-timeline";
 import {
@@ -313,7 +318,7 @@ export default function KimiChat() {
 
   return (
     <>
-      <div className="mx-auto flex h-[calc(100dvh-3rem)] w-full max-w-[1380px] min-w-0 flex-col overflow-hidden px-0 pb-0 pt-0 sm:h-[calc(100dvh-3.5rem)] sm:px-4 sm:pb-4 sm:pt-2">
+      <div className={getChatShellClassName()}>
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-border/35 bg-card/15 shadow-[0_20px_80px_rgba(0,0,0,0.22)] sm:rounded-[30px] sm:border">
           <div className="flex items-center justify-between gap-3 border-b border-border/20 px-3 py-2.5 sm:px-5 sm:py-3">
             <div className="min-w-0">
@@ -353,7 +358,7 @@ export default function KimiChat() {
             modelLabel={selectedModelOption.displayName}
           />
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
+          <div className={getChatScrollAreaClassName()}>
             {isConversationLoading ? (
               <LoadingState label="Loading conversation" />
             ) : displayedMessages.length === 0 && !pendingUserMessage ? (
@@ -383,9 +388,9 @@ export default function KimiChat() {
             )}
           </div>
 
-          <div className="border-t border-border/20 bg-background/85 px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur sm:px-4 sm:py-3">
-            <div className="mx-auto max-w-4xl rounded-[22px] border border-border/30 bg-card/55 p-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.18)] sm:rounded-[28px] sm:p-3">
-              <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-1 sm:mb-3 sm:flex-wrap sm:overflow-visible sm:pb-0">
+          <div className={getChatComposerShellClassName()}>
+            <div className="mx-auto max-w-4xl rounded-[20px] border border-border/25 bg-card/45 p-2 shadow-[0_8px_28px_rgba(0,0,0,0.14)] sm:rounded-[28px] sm:border-border/30 sm:bg-card/55 sm:p-3">
+              <div className="mb-1.5 flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:mb-3 sm:flex-wrap sm:overflow-visible sm:pb-0">
                 <ModeChip
                   active={chatViewMode === "general"}
                   onClick={() => {
@@ -452,8 +457,8 @@ export default function KimiChat() {
                     : "Ask anything..."
                   }
                   className={cn(
-                    "max-h-[132px] resize-none border-0 bg-transparent p-0 text-[14px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0 sm:max-h-[144px]",
-                    input.trim().length === 0 ? "min-h-[44px] pr-12 sm:min-h-[56px]" : "min-h-[44px] sm:min-h-[56px]",
+                    "max-h-[112px] resize-none border-0 bg-transparent p-0 text-[14px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0 sm:max-h-[144px]",
+                    input.trim().length === 0 ? "min-h-[38px] pr-12 sm:min-h-[56px]" : "min-h-[38px] sm:min-h-[56px]",
                   )}
                 />
                 {input.trim().length === 0 && (
@@ -468,7 +473,7 @@ export default function KimiChat() {
                 )}
               </div>
 
-              <div className="mt-2 flex items-center justify-between gap-2 sm:mt-3 sm:gap-3">
+              <div className="mt-1.5 flex items-center justify-between gap-2 sm:mt-3 sm:gap-3">
                 <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
                   {isMobile ? (
                     <ComposerPill onClick={() => setShowHelperPicker(true)}>
@@ -545,7 +550,7 @@ export default function KimiChat() {
 
                 <Button
                   size="icon"
-                  className="h-11 w-11 shrink-0 rounded-full"
+                  className="h-10 w-10 shrink-0 rounded-full sm:h-11 sm:w-11"
                   disabled={!input.trim() || isSending}
                   onClick={() => {
                     void handleSend();

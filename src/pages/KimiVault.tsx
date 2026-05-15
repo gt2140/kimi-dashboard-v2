@@ -360,7 +360,28 @@ export default function KimiVault() {
             />
           </div>
 
-          <div className="mt-4 overflow-hidden rounded-2xl border border-border/25">
+          <div className="mt-4 space-y-2 md:hidden">
+            {filteredDocuments.map(document => (
+              <VaultMobileDocumentCard
+                key={document.id}
+                document={document}
+                onPreview={() => setPreviewDocument(document)}
+                onReprocess={() => {
+                  void reprocessMutation.mutateAsync(document.id);
+                }}
+                onDelete={() => {
+                  void deleteMutation.mutateAsync(document.id);
+                }}
+              />
+            ))}
+            {filteredDocuments.length === 0 && (
+              <div className="rounded-2xl border border-border/25 bg-background/35 px-4 py-8 text-center text-[12px] text-muted-foreground/35">
+                {documentsQuery.isLoading ? "Loading vault..." : "No documents found."}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 hidden overflow-hidden rounded-2xl border border-border/25 md:block">
             <div className="grid grid-cols-[minmax(0,1fr)_120px_140px_100px] gap-3 border-b border-border/20 bg-background/40 px-4 py-2 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/35">
               <span>Document</span>
               <span>Status</span>
@@ -728,6 +749,87 @@ function StatusPill({ status }: { status: VaultDocument["status"] }) {
       <Loader2 className="h-3 w-3 animate-spin" />
       {status}
     </span>
+  );
+}
+
+function VaultMobileDocumentCard({
+  document,
+  onPreview,
+  onReprocess,
+  onDelete,
+}: {
+  document: VaultDocument;
+  onPreview: () => void;
+  onReprocess: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-border/25 bg-background/35 p-3">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-card/45 text-muted-foreground/35">
+          {getFileIcon(document.filename)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-medium text-foreground">
+            {document.filename}
+          </p>
+          <p className="mt-1 text-[10px] text-muted-foreground/38">
+            {document.category} | {formatBytes(document.sizeBytes)}
+          </p>
+          {document.errorMessage && (
+            <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-destructive/75">
+              {document.errorMessage}
+            </p>
+          )}
+        </div>
+        <StatusPill status={document.status} />
+      </div>
+
+      <div className="mt-3 rounded-xl border border-border/15 bg-card/20 px-3 py-2">
+        <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground/32">
+          Pipeline
+        </p>
+        <p className="mt-1 truncate text-[12px] text-muted-foreground/58">
+          {document.latestRun?.currentStage ?? "uploaded"}
+        </p>
+        {document.categoryMismatch && document.categorySuggested && (
+          <p className="mt-2 text-[11px] text-amber-200/75">
+            Suggested category: {document.categorySuggested}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 rounded-full border-border/25 bg-card/25 text-[11px]"
+          onClick={onPreview}
+        >
+          <FileSearch className="mr-1.5 h-3.5 w-3.5" />
+          View
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 rounded-full border-border/25 bg-card/25 text-[11px]"
+          disabled={document.status !== "failed"}
+          onClick={onReprocess}
+        >
+          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+          Retry
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-9 rounded-full text-[11px] text-destructive/75 hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+          Delete
+        </Button>
+      </div>
+    </div>
   );
 }
 

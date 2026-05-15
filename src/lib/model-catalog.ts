@@ -19,6 +19,8 @@ export type CuratedTextModelOption = {
   isDefaultCandidate: boolean;
 };
 
+const MODEL_PICKER_LIMIT = 20;
+
 export const CURATED_TEXT_MODELS: CuratedTextModelOption[] = [
   {
     providerSlug: "auto",
@@ -243,13 +245,13 @@ export const CURATED_TEXT_MODELS: CuratedTextModelOption[] = [
   },
   {
     providerSlug: "venice",
-    modelName: "aion-labs-aion-2-0",
-    displayName: "Aion 2.0",
+    modelName: "llama-3.3-70b",
+    displayName: "Llama 3.3 70B",
     providerLabel: "Venice",
-    modelId: "aion-labs-aion-2-0",
+    modelId: "llama-3.3-70b",
     contextWindow: "Unknown",
-    badges: ["Anon", "Uncensored", "Creative"],
-    supportsReasoning: false,
+    badges: ["Private", "Fast"],
+    supportsReasoning: true,
     supportsVision: false,
     supportsCode: false,
     isDefaultCandidate: false,
@@ -281,6 +283,23 @@ export const CURATED_TEXT_MODELS: CuratedTextModelOption[] = [
     isDefaultCandidate: false,
   },
 ];
+
+function getModelOptionKey(model: Pick<CuratedTextModelOption, "providerSlug" | "modelName">) {
+  return `${model.providerSlug}:${model.modelName ?? "auto"}`;
+}
+
+export function limitDisplayableTextModels(
+  models: CuratedTextModelOption[] = CURATED_TEXT_MODELS,
+) {
+  const suppliedByKey = new Map(
+    models.map(model => [getModelOptionKey(model), model]),
+  );
+
+  return CURATED_TEXT_MODELS.map(curatedModel => {
+    const suppliedModel = suppliedByKey.get(getModelOptionKey(curatedModel));
+    return suppliedModel ?? curatedModel;
+  }).slice(0, MODEL_PICKER_LIMIT);
+}
 
 export function filterCuratedTextModels(
   query: string,

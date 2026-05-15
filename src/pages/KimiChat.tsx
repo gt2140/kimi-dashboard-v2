@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -37,12 +38,15 @@ import { trpc, useBackendSessionState } from "@/providers/trpc";
 import { useChatStore } from "@/hooks/useStore";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { isSupabaseConfigured } from "@/lib/supabase";
+import { listVaultDocuments } from "@/lib/vault-client";
+import { buildChatContextStatus } from "@/lib/chat-context-status";
 import { type PendingTurnStage } from "@/lib/chat-experience";
 import { buildKimiChatTimeline } from "@/lib/kimi-chat-timeline";
 import {
   CURATED_TEXT_MODELS,
   filterCuratedTextModels,
   getSelectedModelOption,
+  limitDisplayableTextModels,
   type CuratedTextModelOption,
 } from "@/lib/model-catalog";
 import {
@@ -129,6 +133,7 @@ export default function KimiChat() {
   const setMedicalMode = useChatStore(state => state.setMedicalMode);
   const setChatViewMode = useChatStore(state => state.setChatViewMode);
   const setSelectedModel = useChatStore(state => state.setSelectedModel);
+  const resetSelectedModel = useChatStore(state => state.resetSelectedModel);
   const callAgent = useChatStore(state => state.callAgent);
   const removeCalledAgent = useChatStore(state => state.removeCalledAgent);
   const clearChat = useChatStore(state => state.clearChat);
@@ -158,12 +163,29 @@ export default function KimiChat() {
     enabled: !isSupabaseConfigured || backendSession.backendReady,
     retry: false,
   });
+  const vaultDocumentsQuery = useQuery({
+    queryKey: ["vault-documents"],
+    queryFn: listVaultDocuments,
+    enabled: !isSupabaseConfigured || backendSession.backendReady,
+    retry: false,
+  });
   const activeAgent = AGENTS.find(agent => agent.id === activeAgentId) ?? AGENTS[0];
   const availableHelpers = AGENTS.filter(
     agent => agent.id !== activeAgentId && !calledAgentIds.includes(agent.id),
   );
+  const readyVaultCount = (vaultDocumentsQuery.data ?? []).filter(
+    document => document.status === "ready",
+  ).length;
+  const contextStatus = buildChatContextStatus({
+    vaultLoading: vaultDocumentsQuery.isLoading,
+    vaultReadyCount: readyVaultCount,
+    vaultTotalCount: vaultDocumentsQuery.data?.length ?? 0,
+    helperCount: calledAgentIds.length,
+  });
 
-  const availableModels = availableModelsQuery.data ?? CURATED_TEXT_MODELS;
+  const availableModels = limitDisplayableTextModels(
+    availableModelsQuery.data ?? CURATED_TEXT_MODELS,
+  );
 
   const selectedModelOption = useMemo(
     () =>
@@ -291,9 +313,9 @@ export default function KimiChat() {
 
   return (
     <>
-      <div className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-[1380px] min-w-0 flex-col overflow-hidden px-3 pb-3 pt-2 sm:px-4 sm:pb-4">
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-border/40 bg-card/15 shadow-[0_20px_80px_rgba(0,0,0,0.22)]">
-          <div className="flex items-center justify-between border-b border-border/20 px-4 py-3 sm:px-5">
+      <div className="mx-auto flex h-[calc(100dvh-3rem)] w-full max-w-[1380px] min-w-0 flex-col overflow-hidden px-0 pb-0 pt-0 sm:h-[calc(100dvh-3.5rem)] sm:px-4 sm:pb-4 sm:pt-2">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-border/35 bg-card/15 shadow-[0_20px_80px_rgba(0,0,0,0.22)] sm:rounded-[30px] sm:border">
+          <div className="flex items-center justify-between gap-3 border-b border-border/20 px-3 py-2.5 sm:px-5 sm:py-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <span className={cn("text-amber-200/80", activeAgent.color)}>
@@ -302,7 +324,7 @@ export default function KimiChat() {
                 <span className="truncate">{activeAgent.name}</span>
               </div>
               <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground/55">
-                <span>
+                <span className="shrink-0">
                   {chatViewMode === "research"
                     ? "Research mode"
                     : chatViewMode === "health"
@@ -310,21 +332,28 @@ export default function KimiChat() {
                       : "General mode"}
                 </span>
                 <span className="h-1 w-1 rounded-full bg-muted-foreground/30" />
-                <span>{selectedModelOption.displayName}</span>
+                <span className="truncate">{selectedModelOption.displayName}</span>
               </div>
             </div>
             <button
+              type="button"
               onClick={() => {
                 clearChat();
                 void startNewChat(activeAgentId);
               }}
-              className="rounded-full border border-border/35 bg-background/40 px-3 py-1.5 text-[11px] text-muted-foreground/65 transition-colors hover:text-foreground"
+              className="shrink-0 rounded-full border border-border/35 bg-background/40 px-3 py-1.5 text-[11px] text-muted-foreground/65 transition-colors hover:text-foreground"
             >
               New chat
             </button>
           </div>
+          <ChatContextStrip
+            vaultLabel={contextStatus.vaultLabel}
+            vaultDetail={contextStatus.vaultDetail}
+            helperLabel={contextStatus.helperLabel}
+            modelLabel={selectedModelOption.displayName}
+          />
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
             {isConversationLoading ? (
               <LoadingState label="Loading conversation" />
             ) : displayedMessages.length === 0 && !pendingUserMessage ? (
@@ -354,9 +383,9 @@ export default function KimiChat() {
             )}
           </div>
 
-          <div className="border-t border-border/20 bg-background/75 px-3 py-3 backdrop-blur sm:px-4">
-            <div className="mx-auto max-w-4xl rounded-[28px] border border-border/30 bg-card/55 p-3 shadow-[0_10px_40px_rgba(0,0,0,0.18)]">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="border-t border-border/20 bg-background/85 px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur sm:px-4 sm:py-3">
+            <div className="mx-auto max-w-4xl rounded-[22px] border border-border/30 bg-card/55 p-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.18)] sm:rounded-[28px] sm:p-3">
+              <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-1 sm:mb-3 sm:flex-wrap sm:overflow-visible sm:pb-0">
                 <ModeChip
                   active={chatViewMode === "general"}
                   onClick={() => {
@@ -392,6 +421,7 @@ export default function KimiChat() {
 
                   return (
                     <button
+                      type="button"
                       key={id}
                       onClick={() => removeCalledAgent(id)}
                       className="inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-400/10 px-2.5 py-1 text-[10px] text-amber-100/85"
@@ -419,11 +449,11 @@ export default function KimiChat() {
                       ? "Ask for evidence, trials, PubMed, or document-backed analysis..."
                       : chatViewMode === "health"
                         ? "Ask about biomarkers, symptoms, supplements, or vault context..."
-                    : "Ask about biomarkers, supplements, symptoms, or vault context..."
+                    : "Ask anything..."
                   }
                   className={cn(
-                    "max-h-[144px] resize-none border-0 bg-transparent p-0 text-[14px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0",
-                    input.trim().length === 0 ? "min-h-[64px] pr-12 md:min-h-[56px]" : "min-h-[56px]",
+                    "max-h-[132px] resize-none border-0 bg-transparent p-0 text-[14px] leading-relaxed placeholder:text-muted-foreground/30 focus-visible:ring-0 sm:max-h-[144px]",
+                    input.trim().length === 0 ? "min-h-[44px] pr-12 sm:min-h-[56px]" : "min-h-[44px] sm:min-h-[56px]",
                   )}
                 />
                 {input.trim().length === 0 && (
@@ -438,7 +468,7 @@ export default function KimiChat() {
                 )}
               </div>
 
-              <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="mt-2 flex items-center justify-between gap-2 sm:mt-3 sm:gap-3">
                 <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
                   {isMobile ? (
                     <ComposerPill onClick={() => setShowHelperPicker(true)}>
@@ -476,7 +506,7 @@ export default function KimiChat() {
                   {isMobile ? (
                     <ComposerPill onClick={() => setShowModelPicker(true)}>
                       <Sparkles className="h-3.5 w-3.5" />
-                      <span className="truncate">{selectedModelOption.displayName}</span>
+                      <span className="max-w-[9.5rem] truncate">{selectedModelOption.displayName}</span>
                       <ChevronDown className="h-3.5 w-3.5" />
                     </ComposerPill>
                   ) : (
@@ -531,9 +561,14 @@ export default function KimiChat() {
             </div>
 
             {error && (
-              <p className="mx-auto mt-2 max-w-3xl text-[12px] text-destructive/80">
-                {error}
-              </p>
+              <ChatErrorCard
+                message={error}
+                canRetry={Boolean(input.trim()) && !isSending}
+                onRetry={() => {
+                  void handleSend();
+                }}
+                onUseAuto={() => resetSelectedModel()}
+              />
             )}
             {!error && availableModelsQuery.error && (
               <p className="mx-auto mt-2 max-w-3xl text-[12px] text-muted-foreground/70">
@@ -714,6 +749,50 @@ function LoadingState({ label }: { label: string }) {
   );
 }
 
+function ChatContextStrip({
+  vaultLabel,
+  vaultDetail,
+  helperLabel,
+  modelLabel,
+}: {
+  vaultLabel: string;
+  vaultDetail: string;
+  helperLabel: string;
+  modelLabel: string;
+}) {
+  return (
+    <div className="flex min-h-10 items-center gap-2 overflow-x-auto border-b border-border/15 bg-background/35 px-3 py-2 sm:px-5">
+      <ContextPill icon={<DatabaseZap className="h-3.5 w-3.5" />}>
+        <span className="font-medium text-foreground/75">{vaultLabel}</span>
+        <span className="text-muted-foreground/48">{vaultDetail}</span>
+      </ContextPill>
+      <ContextPill icon={<Brain className="h-3.5 w-3.5" />}>
+        {helperLabel}
+      </ContextPill>
+      <ContextPill icon={<Sparkles className="h-3.5 w-3.5" />}>
+        <span className="max-w-[9rem] truncate sm:max-w-[14rem]">
+          {modelLabel}
+        </span>
+      </ContextPill>
+    </div>
+  );
+}
+
+function ContextPill({
+  icon,
+  children,
+}: {
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border/22 bg-card/30 px-2.5 text-[10px] text-muted-foreground/58">
+      {icon}
+      {children}
+    </span>
+  );
+}
+
 function KimiMessageBubble({
   message,
   isStreaming = false,
@@ -846,6 +925,43 @@ function MetaPill({
   );
 }
 
+function ChatErrorCard({
+  message,
+  canRetry,
+  onRetry,
+  onUseAuto,
+}: {
+  message: string;
+  canRetry: boolean;
+  onRetry: () => void;
+  onUseAuto: () => void;
+}) {
+  return (
+    <div className="mx-auto mt-2 flex max-w-4xl flex-col gap-2 rounded-2xl border border-destructive/25 bg-destructive/10 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+      <p className="min-w-0 text-[12px] leading-relaxed text-destructive/85">
+        {message}
+      </p>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          disabled={!canRetry}
+          onClick={onRetry}
+          className="inline-flex h-8 items-center rounded-full border border-destructive/25 bg-background/35 px-3 text-[11px] text-destructive/85 transition-colors hover:bg-background/55 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          onClick={onUseAuto}
+          className="inline-flex h-8 items-center rounded-full border border-border/25 bg-background/35 px-3 text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground"
+        >
+          Use Auto
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ModeChip({
   active,
   onClick,
@@ -857,9 +973,10 @@ function ModeChip({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1 text-[10px] transition-colors",
+        "shrink-0 rounded-full border px-3 py-1 text-[10px] transition-colors",
         active
           ? "border-sky-400/30 bg-sky-500/12 text-sky-100"
           : "border-border/30 bg-background/40 text-muted-foreground/55 hover:text-foreground",
@@ -881,7 +998,7 @@ function ComposerPill({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-background/50 px-3 text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground"
+      className="inline-flex h-9 max-w-[13rem] shrink-0 items-center gap-2 rounded-full border border-border/30 bg-background/50 px-3 text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground sm:h-10"
     >
       {children}
     </button>

@@ -78,6 +78,7 @@ describe("VeniceFirstConversationTurnRuntime", () => {
     const runtime = new VeniceFirstConversationTurnRuntime({
       conversationRepository,
       loadRecentMessages,
+      contextLoader: vi.fn().mockRejectedValue(new Error("Context unavailable in unit test.")),
       modelGateway: {
         streamText,
         generateText,

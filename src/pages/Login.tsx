@@ -1,20 +1,60 @@
-import { ArrowLeft, Sparkles } from "lucide-react";
+import { Apple, ArrowLeft, Github, Sparkles, WalletCards } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Button } from "@/components/ui/button";
 import { getAuthCallbackUrl } from "@/const";
 import { useAuth } from "@/hooks/useAuth";
+import {
+  signInWithEthereumWallet,
+  signInWithProvider,
+  type LoginProvider,
+} from "@/lib/auth-login";
 import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug, logClientError } from "@/lib/debug";
-import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
-import { clearSupabaseBrowserState } from "@/lib/supabase-session";
+import { isSupabaseConfigured } from "@/lib/supabase";
 
 const AURA_LANDING_URL = "https://landing-aura-v1-3hah.vercel.app";
+
+type AuthProviderOption = {
+  id: LoginProvider | "web3";
+  label: string;
+  detail: string;
+  icon: React.ReactNode;
+};
+
+const AUTH_PROVIDERS: AuthProviderOption[] = [
+  {
+    id: "google",
+    label: "Continue with Google",
+    detail: "Fastest path back into your workspace.",
+    icon: <Sparkles className="h-4 w-4" />,
+  },
+  {
+    id: "apple",
+    label: "Continue with Apple",
+    detail: "Private OAuth sign-in through Supabase.",
+    icon: <Apple className="h-4 w-4" />,
+  },
+  {
+    id: "github",
+    label: "Continue with GitHub",
+    detail: "Useful for technical and builder accounts.",
+    icon: <Github className="h-4 w-4" />,
+  },
+  {
+    id: "web3",
+    label: "Web3 Wallet",
+    detail: "Ethereum wallet signature, no password.",
+    icon: <WalletCards className="h-4 w-4" />,
+  },
+];
 
 export default function Login() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading, error } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
+  const [pendingProvider, setPendingProvider] = useState<
+    AuthProviderOption["id"] | null
+  >(null);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
@@ -25,36 +65,32 @@ export default function Login() {
     }
   }, [isAuthenticated, isLoading, navigate]);
 
-  async function handleGoogleLogin() {
+  async function handleLogin(provider: AuthProviderOption["id"]) {
     try {
       setAuthError(null);
+      setPendingProvider(provider);
       const callbackUrl = getAuthCallbackUrl();
       logClientDebug("login.click", {
+        provider,
         redirectTo: callbackUrl,
         origin: window.location.origin,
       });
 
-      const { data } = await getSupabaseBrowserClient().auth.getSession();
-      logClientDebug("login.current-session", {
-        hasSession: Boolean(data.session),
-        userId: data.session?.user?.id ?? null,
-      });
-
-      if (data.session) {
+      const result =
+        provider === "web3"
+          ? await signInWithEthereumWallet()
+          : await signInWithProvider(provider);
+      if (result === "existing-session") {
         navigate("/dashboard", { replace: true });
-        return;
       }
-
-      clearSupabaseBrowserState();
-      await getSupabaseBrowserClient().auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: callbackUrl },
-      });
     } catch (error) {
       logClientError("login.failed", error, {
+        provider,
         redirectTo: getAuthCallbackUrl(),
       });
       setAuthError(formatRuntimeError(error, "Auth"));
+    } finally {
+      setPendingProvider(null);
     }
   }
 
@@ -79,34 +115,58 @@ export default function Login() {
         </div>
 
         <div className="flex flex-1 items-center justify-center">
-          <section className="w-full max-w-[27rem] rounded-[32px] border border-black/[0.06] bg-white/86 px-7 py-9 shadow-[0_24px_80px_rgba(0,0,0,0.08)] backdrop-blur-xl sm:px-9 sm:py-10">
+          <section className="w-full max-w-[29rem] rounded-[28px] border border-black/[0.06] bg-white/86 px-5 py-7 shadow-[0_24px_80px_rgba(0,0,0,0.08)] backdrop-blur-xl sm:rounded-[32px] sm:px-9 sm:py-10">
             <div className="mx-auto flex max-w-sm flex-col items-center text-center">
-              <div className="mb-4 inline-flex rounded-full border border-black/8 bg-[#faf8f2] px-4 py-1.5 text-[11px] font-medium tracking-[0.24em] text-black/48">
+              <div className="mb-3 inline-flex rounded-full border border-black/8 bg-[#faf8f2] px-4 py-1.5 text-[10px] font-medium tracking-[0.22em] text-black/48 sm:mb-4 sm:text-[11px]">
                 DASHBOARD ACCESS
               </div>
-              <Sparkles className="mb-4 h-5 w-5 text-black/25" />
-              <h1 className="text-[2.35rem] font-semibold tracking-[-0.06em] text-[#151311]">
+              <Sparkles className="mb-3 h-5 w-5 text-black/25 sm:mb-4" />
+              <h1 className="text-[2rem] font-semibold tracking-[-0.04em] text-[#151311] sm:text-[2.35rem]">
                 Welcome to Aura
               </h1>
-              <p className="mt-3 max-w-[22rem] text-[0.98rem] leading-6 text-black/58">
-                Sign in with Google to open your dashboard, restore your saved conversations, and continue where you left off.
+              <p className="mt-2 max-w-[22rem] text-[0.92rem] leading-6 text-black/58 sm:mt-3 sm:text-[0.98rem]">
+                Open your AI workspace with Supabase Auth, then continue your chats, models, agents, and vault context.
               </p>
             </div>
 
-            <div className="mx-auto mt-8 max-w-sm">
-              <Button
-                size="lg"
-                className="h-12 w-full rounded-[14px] bg-[#151311] text-[0.98rem] font-medium text-white hover:bg-black"
-                disabled={!isSupabaseConfigured || Boolean(error)}
-                onClick={() => {
-                  void handleGoogleLogin();
-                }}
-              >
-                {isLoading ? "Checking session..." : "Continue with Google"}
-              </Button>
+            <div className="mx-auto mt-6 max-w-sm sm:mt-8">
+              <div className="grid gap-2.5">
+                {AUTH_PROVIDERS.map(provider => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    className="group flex min-h-14 w-full items-center gap-3 rounded-[16px] border border-black/[0.08] bg-white/76 px-3.5 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-black/15 hover:bg-white disabled:pointer-events-none disabled:opacity-55"
+                    disabled={
+                      !isSupabaseConfigured ||
+                      Boolean(error) ||
+                      isLoading ||
+                      pendingProvider !== null
+                    }
+                    onClick={() => {
+                      void handleLogin(provider.id);
+                    }}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/[0.08] bg-[#faf8f2] text-black/55 transition-colors group-hover:text-black">
+                      {pendingProvider === provider.id ? (
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-black/20 border-t-black" />
+                      ) : (
+                        provider.icon
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-medium text-black/82">
+                        {provider.label}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[11px] text-black/45">
+                        {provider.detail}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
 
               <p className="mt-4 text-center text-[12px] leading-5 text-black/44">
-                Secure access powered by Google and your existing Aura account.
+                Apple, GitHub, and Web3 require their providers to be enabled in Supabase.
               </p>
 
               {authError && (
@@ -130,7 +190,7 @@ export default function Login() {
                 authError == null &&
                 !error && (
                   <p className="mt-5 text-center text-[12px] leading-5 text-black/46">
-                    If Google sign-in does not open, return to the Aura home page and try again from Enter App.
+                    If a provider does not open, check that it is enabled in Supabase and try again.
                   </p>
                 )}
             </div>

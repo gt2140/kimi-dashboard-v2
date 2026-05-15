@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CURATED_TEXT_MODELS,
   filterCuratedTextModels,
+  limitDisplayableTextModels,
   getSelectedModelOption,
   resolveRuntimeModelSelection,
 } from "./model-catalog";
@@ -9,6 +10,7 @@ import {
 describe("model catalog", () => {
   it("keeps the curated text-only list available for the chat picker", () => {
     expect(CURATED_TEXT_MODELS[0]?.displayName).toBe("Auto");
+    expect(CURATED_TEXT_MODELS).toHaveLength(20);
     expect(CURATED_TEXT_MODELS.map(model => model.modelName)).toEqual(
       expect.arrayContaining([
         null,
@@ -22,6 +24,41 @@ describe("model catalog", () => {
         "grok-4-20",
       ]),
     );
+  });
+
+  it("keeps exactly two uncensored options in the visible picker catalog", () => {
+    const uncensoredModels = CURATED_TEXT_MODELS.filter(model =>
+      model.badges.some(badge => badge.toLowerCase().includes("uncensored")),
+    );
+
+    expect(uncensoredModels.map(model => model.modelName)).toEqual([
+      "gemma-4-uncensored",
+      "venice-uncensored-1-2",
+    ]);
+  });
+
+  it("limits live provider catalogs to the curated twenty-model picker set", () => {
+    const liveModels = [
+      ...CURATED_TEXT_MODELS,
+      {
+        providerSlug: "venice" as const,
+        modelName: "extra-live-model",
+        displayName: "Extra Live Model",
+        providerLabel: "Venice",
+        modelId: "extra-live-model",
+        contextWindow: "64K",
+        badges: ["Private"],
+        supportsReasoning: false,
+        supportsVision: false,
+        supportsCode: false,
+        isDefaultCandidate: false,
+      },
+    ];
+
+    expect(limitDisplayableTextModels(liveModels)).toHaveLength(20);
+    expect(
+      limitDisplayableTextModels(liveModels).map(model => model.modelName),
+    ).not.toContain("extra-live-model");
   });
 
   it("filters the curated list by visible name and model id", () => {

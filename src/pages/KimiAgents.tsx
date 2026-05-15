@@ -106,8 +106,8 @@ export default function KimiAgents() {
             Favorite agents, memory, and tools
           </h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-5 text-muted-foreground/45">
-            Keep your core agents close, then fine-tune how each one uses
-            memory, web search, and vault context.
+            Keep daily agents one tap away, then tune memory, web, and vault
+            context only when it matters.
           </p>
         </div>
 
@@ -149,10 +149,10 @@ export default function KimiAgents() {
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground/35">
-                Pinned and favorites
+                My agents
               </p>
               <p className="mt-1 text-[12px] text-muted-foreground/42">
-                Your primary workspace layer for fast switching.
+                Pinned profiles ready for fast mobile switching.
               </p>
             </div>
             <span className="rounded-full border border-border/25 bg-background/30 px-2.5 py-1 text-[10px] text-muted-foreground/45">
@@ -250,7 +250,7 @@ function FeaturedAgentCard({
   onSettings,
 }: AgentCardProps) {
   return (
-    <div className="rounded-[28px] border border-border/30 bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.015))] p-4 shadow-[0_18px_48px_rgba(0,0,0,0.16)]">
+    <div className="rounded-2xl border border-border/30 bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.015))] p-3.5 shadow-[0_18px_48px_rgba(0,0,0,0.16)] sm:rounded-[28px] sm:p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -259,10 +259,10 @@ function FeaturedAgentCard({
               {agent.slug.replaceAll("-", " ")}
             </p>
           </div>
-          <h2 className="mt-2 text-[18px] font-medium tracking-tight text-foreground">
+          <h2 className="mt-2 text-[16px] font-medium tracking-tight text-foreground sm:text-[18px]">
             {agent.name}
           </h2>
-          <p className="mt-1 line-clamp-2 max-w-[32rem] text-[12px] leading-5 text-muted-foreground/50">
+          <p className="mt-1 line-clamp-1 max-w-[32rem] text-[12px] leading-5 text-muted-foreground/50 sm:line-clamp-2">
             {agent.description}
           </p>
         </div>
@@ -273,7 +273,7 @@ function FeaturedAgentCard({
         />
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-1.5">
+      <div className="mt-3 flex flex-wrap gap-1.5 sm:mt-4">
         <MetaPill icon={<Brain className="h-3 w-3" />}>
           Thinking {setting?.kimiThinkingMode ?? "enabled"}
         </MetaPill>
@@ -285,8 +285,8 @@ function FeaturedAgentCard({
         </MetaPill>
       </div>
 
-      <div className="mt-4 flex flex-col gap-3 border-t border-border/20 pt-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
+      <div className="mt-3 flex flex-col gap-3 border-t border-border/20 pt-3 sm:mt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="hidden min-w-0 sm:block">
           <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/32">
             Tools
           </p>
@@ -325,14 +325,14 @@ function CatalogAgentCard({
   onSettings,
 }: AgentCardProps) {
   return (
-    <div className="rounded-3xl border border-border/25 bg-card/16 p-3.5">
+    <div className="rounded-2xl border border-border/25 bg-card/16 p-3 sm:rounded-3xl sm:p-3.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/30">
             {agent.slug.replaceAll("-", " ")}
           </p>
           <h3 className="mt-1.5 text-[15px] font-medium text-foreground">{agent.name}</h3>
-          <p className="mt-1 line-clamp-1 text-[11px] leading-5 text-muted-foreground/44">
+          <p className="mt-1 hidden line-clamp-1 text-[11px] leading-5 text-muted-foreground/44 sm:block">
             {agent.description}
           </p>
         </div>
@@ -343,7 +343,7 @@ function CatalogAgentCard({
         />
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-3">
         <MetaPill icon={<Brain className="h-3 w-3" />}>
           {setting?.kimiThinkingMode ?? "enabled"}
         </MetaPill>
@@ -356,7 +356,7 @@ function CatalogAgentCard({
       </div>
 
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[11px] text-muted-foreground/44">{describeTools(tools)}</p>
+        <p className="hidden text-[11px] text-muted-foreground/44 sm:block">{describeTools(tools)}</p>
         <div className="flex w-full gap-1.5 sm:w-auto">
           <button
             onClick={onChat}

@@ -102,7 +102,7 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     normalized.includes("failed to fetch") ||
     normalized.includes("timed out")
   ) {
-    return `Network error: check the local API connection and try again.${traceSuffix}`;
+    return `Connection error: Aura could not reach the chat API. Check your connection and retry.${traceSuffix}`;
   }
 
   if (

@@ -315,12 +315,15 @@ const CURATED_VENICE_TEXT_MODELS: VeniceModelListEntry[] = [
     },
   },
   {
-    id: "aion-labs-aion-2-0",
+    id: "llama-3.3-70b",
     type: "text",
     model_spec: {
-      name: "Aion 2.0",
-      privacy: "anonymized",
-      traits: ["uncensored", "creative"],
+      name: "Llama 3.3 70B",
+      privacy: "private",
+      traits: ["fast"],
+      capabilities: {
+        supportsReasoning: true,
+      },
     },
   },
   {

@@ -26,6 +26,12 @@ describe("formatRuntimeError", () => {
     ).toBe("Network error: the request was interrupted. Try again.");
   });
 
+  it("formats fetch failures without referring to a local API connection", () => {
+    expect(formatRuntimeError(new Error("Failed to fetch"), "Aura chat")).toBe(
+      "Connection error: Aura could not reach the chat API. Check your connection and retry."
+    );
+  });
+
   it("normalizes auth provider timeouts into retry guidance", () => {
     expect(
       formatRuntimeError(

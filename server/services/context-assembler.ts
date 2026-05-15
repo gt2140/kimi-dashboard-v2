@@ -44,6 +44,14 @@ export async function assembleConversationContext(params: {
     category: string;
     status: string;
   }> = [];
+  let vaultContext: {
+    clinicalProfileSummary: string | null;
+    selectedVaultChunks: Array<{
+      documentId: number;
+      chunkIndex: number;
+      content: string;
+    }>;
+  } | null = null;
 
   if (allowedCategories.length > 0) {
     try {
@@ -59,8 +67,13 @@ export async function assembleConversationContext(params: {
         category: document.category,
         status: "ready",
       }));
+      vaultContext = {
+        clinicalProfileSummary: context.clinicalProfileSummary,
+        selectedVaultChunks: context.selectedVaultChunks,
+      };
     } catch (error) {
       accessibleFiles = [];
+      vaultContext = null;
     }
   }
 
@@ -68,6 +81,7 @@ export async function assembleConversationContext(params: {
     conversationSummary: conversationRow?.summary ?? null,
     recentMessages: recentMessages.reverse(),
     accessibleFiles,
+    vaultContext,
     resolvedAgentProfile: profile.resolved,
     latestUserMessage: params.latestUserMessage,
   };

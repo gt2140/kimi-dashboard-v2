@@ -7,6 +7,7 @@ import {
   isRecoverableChatStreamStatus,
   parseChatStreamChunk,
   readChatStreamResponseMetadata,
+  shouldAttemptChatRecovery,
 } from "./chat-stream";
 
 describe("chat-stream", () => {
@@ -65,6 +66,12 @@ describe("chat-stream", () => {
     expect(isRecoverableChatStreamStatus(500)).toBe(true);
     expect(isRecoverableChatStreamStatus(503)).toBe(true);
     expect(isRecoverableChatStreamStatus(401)).toBe(false);
+  });
+
+  it("does not attempt persisted recovery for provider errors", () => {
+    expect(shouldAttemptChatRecovery(503, "provider-error")).toBe(false);
+    expect(shouldAttemptChatRecovery(503, "backend-timeout")).toBe(true);
+    expect(shouldAttemptChatRecovery(401, "auth")).toBe(false);
   });
 
   it("marks timeout, abort, and network stream failures as recoverable", () => {

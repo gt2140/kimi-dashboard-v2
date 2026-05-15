@@ -12,7 +12,7 @@ import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import {
   isRecoverableChatStreamError,
-  isRecoverableChatStreamStatus,
+  shouldAttemptChatRecovery,
   type ChatStreamEvent,
 } from "@/lib/chat-stream";
 import { resolveRuntimeModelSelection } from "@/lib/model-catalog";
@@ -259,7 +259,7 @@ export function useKimiChatData() {
           provider = payload.error.provider;
         }
 
-        if (isRecoverableChatStreamStatus(response.status)) {
+        if (shouldAttemptChatRecovery(response.status, category)) {
           const recoveredMessage = await recoverPersistedCompletion();
           if (recoveredMessage) {
             return recoveredMessage;

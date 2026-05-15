@@ -38,6 +38,17 @@ export function isRecoverableChatStreamStatus(status: number) {
   );
 }
 
+export function shouldAttemptChatRecovery(
+  status: number,
+  category?: string | null
+) {
+  if (category === "provider-error" || category === "provider-timeout") {
+    return false;
+  }
+
+  return isRecoverableChatStreamStatus(status);
+}
+
 export function isRecoverableChatStreamError(error: unknown) {
   if (!(error instanceof Error)) {
     return false;

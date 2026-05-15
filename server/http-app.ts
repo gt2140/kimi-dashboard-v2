@@ -14,6 +14,7 @@ import { logServerDebug } from "./lib/debug.js";
 import { vaultV2Service } from "./services/vault-v2-service.js";
 import { handleSimpleChatRequest } from "./chat/simple-chat-handler.js";
 import { handleProviderCheckRequest } from "./chat/provider-check-handler.js";
+import { handleDiagnoseTurnRequest } from "./chat/diagnose-turn-handler.js";
 
 export const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -230,6 +231,10 @@ app.post("/api/chat/send", async c => {
 
 app.on(["GET", "POST"], "/api/chat/provider-check", async c => {
   return handleProviderCheckRequest(c.req.raw);
+});
+
+app.post("/api/chat/diagnose-turn", async c => {
+  return handleDiagnoseTurnRequest(c.req.raw);
 });
 
 app.post("/api/vault/documents", async c => {

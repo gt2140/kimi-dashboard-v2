@@ -189,6 +189,17 @@ describe("production chat route behavior", () => {
         }
       },
     }));
+    vi.doMock("./queries/connection.js", () => ({
+      getDb: () => {
+        const chain = {
+          select: () => chain,
+          from: () => chain,
+          where: () => chain,
+          limit: vi.fn().mockResolvedValue([]),
+        };
+        return chain;
+      },
+    }));
 
     const { app } = await import("./http-app.js");
     const response = await app.fetch(
@@ -206,6 +217,86 @@ describe("production chat route behavior", () => {
         providerSlug: "venice",
         category: "ready",
       },
+    });
+  });
+
+  it("serves the authenticated chat turn diagnostic route", async () => {
+    vi.doMock("./trpc/auth.js", () => ({
+      authenticateRequest: vi.fn().mockResolvedValue({
+        id: 42,
+        unionId: "supabase:test-user",
+      }),
+    }));
+    vi.doMock("./services/vault-v2-service.js", () => ({
+      vaultV2Service: {
+        startWorker: vi.fn(),
+      },
+    }));
+    vi.doMock("./repositories/conversation-repository.js", () => ({
+      ConversationRepository: class {
+        async requireConversationOwner() {
+          return {
+            id: 1,
+            summary: null,
+          };
+        }
+      },
+    }));
+    vi.doMock("./services/venice-chat-runtime.js", async importOriginal => {
+      const actual = await importOriginal<
+        typeof import("./services/venice-chat-runtime.js")
+      >();
+      return {
+        ...actual,
+        loadRecentConversationMessages: vi.fn().mockResolvedValue([]),
+      };
+    });
+    vi.doMock("./services/model-gateway.js", () => ({
+      ModelGatewayService: class {
+        async diagnoseVenice() {
+          return {
+            ok: true,
+            providerSlug: "venice",
+            modelName: "zai-org-glm-5",
+            status: 200,
+            category: "ready",
+            message: "Venice generation is ready.",
+          };
+        }
+
+        async generateText() {
+          return {
+            text: "OK",
+            providerSlug: "venice",
+            modelName: "zai-org-glm-5",
+          };
+        }
+      },
+    }));
+
+    const { app } = await import("./http-app.js");
+    const response = await app.fetch(
+      new Request("http://localhost/api/chat/diagnose-turn", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          conversationId: 1,
+          content: "hello",
+          agentId: "generalist",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      stages: expect.arrayContaining([
+        expect.objectContaining({ id: "venice-generation", ok: true }),
+        expect.objectContaining({ id: "client-contract", ok: true }),
+      ]),
     });
   });
 

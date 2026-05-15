@@ -1,5 +1,7 @@
 # Conversational Architecture Blueprint
 
+> Status: historical design blueprint. The production MVP chat path is now Venice-first and documented in [Active Chat Runtime](./active-chat-runtime.md). Use this document for future agent architecture ideas, not as the current production chat contract.
+
 ## Goal
 
 Build the first real conversational layer of Aura around a single scalable agent engine.

@@ -97,7 +97,11 @@ Before promoting the Vercel project:
 - Verify Supabase callback URLs include the deployed domain.
 - Add the Venice secret to both `Preview` and `Production`.
 - Open `https://<your-domain>/api/health` and confirm `ok: true`; the payload reports missing environment categories without exposing secret values.
-- Run one authenticated `POST /api/chat/stream` turn with an explicit `requestedModelName` after deploy.
+- Open `https://<your-domain>/api/chat/provider-check` and confirm Venice generation is ready.
+- Run one authenticated `POST /api/chat/send` turn with `Auto`, then another with an explicit Venice `requestedModelName` after deploy.
+- Use `POST /api/chat/diagnose-turn` only as a protected internal diagnostic when the real chat turn fails. It mirrors the chat checks by stage without exposing secrets.
+
+The active production chat contract is documented in [docs/active-chat-runtime.md](docs/active-chat-runtime.md). Older `/api/chat/stream`, Kimi, OpenAI, medical runtime, and multi-agent references are compatibility or historical planning material unless that document says otherwise.
 
 ## Supabase setup
 

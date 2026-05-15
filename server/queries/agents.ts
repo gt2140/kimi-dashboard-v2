@@ -100,6 +100,7 @@ const PROVIDER_SEEDS = [
 ];
 
 const CANONICAL_AGENT_SLUGS = AGENTS.map(agent => agent.id);
+const DEFAULT_AGENT_PROVIDER_SLUG = "venice";
 
 export function getCanonicalAgentSlugs() {
   return [...CANONICAL_AGENT_SLUGS];
@@ -278,13 +279,15 @@ async function seedConversationalCatalog() {
 
   for (const agent of AGENTS) {
     const seed = buildAgentSeed(agent);
-    const kimiReference = providerReferences.get("kimi");
+    const defaultProviderReference = providerReferences.get(
+      DEFAULT_AGENT_PROVIDER_SLUG,
+    );
     const result = await db
       .insert(agentDefinitions)
       .values({
         ...seed,
-        defaultProviderId: kimiReference?.providerId ?? null,
-        defaultModelId: kimiReference?.modelEndpointId ?? null,
+        defaultProviderId: defaultProviderReference?.providerId ?? null,
+        defaultModelId: defaultProviderReference?.modelEndpointId ?? null,
       })
       .onConflictDoUpdate({
         target: agentDefinitions.slug,
@@ -304,8 +307,8 @@ async function seedConversationalCatalog() {
           allowedVaultCategories: seed.allowedVaultCategories,
           tags: seed.tags,
           capabilities: seed.capabilities,
-          defaultProviderId: kimiReference?.providerId ?? null,
-          defaultModelId: kimiReference?.modelEndpointId ?? null,
+          defaultProviderId: defaultProviderReference?.providerId ?? null,
+          defaultModelId: defaultProviderReference?.modelEndpointId ?? null,
           updatedAt: new Date(),
         },
       })

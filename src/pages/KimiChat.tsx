@@ -642,7 +642,7 @@ export default function KimiChat() {
                         )}
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground/60">
-                        {option.modelId ?? "Uses Aura defaults"} · {option.contextWindow}
+                        {option.modelId ?? "Uses Aura defaults"} - {option.contextWindow}
                       </p>
                     </div>
                   </div>
@@ -807,7 +807,7 @@ function KimiMessageBubble({
               </MetaPill>
             )}
             <MetaPill icon={<Sparkles className="h-3 w-3" />}>
-              {getVisibleProviderLabel(metadata)} · {getVisibleModelLabel(metadata)}
+              {getVisibleProviderLabel(metadata)} - {getVisibleModelLabel(metadata)}
             </MetaPill>
             {metadata.memoryApplied && (
               <MetaPill icon={<DatabaseZap className="h-3 w-3" />}>
@@ -951,7 +951,7 @@ function DesktopModelMenu({
       <div className="px-1 pb-3">
         <p className="text-center text-xl font-semibold text-foreground">Models</p>
         <p className="mt-1 text-center text-xs text-muted-foreground/50">
-          Curated text models for lean chat turns
+          Auto plus available Venice text models
         </p>
       </div>
       <div className="relative">
@@ -968,7 +968,7 @@ function DesktopModelMenu({
           Text
         </span>
         <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1 text-[10px] text-muted-foreground/60">
-          Curated
+          {filteredModels.length} shown
         </span>
       </div>
       <div className="mt-3 max-h-[360px] overflow-y-auto pr-1">
@@ -1000,7 +1000,7 @@ function DesktopModelMenu({
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground/55">
-                      {option.modelId ?? "Uses Aura defaults"} · {option.contextWindow}
+                      {option.modelId ?? "Uses Aura defaults"} - {option.contextWindow}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {option.badges.map(badge => (
@@ -1027,7 +1027,7 @@ function DesktopModelMenu({
           })}
           {filteredModels.length === 0 && (
             <div className="rounded-2xl px-3 py-4 text-sm text-muted-foreground/55">
-              No curated models match this search yet.
+              No Venice models match this search yet.
             </div>
           )}
         </div>
@@ -1035,3 +1035,4 @@ function DesktopModelMenu({
     </div>
   );
 }
+

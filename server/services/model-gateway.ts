@@ -117,6 +117,236 @@ const CURATED_VENICE_TEXT_MODELS: VeniceModelListEntry[] = [
       },
     },
   },
+  {
+    id: "claude-opus-4-7-fast",
+    type: "text",
+    model_spec: {
+      name: "Claude Opus 4.7 Fast",
+      availableContextTokens: 1000000,
+      privacy: "anonymized",
+      traits: ["fast"],
+      capabilities: {
+        optimizedForCode: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "deepseek-v4-pro",
+    type: "text",
+    model_spec: {
+      name: "DeepSeek V4 Pro",
+      availableContextTokens: 1000000,
+      privacy: "anonymized",
+      capabilities: {
+        optimizedForCode: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "openai-gpt-55-pro",
+    type: "text",
+    model_spec: {
+      name: "GPT-5.5 Pro",
+      availableContextTokens: 1050000,
+      privacy: "anonymized",
+      capabilities: {
+        optimizedForCode: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "qwen3-6-27b",
+    type: "text",
+    model_spec: {
+      name: "Qwen 3.6 27B",
+      privacy: "private",
+      capabilities: {
+        optimizedForCode: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "deepseek-v4-flash",
+    type: "text",
+    model_spec: {
+      name: "DeepSeek V4 Flash",
+      availableContextTokens: 1000000,
+      privacy: "anonymized",
+      traits: ["fast"],
+      capabilities: {
+        optimizedForCode: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "e2ee-glm-5-1",
+    type: "text",
+    model_spec: {
+      name: "GLM 5.1 E2EE",
+      privacy: "private",
+      traits: ["tee", "e2ee"],
+      capabilities: {
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "openai-gpt-55",
+    type: "text",
+    model_spec: {
+      name: "GPT-5.5",
+      availableContextTokens: 1050000,
+      privacy: "anonymized",
+      capabilities: {
+        optimizedForCode: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "kimi-k2-6",
+    type: "text",
+    model_spec: {
+      name: "Kimi K2.6",
+      availableContextTokens: 256000,
+      privacy: "private",
+      capabilities: {
+        optimizedForCode: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "grok-4-3",
+    type: "text",
+    model_spec: {
+      name: "Grok 4.3",
+      availableContextTokens: 1000000,
+      privacy: "private",
+      capabilities: {
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "claude-opus-4-7",
+    type: "text",
+    model_spec: {
+      name: "Claude Opus 4.7",
+      availableContextTokens: 1000000,
+      privacy: "anonymized",
+      capabilities: {
+        optimizedForCode: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "gemma-4-uncensored",
+    type: "text",
+    model_spec: {
+      name: "Gemma 4 Uncensored",
+      availableContextTokens: 256000,
+      privacy: "private",
+      traits: ["uncensored"],
+      capabilities: {
+        optimizedForCode: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "claude-opus-4-6-fast",
+    type: "text",
+    model_spec: {
+      name: "Claude Opus 4.6 Fast",
+      availableContextTokens: 1000000,
+      privacy: "anonymized",
+      traits: ["fast"],
+      capabilities: {
+        optimizedForCode: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "zai-org-glm-5-1",
+    type: "text",
+    model_spec: {
+      name: "GLM 5.1",
+      privacy: "private",
+      capabilities: {
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "venice-uncensored-1-2",
+    type: "text",
+    model_spec: {
+      name: "Venice Uncensored 1.2",
+      availableContextTokens: 128000,
+      privacy: "private",
+      traits: ["uncensored"],
+    },
+  },
+  {
+    id: "openai-gpt-54-mini",
+    type: "text",
+    model_spec: {
+      name: "GPT-5.4 Mini",
+      privacy: "anonymized",
+      traits: ["fast"],
+      capabilities: {
+        optimizedForCode: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "aion-labs-aion-2-0",
+    type: "text",
+    model_spec: {
+      name: "Aion 2.0",
+      privacy: "anonymized",
+      traits: ["uncensored", "creative"],
+    },
+  },
+  {
+    id: "minimax-m27",
+    type: "text",
+    model_spec: {
+      name: "MiniMax M2.7",
+      privacy: "anonymized",
+      traits: ["agentic"],
+      capabilities: {
+        optimizedForCode: true,
+        supportsReasoning: true,
+      },
+    },
+  },
+  {
+    id: "grok-4-20",
+    type: "text",
+    model_spec: {
+      name: "Grok 4.20",
+      privacy: "private",
+      capabilities: {
+        supportsReasoning: true,
+      },
+    },
+  },
 ];
 
 let veniceModelCatalogCache: {
@@ -132,7 +362,9 @@ export function clearVeniceModelCatalogCache() {
 export function getCuratedVeniceTextModels() {
   const byModelId = new Map<string, VeniceCatalogOption>();
   for (const model of CURATED_VENICE_TEXT_MODELS) {
-    byModelId.set(model.id, mapVeniceModelToCatalogOption(model));
+    if (!byModelId.has(model.id)) {
+      byModelId.set(model.id, mapVeniceModelToCatalogOption(model));
+    }
   }
 
   return Array.from(byModelId.values()).sort((left, right) => {

@@ -8,16 +8,27 @@ import {
 
 describe("model catalog", () => {
   it("keeps the curated text-only list available for the chat picker", () => {
-    expect(CURATED_TEXT_MODELS.map(model => model.displayName)).toEqual([
-      "Auto",
-      "GLM 5",
-      "Venice Uncensored 1.2",
-    ]);
+    expect(CURATED_TEXT_MODELS[0]?.displayName).toBe("Auto");
+    expect(CURATED_TEXT_MODELS.map(model => model.modelName)).toEqual(
+      expect.arrayContaining([
+        null,
+        "zai-org-glm-5",
+        "claude-opus-4-7-fast",
+        "deepseek-v4-pro",
+        "openai-gpt-55-pro",
+        "zai-org-glm-5-1",
+        "kimi-k2-6",
+        "venice-uncensored-1-2",
+        "grok-4-20",
+      ]),
+    );
   });
 
   it("filters the curated list by visible name and model id", () => {
     expect(filterCuratedTextModels("glm").map(model => model.displayName)).toEqual([
       "GLM 5",
+      "GLM 5.1 E2EE",
+      "GLM 5.1",
     ]);
 
     expect(

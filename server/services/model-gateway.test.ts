@@ -146,6 +146,22 @@ describe("ModelGatewayService", () => {
           modelName: "zai-org-glm-5",
           isDefaultCandidate: true,
         }),
+        expect.objectContaining({
+          modelName: "openai-gpt-55-pro",
+          displayName: "GPT-5.5 Pro",
+        }),
+        expect.objectContaining({
+          modelName: "claude-opus-4-7-fast",
+          displayName: "Claude Opus 4.7 Fast",
+        }),
+        expect.objectContaining({
+          modelName: "deepseek-v4-pro",
+          displayName: "DeepSeek V4 Pro",
+        }),
+        expect.objectContaining({
+          modelName: "venice-uncensored-1-2",
+          badges: expect.arrayContaining(["Uncensored", "Private"]),
+        }),
       ])
     );
   });

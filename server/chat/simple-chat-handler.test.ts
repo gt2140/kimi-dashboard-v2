@@ -20,6 +20,14 @@ describe("handleSimpleChatRequest", () => {
       },
     });
     const authenticate = vi.fn().mockResolvedValue({ id: 7 });
+    const diagnoseProvider = vi.fn().mockResolvedValue({
+      ok: true,
+      providerSlug: "venice",
+      modelName: "zai-org-glm-5",
+      status: 200,
+      category: "ready",
+      message: "Venice generation is ready.",
+    });
 
     const response = await handleSimpleChatRequest(
       new Request("https://example.com/api/chat/send", {
@@ -38,6 +46,7 @@ describe("handleSimpleChatRequest", () => {
       {
         authenticateRequest: authenticate,
         runtime: { executeTurn },
+        diagnoseProvider,
       }
     );
 
@@ -65,6 +74,9 @@ describe("handleSimpleChatRequest", () => {
         stream: false,
       })
     );
+    expect(diagnoseProvider).toHaveBeenCalledWith({
+      modelName: "zai-org-glm-5",
+    });
   });
 
   it("returns structured errors instead of hanging before stream startup", async () => {
@@ -92,6 +104,25 @@ describe("handleSimpleChatRequest", () => {
   });
 
   it("replaces generic provider failures with a sanitized Venice diagnostic", async () => {
+    const diagnoseProvider = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        providerSlug: "venice",
+        modelName: "zai-org-glm-5",
+        status: 200,
+        category: "ready",
+        message: "Venice generation is ready.",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        providerSlug: "venice",
+        modelName: "zai-org-glm-5",
+        status: 401,
+        category: "auth",
+        message:
+          "Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY.",
+      });
     const response = await handleSimpleChatRequest(
       new Request("https://example.com/api/chat/send", {
         method: "POST",
@@ -114,15 +145,7 @@ describe("handleSimpleChatRequest", () => {
               new Error("the model provider failed to complete the chat turn")
             ),
         },
-        diagnoseProvider: vi.fn().mockResolvedValue({
-          ok: false,
-          providerSlug: "venice",
-          modelName: "zai-org-glm-5",
-          status: 401,
-          category: "auth",
-          message:
-            "Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY.",
-        }),
+        diagnoseProvider,
       }
     );
 
@@ -139,5 +162,50 @@ describe("handleSimpleChatRequest", () => {
       },
     });
     expect(response.status).toBe(500);
+    expect(diagnoseProvider).toHaveBeenCalledTimes(2);
+  });
+
+  it("preflights Venice before executing the chat turn", async () => {
+    const executeTurn = vi.fn();
+    const response = await handleSimpleChatRequest(
+      new Request("https://example.com/api/chat/send", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          conversationId: 42,
+          content: "holaaa",
+          agentId: "generalist",
+          requestedModelName: "venice-retired-model",
+        }),
+      }),
+      {
+        authenticateRequest: vi.fn().mockResolvedValue({ id: 7 }),
+        runtime: { executeTurn },
+        diagnoseProvider: vi.fn().mockResolvedValue({
+          ok: false,
+          providerSlug: "venice",
+          modelName: "venice-retired-model",
+          status: 404,
+          category: "model",
+          message: "Venice request failed (404). The selected model is unavailable.",
+        }),
+      }
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        category: "provider-error",
+        message: "Venice request failed (404). The selected model is unavailable.",
+        provider: {
+          category: "model",
+          modelName: "venice-retired-model",
+        },
+      },
+    });
+    expect(response.status).toBe(503);
+    expect(executeTurn).not.toHaveBeenCalled();
   });
 });

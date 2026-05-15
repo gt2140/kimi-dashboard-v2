@@ -8,7 +8,7 @@ import { chatSendMessageInputSchema } from "../trpc/chat-router.js";
 type SimpleChatHandlerDependencies = {
   authenticateRequest?: typeof defaultAuthenticateRequest;
   runtime?: ConversationTurnRuntime;
-  diagnoseProvider?: () => Promise<
+  diagnoseProvider?: (input?: { modelName?: string | null }) => Promise<
     Awaited<ReturnType<ModelGatewayService["diagnoseVenice"]>>
   >;
 };
@@ -39,7 +39,7 @@ async function enrichProviderError(
   if (classified.category === "provider-error") {
     const diagnoseProvider =
       dependencies.diagnoseProvider ??
-      (() => new ModelGatewayService().diagnoseVenice());
+        (input => new ModelGatewayService().diagnoseVenice(input));
     provider = await diagnoseProvider().catch(() => undefined);
     if (provider && !provider.ok) {
       message = provider.message;
@@ -105,6 +105,29 @@ export async function handleSimpleChatRequest(
         },
       },
       { status: 400, headers: { "x-trace-id": traceId } }
+    );
+  }
+
+  const diagnoseProvider =
+    dependencies.diagnoseProvider ??
+    (input => new ModelGatewayService().diagnoseVenice(input));
+  const providerReadiness = await diagnoseProvider({
+    modelName: parsed.data.requestedModelName,
+  }).catch(() => null);
+  if (providerReadiness && !providerReadiness.ok) {
+    return jsonResponse(
+      {
+        error: {
+          message: providerReadiness.message,
+          category: "provider-error",
+          traceId,
+          provider: providerReadiness,
+        },
+      },
+      {
+        status: 503,
+        headers: { "x-trace-id": traceId },
+      }
     );
   }
 

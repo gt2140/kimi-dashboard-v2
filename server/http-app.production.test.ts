@@ -45,6 +45,20 @@ describe("production chat route behavior", () => {
         startWorker: vi.fn(),
       },
     }));
+    vi.doMock("./services/model-gateway.js", () => ({
+      ModelGatewayService: class {
+        async diagnoseVenice() {
+          return {
+            ok: true,
+            providerSlug: "venice",
+            modelName: "zai-org-glm-5",
+            status: 200,
+            category: "ready",
+            message: "Venice generation is ready.",
+          };
+        }
+      },
+    }));
     vi.doMock("./services/venice-chat-runtime.js", () => ({
       auraChatConversationTurnRuntime: {
         executeTurn: vi
@@ -90,6 +104,20 @@ describe("production chat route behavior", () => {
     vi.doMock("./services/vault-v2-service.js", () => ({
       vaultV2Service: {
         startWorker: vi.fn(),
+      },
+    }));
+    vi.doMock("./services/model-gateway.js", () => ({
+      ModelGatewayService: class {
+        async diagnoseVenice() {
+          return {
+            ok: true,
+            providerSlug: "venice",
+            modelName: "zai-org-glm-5",
+            status: 200,
+            category: "ready",
+            message: "Venice generation is ready.",
+          };
+        }
       },
     }));
     vi.doMock("./services/venice-chat-runtime.js", () => ({

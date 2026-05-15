@@ -564,8 +564,10 @@ export class ModelGatewayService {
     return models;
   }
 
-  async diagnoseVenice(): Promise<VeniceDiagnosticResult> {
-    const model = this.getDefaultModel("venice");
+  async diagnoseVenice(
+    input: { modelName?: string | null } = {}
+  ): Promise<VeniceDiagnosticResult> {
+    const model = input.modelName?.trim() || this.getDefaultModel("venice");
     const veniceApiKey = this.getVeniceApiKey();
     if (!veniceApiKey) {
       return {

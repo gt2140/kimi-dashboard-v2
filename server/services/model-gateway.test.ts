@@ -298,4 +298,30 @@ describe("ModelGatewayService", () => {
 
     expect(JSON.stringify(result)).not.toContain("raw upstream data");
   });
+
+  it("diagnoses the explicitly selected Venice model", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "OK" } }],
+      }),
+    });
+    const gateway = new ModelGatewayService({
+      fetch: fetchMock as unknown as typeof fetch,
+      veniceApiKey: "test-venice-key",
+    });
+
+    await expect(
+      gateway.diagnoseVenice({ modelName: "venice-uncensored-1-2" })
+    ).resolves.toMatchObject({
+      ok: true,
+      modelName: "venice-uncensored-1-2",
+      category: "ready",
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      model: "venice-uncensored-1-2",
+    });
+  });
 });

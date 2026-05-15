@@ -29,7 +29,8 @@ function statusForCategory(category: ReturnType<typeof classifyApiError>["catego
 
 async function enrichProviderError(
   classified: ReturnType<typeof classifyApiError>,
-  dependencies: SimpleChatHandlerDependencies
+  dependencies: SimpleChatHandlerDependencies,
+  input?: { modelName?: string | null }
 ) {
   let message = classified.message;
   let provider:
@@ -40,9 +41,11 @@ async function enrichProviderError(
     const diagnoseProvider =
       dependencies.diagnoseProvider ??
         (input => new ModelGatewayService().diagnoseVenice(input));
-    provider = await diagnoseProvider().catch(() => undefined);
+    provider = await diagnoseProvider(input).catch(() => undefined);
     if (provider && !provider.ok) {
       message = provider.message;
+    } else {
+      provider = undefined;
     }
   }
 
@@ -159,7 +162,9 @@ export async function handleSimpleChatRequest(
     );
   } catch (error) {
     const classified = classifyApiError(error);
-    const enriched = await enrichProviderError(classified, dependencies);
+    const enriched = await enrichProviderError(classified, dependencies, {
+      modelName: parsed.data.requestedModelName,
+    });
     return jsonResponse(
       {
         error: {

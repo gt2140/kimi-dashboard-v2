@@ -3,6 +3,7 @@ type ErrorWithData = {
   category?: string;
   traceId?: string;
   provider?: {
+    ok?: boolean;
     message?: string;
   };
   data?: {
@@ -35,7 +36,7 @@ export function formatRuntimeError(input: unknown, fallbackLabel = "Request") {
     case "provider-timeout":
       return `Provider timeout: the model provider took too long to answer. Retry in a moment.${traceSuffix}`;
     case "provider-error":
-      if (error.provider?.message?.trim()) {
+      if (error.provider?.ok !== true && error.provider?.message?.trim()) {
         return `Provider error: ${error.provider.message.trim()}${traceSuffix}`;
       }
       if (normalized.startsWith("venice ")) {

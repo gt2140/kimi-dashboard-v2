@@ -165,6 +165,55 @@ describe("handleSimpleChatRequest", () => {
     expect(diagnoseProvider).toHaveBeenCalledTimes(2);
   });
 
+  it("does not attach a successful provider diagnostic to a failed chat turn", async () => {
+    const diagnoseProvider = vi.fn().mockResolvedValue({
+      ok: true,
+      providerSlug: "venice",
+      modelName: "openai-gpt-55-pro",
+      status: 200,
+      category: "ready",
+      message: "Venice generation is ready.",
+    });
+    const response = await handleSimpleChatRequest(
+      new Request("https://example.com/api/chat/send", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-token",
+        },
+        body: JSON.stringify({
+          conversationId: 42,
+          content: "holaaa",
+          agentId: "generalist",
+          requestedModelName: "openai-gpt-55-pro",
+        }),
+      }),
+      {
+        authenticateRequest: vi.fn().mockResolvedValue({ id: 7 }),
+        runtime: {
+          executeTurn: vi
+            .fn()
+            .mockRejectedValue(
+              new Error("the model provider failed to complete the chat turn")
+            ),
+        },
+        diagnoseProvider,
+      }
+    );
+
+    const body = await response.json();
+    expect(body).toMatchObject({
+      error: {
+        category: "provider-error",
+        message: "the model provider failed to complete the chat turn",
+      },
+    });
+    expect(body?.error?.provider).toBeUndefined();
+    expect(diagnoseProvider).toHaveBeenLastCalledWith({
+      modelName: "openai-gpt-55-pro",
+    });
+  });
+
   it("preflights Venice before executing the chat turn", async () => {
     const executeTurn = vi.fn();
     const response = await handleSimpleChatRequest(

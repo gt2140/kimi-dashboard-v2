@@ -113,6 +113,26 @@ describe("formatRuntimeError", () => {
     );
   });
 
+  it("ignores successful provider diagnostics while formatting provider errors", () => {
+    expect(
+      formatRuntimeError(
+        {
+          message:
+            "the model provider failed to complete the chat turn",
+          category: "provider-error",
+          traceId: "venice-ready",
+          provider: {
+            ok: true,
+            message: "Venice generation is ready.",
+          },
+        },
+        "Aura chat"
+      )
+    ).toBe(
+      "Provider error: the model provider failed to complete the chat turn. Check the API logs for upstream details. (trace venice-ready)"
+    );
+  });
+
   it("formats structured provider timeout errors with trace ids", () => {
     expect(
       formatRuntimeError({

@@ -93,6 +93,26 @@ describe("formatRuntimeError", () => {
     );
   });
 
+  it("prefers structured provider diagnostics over a generic provider message", () => {
+    expect(
+      formatRuntimeError(
+        {
+          message:
+            "the model provider failed to complete the chat turn",
+          category: "provider-error",
+          traceId: "venice-2",
+          provider: {
+            message:
+              "Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY.",
+          },
+        },
+        "Aura chat"
+      )
+    ).toBe(
+      "Provider error: Venice request failed (401). Check VENICE_API_KEY or VENICE_INFERENCE_KEY. (trace venice-2)"
+    );
+  });
+
   it("formats structured provider timeout errors with trace ids", () => {
     expect(
       formatRuntimeError({

@@ -226,6 +226,13 @@ export function useKimiChatData() {
               message?: string;
               category?: string;
               traceId?: string;
+              provider?: {
+                message?: string;
+                category?: string;
+                status?: number;
+                modelName?: string;
+                providerSlug?: string;
+              };
             };
       } | null;
 
@@ -233,6 +240,15 @@ export function useKimiChatData() {
         let responseMessage = `Aura chat failed with HTTP ${response.status}.`;
         let category: string | undefined;
         let traceId: string | undefined;
+        let provider:
+          | {
+              message?: string;
+              category?: string;
+              status?: number;
+              modelName?: string;
+              providerSlug?: string;
+            }
+          | undefined;
 
         if (typeof payload?.error === "string" && payload.error.trim()) {
           responseMessage = payload.error.trim();
@@ -240,6 +256,7 @@ export function useKimiChatData() {
           responseMessage = payload.error.message?.trim() || responseMessage;
           category = payload.error.category;
           traceId = payload.error.traceId;
+          provider = payload.error.provider;
         }
 
         if (isRecoverableChatStreamStatus(response.status)) {
@@ -252,6 +269,13 @@ export function useKimiChatData() {
         const httpError = new Error(responseMessage) as Error & {
           category?: string;
           traceId?: string;
+          provider?: {
+            message?: string;
+            category?: string;
+            status?: number;
+            modelName?: string;
+            providerSlug?: string;
+          };
         };
         httpError.category =
           category ||
@@ -261,6 +285,7 @@ export function useKimiChatData() {
               ? "backend-timeout"
               : "transport");
         httpError.traceId = traceId;
+        httpError.provider = provider;
         throw httpError;
       }
 

@@ -143,6 +143,7 @@ export default function KimiVault() {
   const reclassifyMutation = useMutation({
     mutationFn: reclassifyVaultDocument,
     onSuccess: async result => {
+      setPreviewCategoryDraft(result.document.category);
       setPreviewDocument(current =>
         current && current.id === result.document.id ? result.document : current,
       );
@@ -155,7 +156,7 @@ export default function KimiVault() {
     },
   });
 
-  const documents = documentsQuery.data ?? [];
+  const documents = useMemo(() => documentsQuery.data ?? [], [documentsQuery.data]);
   const filteredDocuments = useMemo(
     () =>
       documents.filter(document =>
@@ -177,9 +178,10 @@ export default function KimiVault() {
     previewEventsQuery.error?.message ||
     null;
 
-  useEffect(() => {
-    setPreviewCategoryDraft(previewDocument?.category ?? "other");
-  }, [previewDocument?.id, previewDocument?.category]);
+  function openPreview(document: VaultDocument) {
+    setPreviewCategoryDraft(document.category);
+    setPreviewDocument(document);
+  }
 
   useEffect(() => {
     let active = true;
@@ -188,17 +190,21 @@ export default function KimiVault() {
       if (!previewDocument) {
         setPreviewText(null);
         setPreviewMimeType(null);
-        if (previewBlobUrl) {
-          URL.revokeObjectURL(previewBlobUrl);
-          setPreviewBlobUrl(null);
-        }
+        setPreviewBlobUrl(current => {
+          if (current) {
+            URL.revokeObjectURL(current);
+          }
+          return null;
+        });
         return;
       }
 
-      if (previewBlobUrl) {
-        URL.revokeObjectURL(previewBlobUrl);
-        setPreviewBlobUrl(null);
-      }
+      setPreviewBlobUrl(current => {
+        if (current) {
+          URL.revokeObjectURL(current);
+        }
+        return null;
+      });
 
       try {
         const blob = await fetchVaultDocumentOriginal(previewDocument.id);
@@ -365,7 +371,7 @@ export default function KimiVault() {
               <VaultMobileDocumentCard
                 key={document.id}
                 document={document}
-                onPreview={() => setPreviewDocument(document)}
+                onPreview={() => openPreview(document)}
                 onReprocess={() => {
                   void reprocessMutation.mutateAsync(document.id);
                 }}
@@ -428,7 +434,7 @@ export default function KimiVault() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-muted-foreground/35 hover:text-foreground"
-                      onClick={() => setPreviewDocument(document)}
+                      onClick={() => openPreview(document)}
                     >
                       <FileSearch className="h-3.5 w-3.5" />
                     </Button>

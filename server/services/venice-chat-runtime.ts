@@ -108,109 +108,105 @@ export class VeniceFirstConversationTurnRuntime implements ConversationTurnRunti
       metadata: {},
     });
 
-    try {
-      const turnContext = await this.loadTurnContext(input).catch(error => {
-        logServerDebug("chat.turn.venice.context-fallback", {
-          conversationId: input.conversationId,
-          errorMessage:
-            error instanceof Error
-              ? error.message
-              : "Context loader failed unexpectedly.",
-        });
-        return null;
+    const turnContext = await this.loadTurnContext(input).catch(error => {
+      logServerDebug("chat.turn.venice.context-fallback", {
+        conversationId: input.conversationId,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : "Context loader failed unexpectedly.",
       });
-      const recentMessages = turnContext
-        ? turnContext.recentMessages.map(message => ({
-            role: message.role,
-            content: message.content,
-          }))
-        : await this.loadRecentMessages({
+      return null;
+    });
+    const recentMessages = turnContext
+      ? turnContext.recentMessages.map(message => ({
+          role: message.role,
+          content: message.content,
+        }))
+      : await this.loadRecentMessages({
         conversationId: input.conversationId,
         limit: 6,
       });
-      const systemPrompt = buildVeniceSystemPrompt({
-        conversationSummary:
-          turnContext?.conversationSummary ?? conversation.summary ?? null,
-        context: turnContext,
-      });
+    const systemPrompt = buildVeniceSystemPrompt({
+      conversationSummary:
+        turnContext?.conversationSummary ?? conversation.summary ?? null,
+      context: turnContext,
+    });
 
-      await input.onStage?.({
-        id: "draft",
-        label: input.stream
-          ? "Streaming Venice response"
-          : "Writing Venice response",
-      });
+    await input.onStage?.({
+      id: "draft",
+      label: input.stream
+        ? "Streaming Venice response"
+        : "Writing Venice response",
+    });
 
-      const requestedModelName = input.requestedModelName?.trim() || null;
-      const modelResult = input.stream
-        ? await this.modelGateway.streamText({
-            providerSlug: "venice",
-            modelName: requestedModelName,
-            systemPrompt,
-            messages: recentMessages,
-            signal: input.signal,
-            onTextDelta: input.onTextDelta,
-          })
-        : await this.modelGateway.generateText({
-            providerSlug: "venice",
-            modelName: requestedModelName,
-            systemPrompt,
-            messages: recentMessages,
-            signal: input.signal,
-          });
-
-      const assistantMetadata = {
-        engine: "aura-chat-v1" as const,
-        providerSlug: "venice" as const,
-        modelName: modelResult.modelName,
-        requestedModelName,
-        relatedVaultFiles:
-          turnContext && turnContext.accessibleFiles.length > 0
-            ? turnContext.accessibleFiles.map(file => file.filename)
-            : undefined,
-        contextSummary: turnContext
-          ? buildVeniceContextSummary(turnContext)
-          : undefined,
-        inputTokens: modelResult.inputTokens,
-        outputTokens: modelResult.outputTokens,
-      };
-
-      const assistantMessage =
-        await this.conversationRepository.createAssistantMessage({
-          conversationId: input.conversationId,
-          content: modelResult.text,
-          agentId: input.agentId,
-          metadata: assistantMetadata,
+    const requestedModelName = input.requestedModelName?.trim() || null;
+    const modelResult = input.stream
+      ? await this.modelGateway.streamText({
+          providerSlug: "venice",
+          modelName: requestedModelName,
+          systemPrompt,
+          messages: recentMessages,
+          signal: input.signal,
+          onTextDelta: input.onTextDelta,
+        })
+      : await this.modelGateway.generateText({
+          providerSlug: "venice",
+          modelName: requestedModelName,
+          systemPrompt,
+          messages: recentMessages,
+          signal: input.signal,
         });
 
-      await this.conversationRepository.updateConversationAfterTurn({
-        conversation,
-        userMessage: input.content,
-        agentId: input.agentId,
-        orchestrationMode: "single_agent",
-      });
+    const assistantMetadata = {
+      engine: "aura-chat-v1" as const,
+      providerSlug: "venice" as const,
+      modelName: modelResult.modelName,
+      requestedModelName,
+      relatedVaultFiles:
+        turnContext && turnContext.accessibleFiles.length > 0
+          ? turnContext.accessibleFiles.map(file => file.filename)
+          : undefined,
+      contextSummary: turnContext
+        ? buildVeniceContextSummary(turnContext)
+        : undefined,
+      inputTokens: modelResult.inputTokens,
+      outputTokens: modelResult.outputTokens,
+    };
 
-      logServerDebug("chat.turn.venice.completed", {
+    const assistantMessage =
+      await this.conversationRepository.createAssistantMessage({
         conversationId: input.conversationId,
-        userMessageId: userMessage.id,
-        assistantMessageId: assistantMessage.id,
-        modelName: modelResult.modelName,
+        content: modelResult.text,
+        agentId: input.agentId,
+        metadata: assistantMetadata,
       });
 
-      return {
-        success: true as const,
-        assistantMessage: {
-          id: assistantMessage.id,
-          role: "assistant" as const,
-          content: modelResult.text,
-          agentId: input.agentId,
-          createdAt: assistantMessage.createdAt,
-          metadata: assistantMetadata,
-        },
-      };
-    } catch (error) {
-      throw error;
-    }
+    await this.conversationRepository.updateConversationAfterTurn({
+      conversation,
+      userMessage: input.content,
+      agentId: input.agentId,
+      orchestrationMode: "single_agent",
+    });
+
+    logServerDebug("chat.turn.venice.completed", {
+      conversationId: input.conversationId,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      modelName: modelResult.modelName,
+    });
+
+    return {
+      success: true as const,
+      assistantMessage: {
+        id: assistantMessage.id,
+        role: "assistant" as const,
+        content: modelResult.text,
+        agentId: input.agentId,
+        createdAt: assistantMessage.createdAt,
+        metadata: assistantMetadata,
+      },
+    };
   }
 
   private loadTurnContext(input: ConversationTurnRuntimeInput) {

@@ -724,7 +724,8 @@ export class ModelGatewayService {
     return LIVE_PROVIDER_SLUGS.includes(providerSlug as LiveProviderSlug);
   }
 
-  getDefaultModel(_providerSlug: LiveProviderSlug = "venice") {
+  getDefaultModel(providerSlug: LiveProviderSlug = "venice") {
+    void providerSlug;
     return env.veniceModel || SAFE_VENICE_FALLBACK_MODEL;
   }
 
@@ -802,7 +803,7 @@ export class ModelGatewayService {
   async diagnoseVenice(
     input: { modelName?: string | null } = {}
   ): Promise<VeniceDiagnosticResult> {
-    const model = input.modelName?.trim() || this.getDefaultModel("venice");
+    const model = input.modelName?.trim() || this.getDefaultModel();
     const veniceApiKey = this.getVeniceApiKey();
     if (!veniceApiKey) {
       return {
@@ -921,7 +922,7 @@ export class ModelGatewayService {
     input: GenerateTextInput,
     attemptedModelFallback = false
   ): Promise<GenerateTextOutput> {
-    const model = input.modelName || this.getDefaultModel("venice");
+    const model = input.modelName || this.getDefaultModel();
     const veniceApiKey = this.getVeniceApiKey();
     const fetchImpl = this.getFetchImplementation();
 
@@ -998,7 +999,7 @@ export class ModelGatewayService {
   private async streamWithVenice(
     input: StreamTextInput
   ): Promise<GenerateTextOutput> {
-    const model = input.modelName || this.getDefaultModel("venice");
+    const model = input.modelName || this.getDefaultModel();
     const veniceApiKey = this.getVeniceApiKey();
     const fetchImpl = this.getFetchImplementation();
 

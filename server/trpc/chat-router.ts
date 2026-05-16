@@ -75,7 +75,8 @@ function parseMetadata(metadata: string | null) {
   }
 
   try {
-    return JSON.parse(metadata) as z.infer<typeof chatMetadataSchema>;
+    const parsed = chatMetadataSchema.safeParse(JSON.parse(metadata));
+    return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   }

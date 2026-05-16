@@ -1021,7 +1021,7 @@ async function extractPdfTextWithPython(bytes: Uint8Array) {
           timeout: 20_000,
           maxBuffer: 8 * 1024 * 1024,
           windowsHide: true,
-        } as any,
+        } as unknown as Parameters<typeof execFileAsync>[2],
       );
       const extracted = String(stdout ?? "").trim();
       if (extracted) {

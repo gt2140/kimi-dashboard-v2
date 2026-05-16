@@ -12,7 +12,9 @@ import { formatRuntimeError } from "@/lib/app-errors";
 import { logClientDebug, logClientError } from "@/lib/debug";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
-const AURA_LANDING_URL = "https://landing-aura-v1-3hah.vercel.app";
+const AURA_LANDING_URL =
+  import.meta.env.VITE_AURA_LANDING_URL ||
+  "https://landing-aura-v1-3hah.vercel.app";
 
 type AuthProviderOption = {
   id: LoginProvider | "web3";

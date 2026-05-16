@@ -934,8 +934,9 @@ function parseInlineMeasurement(input: {
     return null;
   }
 
+   
   const pattern =
-    /^(?<marker>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9()/%+.\- ]{1,80}?)\s*[:\-]?\s+(?<value>[<>]?\d+(?:[.,]\d+)?)\s*(?<unit>(?:[A-Za-zµμ%][A-Za-z0-9µμ/%^.\-]{0,18})|%)?(?:\s+(?:ref(?:erencia)?|rango|range|vr|vn)?\s*[:\-]?\s*(?<range>\d+(?:[.,]\d+)?\s*(?:-|a|to)\s*\d+(?:[.,]\d+)?(?:\s*[A-Za-zµμ%/^.]+)?))?$/i;
+    /^(?<marker>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9()/%+.\- ]{1,80}?)\s*[:-]?\s+(?<value>[<>]?\d+(?:[.,]\d+)?)\s*(?<unit>(?:[A-Za-zµμ%][A-Za-z0-9µμ/%^.-]{0,18})|%)?(?:\s+(?:ref(?:erencia)?|rango|range|vr|vn)?\s*[:-]?\s*(?<range>\d+(?:[.,]\d+)?\s*(?:-|a|to)\s*\d+(?:[.,]\d+)?(?:\s*[A-Za-zµμ%/^.]+)?))?$/i;
 
   const match = normalized.match(pattern);
   const marker = cleanupBloodworkMarker(match?.groups?.marker ?? "");
@@ -1198,8 +1199,8 @@ function isLikelyUnit(value: string) {
     return true;
   }
 
-  if (/[\/µμ]/.test(trimmed)) {
-    return /^[A-Za-z0-9µμ/%^.\-]{2,20}$/i.test(trimmed);
+  if (/[/µμ]/.test(trimmed)) {
+    return /^[A-Za-z0-9µμ/%^.-]{2,20}$/i.test(trimmed);
   }
 
   return /^(?:pg|fl|gdl|gd\/l|g\/dl|mg|mgdl|mg\/dl|ng|ngml|ng\/ml|ui|ui\/l|ui\/ml|u\/l|iu\/l|mm|mmol\/l|pmol\/l|coi)$/i.test(

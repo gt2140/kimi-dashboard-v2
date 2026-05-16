@@ -27,6 +27,7 @@ function writeNodeResponse(
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function wrapVercelJsonHandler<T extends (...args: any[]) => any>(
   handler: T,
 ): T {
@@ -39,6 +40,7 @@ export function wrapVercelJsonHandler<T extends (...args: any[]) => any>(
   }) as T;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function wrapVercelNdjsonHandler<T extends (...args: any[]) => any>(
   handler: T,
 ): T {

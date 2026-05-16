@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KimiConversationTurnService } from "./kimi-conversation-turn-service.js";
 
+type ExecuteTurnInput = Parameters<
+  KimiConversationTurnService["executeTurn"]
+>[0]["input"];
+
 describe("KimiConversationTurnService", () => {
   let callOrder: string[];
 
@@ -521,7 +525,7 @@ describe("KimiConversationTurnService", () => {
         "moonshot/rethink:latest",
       ],
       thinkingMode: "disabled",
-    } as any);
+    });
 
     const service = new KimiConversationTurnService({
       conversationRepository,
@@ -540,7 +544,7 @@ describe("KimiConversationTurnService", () => {
         runtimeVersion: "aura-medical-v1",
         medicalMode: "research",
         policyLevel: "interpretive-on-request",
-      } as any,
+      } satisfies ExecuteTurnInput,
       userId: 14,
       streamPrimary: true,
       onTextDelta: vi.fn(),
@@ -968,7 +972,7 @@ describe("KimiConversationTurnService", () => {
         policyLevel: "interpretive-on-request",
         requestedProviderSlug: "venice",
         requestedModelName: "zai-org-glm-5-1",
-      } as any,
+      } satisfies ExecuteTurnInput,
       userId: 77,
       streamPrimary: false,
       signal,

@@ -54,7 +54,7 @@ export default function KimiAgentSettings() {
 
   const agent = settingsQuery.data?.agent;
   const setting = settingsQuery.data?.setting;
-  const providers = providersQuery.data ?? [];
+  const providers = useMemo(() => providersQuery.data ?? [], [providersQuery.data]);
   const selectedProvider = providers.find(
     provider => provider.id === preferredProviderId,
   );
@@ -65,6 +65,7 @@ export default function KimiAgentSettings() {
       return;
     }
 
+    /* eslint-disable react-hooks/set-state-in-effect -- Query data hydrates this editable draft form. */
     setCustomContext(setting.customContext ?? "");
     setTrainingNotes(setting.trainingNotes ?? "");
     setThinkingMode(setting.kimiThinkingMode ?? "enabled");
@@ -77,6 +78,7 @@ export default function KimiAgentSettings() {
     setResponseStyle(setting.responseStyle);
     setPreferredProviderId(setting.preferredProviderId ?? null);
     setPreferredModelId(setting.preferredModelId ?? null);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [setting]);
 
   useEffect(() => {
@@ -88,6 +90,7 @@ export default function KimiAgentSettings() {
       provider => provider.slug?.toLowerCase() === "kimi",
     );
     if (kimiProvider) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Default provider is derived once after async provider data arrives.
       setPreferredProviderId(kimiProvider.id);
     }
   }, [preferredProviderId, providers]);

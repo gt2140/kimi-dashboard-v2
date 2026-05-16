@@ -3,6 +3,7 @@ import { conversations, messages } from "../../db/schema.js";
 import { getDb } from "../queries/connection.js";
 import { resolveAgentExecutionProfile } from "./agent-registry.js";
 import { vaultV2Service } from "./vault-v2-service.js";
+import type { VaultDocumentCategory } from "./vault-v2.js";
 
 export async function assembleConversationContext(params: {
   userId: number;
@@ -57,7 +58,7 @@ export async function assembleConversationContext(params: {
     try {
       const context = await vaultV2Service.loadContext({
         userId: params.userId,
-        allowedCategories: allowedCategories as any,
+        allowedCategories: allowedCategories as VaultDocumentCategory[],
         query: params.latestUserMessage,
         maxChunks: 4,
       });
@@ -71,7 +72,7 @@ export async function assembleConversationContext(params: {
         clinicalProfileSummary: context.clinicalProfileSummary,
         selectedVaultChunks: context.selectedVaultChunks,
       };
-    } catch (error) {
+    } catch {
       accessibleFiles = [];
       vaultContext = null;
     }

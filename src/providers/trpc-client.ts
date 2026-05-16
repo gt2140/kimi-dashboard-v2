@@ -8,7 +8,14 @@ import { buildAuthenticatedHeaders } from "@/lib/request-auth";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
 export const trpc = createTRPCReact<AppRouter>();
-export const queryClient = new QueryClient();
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 15_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 async function readAccessToken() {
   if (!isSupabaseConfigured) {

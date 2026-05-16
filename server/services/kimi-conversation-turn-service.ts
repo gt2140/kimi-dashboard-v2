@@ -536,7 +536,7 @@ export class KimiConversationTurnService {
         };
       }
 
-      let toolWarnings: string[] = [];
+      const toolWarnings: string[] = [];
       let tools: Array<Record<string, unknown>> = [];
 
       if (context.enabledFormulaTools.length > 0) {

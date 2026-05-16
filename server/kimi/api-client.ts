@@ -26,6 +26,15 @@ type KimiCompletionResponse = {
   };
 };
 
+type KimiStreamingPayload = KimiCompletionResponse & {
+  choices?: Array<{
+    delta?: {
+      content?: string;
+    };
+    finish_reason?: string | null;
+  }>;
+};
+
 type StreamHandlers = {
   onTextDelta?: (delta: string) => void | Promise<void>;
 };
@@ -220,7 +229,7 @@ export class KimiApiClient {
 function parseKimiSseBuffer(buffer: string) {
   const blocks = buffer.split("\n\n");
   const remainder = blocks.pop() ?? "";
-  const payloads: Array<Record<string, any>> = [];
+  const payloads: KimiStreamingPayload[] = [];
 
   for (const block of blocks) {
     const payload = block
@@ -235,7 +244,7 @@ function parseKimiSseBuffer(buffer: string) {
     }
 
     try {
-      payloads.push(JSON.parse(payload));
+      payloads.push(JSON.parse(payload) as KimiStreamingPayload);
     } catch {
       // Ignore partial chunks and rely on the next SSE frame.
     }
